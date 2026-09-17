@@ -218,12 +218,13 @@ export function BuilderRouteControl(props: BuilderRouteControlProps): React.Reac
   const label = settings.mode === 'custom'
     ? builderChipLabel(settings, selectedModel?.name)
     : copy('builder.inherit')
-  const chipLabel = settings.mode === 'custom' ? label : `Builder · ${label}`
+  const chipLabel = settings.mode === 'custom' ? label : `Builder · ${copy('builder.chipInherit')}`
   return (
     <div ref={rootRef} className={CLASS.builderControl} style={{ position: 'relative', display: 'inline-flex' }} onKeyDown={onKeyDown}>
       <button
         ref={chipRef}
         type="button"
+        data-endeavour-builder=""
         className={CLASS.ghost}
         aria-haspopup="menu"
         aria-expanded={open}

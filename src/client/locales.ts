@@ -20,6 +20,7 @@ export const en = {
   'stage.failed': 'Failed',
   'builder.title': 'Builder model',
   'builder.inherit': 'Inherit Planner',
+  'builder.chipInherit': 'Inherit',
   'builder.inheritHint': 'Use the Planner route for the Builder child',
   'builder.models': 'Model',
   'builder.thinking': 'Thinking',
