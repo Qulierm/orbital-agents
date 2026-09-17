@@ -5,7 +5,9 @@
  */
 
 import { spawnSync } from 'node:child_process'
-import { existsSync, mkdtempSync, readFileSync, readdirSync, writeFileSync, mkdirSync, rmSync } from 'node:fs'
+import {
+  chmodSync, existsSync, mkdtempSync, readFileSync, readdirSync, writeFileSync, mkdirSync, rmSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -47,6 +49,44 @@ function installer(home: string, ...args: string[]) {
     encoding: 'utf8',
     env: { ...process.env, DSH_ENDEAVOUR_HOME: home, DSH_ENDEAVOUR_TEST_PNPM: '1' },
   })
+}
+
+/**
+ * A fake `pnpm` that emulates the stale-reuse behavior of a same-version
+ * `file:` dependency: `add` keeps existing installed content unless a prior
+ * `remove` deleted it. Real pnpm behaves this way for unchanged specs, which is
+ * why the installer removes before adding.
+ */
+function fakePnpmDir(home: string): string {
+  const dir = join(home, 'fake-bin')
+  mkdirSync(dir, { recursive: true })
+  const script = `#!/usr/bin/env node
+const fs = require('node:fs')
+const path = require('node:path')
+const [cmd, target] = process.argv.slice(2)
+const cwd = process.cwd()
+const pkgDir = path.join(cwd, 'node_modules', 'dsh-endeavour')
+fs.appendFileSync(path.join(process.env.DSH_ENDEAVOUR_HOME, 'pnpm.log'), cmd + ' ' + (target ?? '') + '\\n')
+if (cmd === 'remove') { fs.rmSync(pkgDir, { recursive: true, force: true }); process.exit(0) }
+if (cmd === 'add') {
+  fs.mkdirSync(path.join(pkgDir, 'lib'), { recursive: true })
+  if (!fs.existsSync(path.join(pkgDir, 'lib', 'client.js'))) {
+    fs.writeFileSync(path.join(pkgDir, 'lib', 'client.js'), fs.readFileSync(target))
+  }
+  fs.writeFileSync(path.join(pkgDir, 'package.json'), JSON.stringify({ name: 'dsh-endeavour' }))
+  process.exit(0)
+}
+process.exit(0)
+`
+  writeFileSync(join(dir, 'pnpm'), script)
+  chmodSync(join(dir, 'pnpm'), 0o755)
+  return dir
+}
+
+function installerWithPath(home: string, bin: string, ...args: string[]) {
+  const env: NodeJS.ProcessEnv = { ...process.env, DSH_ENDEAVOUR_HOME: home, PATH: `${bin}:${process.env.PATH ?? ''}` }
+  delete env.DSH_ENDEAVOUR_TEST_PNPM
+  return spawnSync(process.execPath, ['scripts/install-local.mjs', ...args], { cwd: REPO, encoding: 'utf8', env })
 }
 
 function manifest(home: string) {
@@ -130,6 +170,23 @@ describe('installer lifecycle', () => {
     expect(installer(home, '--uninstall').status).toBe(0)
     expect(manifest(home).dsh.profile.bundles).not.toContain('dsh-endeavour')
     expect(existsSync(join(home, '.dsh', '.agent-presets', 'endeavour'))).toBe(false)
+  })
+
+  it('refreshes the installed artifact when the tarball changes at the same name and version', () => {
+    const home = tempHome()
+    seedProfile(home)
+    const bin = fakePnpmDir(home)
+    const file = join(home, 'dsh-endeavour-0.1.0.tgz')
+    const installed = join(home, '.dsh', 'profiles', 'desktop', 'node_modules', 'dsh-endeavour', 'lib', 'client.js')
+    writeFileSync(file, 'OLD ARTIFACT')
+    expect(installerWithPath(home, bin, '--tarball', file).status).toBe(0)
+    expect(readFileSync(installed, 'utf8')).toBe('OLD ARTIFACT')
+    writeFileSync(file, 'NEW ARTIFACT')
+    expect(installerWithPath(home, bin, '--tarball', file).status).toBe(0)
+    // Without remove-before-add the fake pnpm reuses the stale copy and this is still OLD.
+    expect(readFileSync(installed, 'utf8')).toBe('NEW ARTIFACT')
+    const commands = readFileSync(join(home, 'pnpm.log'), 'utf8')
+    expect(commands).toMatch(/remove[\s\S]*add/)
   })
 
   it('rolls back profile files and preset state exactly', () => {

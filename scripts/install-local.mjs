@@ -209,6 +209,13 @@ function install(tarball, { force }) {
   if (!tarball || !existsSync(resolve(tarball))) throw new Error(`tarball not found: ${String(tarball)}`)
   const stamp = backup()
   try {
+    // A file: dependency at an unchanged version is reused from the store, which
+    // would leave older builds in place; remove first so the tarball is re-copied.
+    try {
+      runPnpm(['remove', PLUGIN], profileDir)
+    } catch {
+      console.log('install-local: no previous install to remove')
+    }
     runPnpm(['add', resolve(tarball)], profileDir)
     const manifest = readManifest()
     const bundles = manifest.dsh?.profile?.bundles
