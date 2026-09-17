@@ -44,7 +44,7 @@ const composer = (active_data) => (
     fontFamily: 'Inter, system-ui, sans-serif',
   }}>
     {dock(active_data)}
-    <div style={{ boxSizing: 'border-box', width: '100%', padding: '0 var(--dsh-composer-side-clearance)' }}>
+    <div style={{ boxSizing: 'border-box', width: '100%', padding: '0 var(--dsh-composer-side-clearance)', marginTop: '28px' }}>
       <div data-composer-card className="fixture-composer-card">Message or run a task, / commands, @ files or sessions</div>
     </div>
   </div>

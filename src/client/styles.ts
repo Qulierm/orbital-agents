@@ -47,6 +47,7 @@ export const STYLE_TEXT = `
    the computed width equals the composer card exactly. */
 .dsh-endeavour-dock-wrap {
   box-sizing: border-box;
+  position: relative;
   flex: none;
   width: calc(100% - var(--dsh-composer-side-clearance) - var(--dsh-composer-side-clearance));
   max-width: var(--dsh-composer-card-max-width);
@@ -68,6 +69,22 @@ export const STYLE_TEXT = `
   --dsh-scrollbar-thumb: var(--dsw-alias-scrollbar-bg-l2);
   --dsh-scrollbar-thumb-hover: var(--dsw-alias-scrollbar-hover-l2);
 }
+/* Gap fill: the composer's layout keeps a vertical offset between the dock slot
+   and the composer root, so the two surfaces would read as separated cards with
+   page background between them. This band paints the shared surface from the
+   dock's bottom edge down behind the composer card (the later sibling paints
+   over it), closing the gap without clipping overlays or mutating the DOM. */
+.dsh-endeavour-dock-wrap::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 100%;
+  height: 56px;
+  background: var(--dsw-specific-input-major);
+  pointer-events: none;
+}
+
 /* Connected junction (only while our dock is mounted in the same composer
    seat): square the composer card's top corners so its curved transparent
    outside no longer exposes the page, and cover the junction band above the

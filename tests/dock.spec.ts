@@ -130,6 +130,17 @@ describe('attached composer stylesheet', () => {
   })
 
 
+
+  it('fills the composer layout gap with the shared surface behind the card', () => {
+    // The docking wrapper is a positioning context and paints the surface band
+    // below itself, so the real composer offset cannot show page background.
+    expect(STYLE_TEXT).toMatch(/\.dsh-endeavour-dock-wrap \{[^}]*position: relative/)
+    expect(STYLE_TEXT).toContain('.dsh-endeavour-dock-wrap::after')
+    expect(STYLE_TEXT).toMatch(/\.dsh-endeavour-dock-wrap::after \{[^}]*top: 100%/)
+    expect(STYLE_TEXT).toMatch(/\.dsh-endeavour-dock-wrap::after \{[^}]*background: var\(--dsw-specific-input-major\)/)
+    expect(STYLE_TEXT).toMatch(/\.dsh-endeavour-dock-wrap::after \{[^}]*pointer-events: none/)
+  })
+
   it('connects the junction through the stable composer anchors only', () => {
     const scoped = '[data-composer-seat]:has(.dsh-endeavour-dock-wrap) [data-composer-card]'
     expect(STYLE_TEXT).toContain(scoped)
