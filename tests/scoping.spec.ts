@@ -32,6 +32,7 @@ function toolContext() {
     tools: { register: (tool: RegisteredTool) => { registered.push(tool) } },
     // Valid-shaped host views so the service constructor's recovery scan is a no-op.
     sessions: { get: () => undefined, flush: async () => true, list: () => [] },
+    sessionProjections: { register: () => () => undefined },
     subagents: { startContinuable: async () => ({ childId: 'child' }), sendMessage: async () => undefined },
   }
   return { ctx, registered }
@@ -42,7 +43,7 @@ describe('scope separation', () => {
     const { ctx, registered } = toolContext()
     applyGlobal(ctx as never, {})
     expect(registered).toHaveLength(0)
-    expect(globalInject).toEqual(['subagents', 'sessions'])
+    expect(globalInject).toEqual(['subagents', 'sessions', 'sessionProjections'])
   })
 
   it('global bundle never calls the tool-registration seam', () => {

@@ -7,9 +7,11 @@
  * a truncated log never yields a half-folded plan.
  */
 
+// Type-only: resolves the module this file augments with `endeavour/plan`.
+import type {} from '@deepseek-ai/dsh-session/types'
+
 /** Durable identity of one Endeavour plan. */
-export type PlanId = string & { readonly __brand: 'PlanId' }
-/** Durable identity of one plan task. */
+export type PlanId = string & { readonly __brand: 'PlanId' }/** Durable identity of one plan task. */
 export type TaskId = string & { readonly __brand: 'TaskId' }
 
 /** Brand a raw string as a {@link PlanId}. */
@@ -282,8 +284,7 @@ export function verifyTask(
   }
 }
 
-/** Task states that need a Builder continuation, i.e. the next detailed brief. */
-export function nextDispatch(plan: PlanState, taskId: TaskId): TaskSpec | undefined {
+/** Task states that need a Builder continuation, i.e. the next detailed brief. */export function nextDispatch(plan: PlanState, taskId: TaskId): TaskSpec | undefined {
   if (plan.terminal !== undefined) return undefined
   const index = plan.tasks.findIndex((state) => state.spec.id === taskId)
   if (index < 0) return undefined
@@ -335,5 +336,12 @@ export function assertChildRole(plan: PlanState, sessionId: string, parentSessio
   }
   if (parentSessionId === undefined || plan.rootSessionId !== parentSessionId) {
     throw new EndeavourError('lineage-mismatch', 'Builder session is not a direct child of the plan root')
+  }
+}
+
+declare module '@deepseek-ai/dsh-session/types' {
+  interface SessionEventMap {
+    /** One whole-value Endeavour plan checkpoint. */
+    'endeavour/plan': PlanEventPayload
   }
 }

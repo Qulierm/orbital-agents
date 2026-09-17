@@ -36,13 +36,6 @@ import { BUILDER_PROMPT } from './prompts.js'
 /** Durable event type appended to the Endeavour root session. */
 export const ENDEAVOUR_EVENT_TYPE = 'endeavour/plan'
 
-declare module '@deepseek-ai/dsh-session' {
-  interface SessionEventMap {
-    /** One whole-value Endeavour plan checkpoint. */
-    'endeavour/plan': PlanEventPayload
-  }
-}
-
 /** Plugin configuration accepted from the bundle row. */
 export interface EndeavourConfig {
   /** Registered `ctx.subagents` provider used for the continuable Builder. */

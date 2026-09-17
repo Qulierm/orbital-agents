@@ -25,6 +25,7 @@ import {
 import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { load, dump } from 'js-yaml'
+import { desktopRunning, repairSessionEvents } from './repair-session-events.mjs'
 
 const PLUGIN = 'dsh-endeavour'
 const PRESET_ID = 'endeavour'
@@ -43,6 +44,15 @@ const presetRoot = join(homeBase, '.dsh', '.agent-presets')
 const presetDir = join(presetRoot, PRESET_ID)
 const backupRoot = join(homeBase, '.dsh', 'backups', 'endeavour')
 const packageRoot = resolve(import.meta.dirname, '..')
+
+/** Repair targets derived from the same home base as the profile state. */
+function repairPaths() {
+  return {
+    write: true,
+    sessionsRoot: join(homeBase, '.dsh', 'sessions'),
+    backupRoot: join(homeBase, '.dsh', 'backups', 'endeavour', 'session-repair'),
+  }
+}
 
 function run(command, commandArgs, cwd) {
   execFileSync(command, commandArgs, { cwd, stdio: 'inherit' })
@@ -231,11 +241,21 @@ function install(tarball, { force }) {
     rollback(stamp)
     throw error
   }
+  try {
+    const { totals } = repairSessionEvents(repairPaths())
+    console.log(`install-local: session events repaired (${String(totals.repairedRows)} row(s) in ${String(totals.repairedFiles)} file(s))`)
+  } catch (error) {
+    console.log(`install-local: session repair skipped (${String(error.message ?? error)})`)
+  }
   console.log(`install-local: installed ${PLUGIN}; restart DSH Desktop if it is running`)
   console.log(`install-local: rollback with --rollback ${stamp}`)
 }
 
 function uninstall() {
+  if (desktopRunning()) {
+    throw new Error('uninstall: quit DSH Desktop first so stored sessions are repaired before the compatibility shim is removed')
+  }
+  repairSessionEvents(repairPaths())
   const stamp = backup()
   const manifest = readManifest()
   const bundles = manifest.dsh?.profile?.bundles
@@ -255,6 +275,10 @@ function uninstall() {
 
 function rollback(stamp) {
   if (!stamp) throw new Error('--rollback requires a timestamp')
+  if (desktopRunning()) {
+    throw new Error('rollback: quit DSH Desktop first so stored sessions are repaired before the compatibility shim is removed')
+  }
+  repairSessionEvents(repairPaths())
   const source = join(backupRoot, stamp)
   const statePath = join(source, 'state.json')
   if (!existsSync(statePath)) throw new Error(`backup not found: ${source}`)

@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest'
 import { TASK_STATUSES } from '../src/domain.js'
 import { en, formatEnglish, NS } from '../src/client/locales.js'
 import { formatElapsed } from '../src/client/PlanView.js'
-import { projectPlanCard, endeavourPlanDefinition } from '../src/client/definition.js'
+import { endeavourPlanDefinition } from '../src/client/definition.js'
+import { projectPlanCard } from '../src/plan-projection.js'
 import {
   createPlanState, PlanId, startTask, TaskId, verifyTask, reportTask, type TaskSpec,
 } from '../src/domain.js'

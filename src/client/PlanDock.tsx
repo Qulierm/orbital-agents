@@ -1,47 +1,37 @@
 /**
- * Composer plan dock: the same durable plan, rendered natively directly above
- * the composer through the `conversation.input.dock` list slot.
+ * Composer plan dock: the current durable plan, rendered natively directly
+ * above the composer through the `conversation.input.dock` list slot.
  *
- * The dock selects the latest `endeavour-plan` Chat node from the current Chat
- * snapshot, so it renders only where such a node exists — an Endeavour
- * root-session chat. Standard and Builder chats have no such node and render
- * nothing. No second state stream is created.
+ * The dock reads the host `endeavourPlan` session projection — the latest
+ * whole card folded over the full session replay — so it shows the current
+ * plan even when its events are older than the client's paged transcript
+ * window. Standard and Builder chats have no such projection value and render
+ * nothing. The transcript ConversationNode stays event-based.
  */
 
 import type { Context as ClientContext } from '@deepseek-ai/cordis'
 import type { PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
-import type { ChatConversationViewNode } from '@deepseek-ai/dsh-client-ui-chat/client'
-import type { EndeavourCardData } from './definition.js'
+import type { EndeavourCardData } from '../plan-projection.js'
 import { NS, type EndeavourKey } from './locales.js'
 import { copyFrom, type EndeavourInjected } from './PlanCard.js'
 import { PlanView } from './PlanView.js'
 
-/** Complete dock renderer props (session scope supplies `useChat`). */
+/** Complete dock renderer props (session scope supplies `useProjection`). */
 export type PlanDockProps =
   PropsRuntime<'conversation.input.dock'>
   & PropsLocale<'endeavour'>
   & EndeavourInjected
 
-/** Latest durable plan node in Chat order, or undefined when none exists. */
-export function latestPlanNode(nodes: readonly ChatConversationViewNode[]): ChatConversationViewNode | undefined {
-  let found: ChatConversationViewNode | undefined
-  for (const node of nodes) {
-    if (node.kind === 'endeavour-plan') found = node
-  }
-  return found
-}
+/** Selector hook shape for the session projection seat. */
+type UseProjection = (key: string) => unknown
 
-/** Selector over the Chat snapshot used by the dock. */
-export function selectPlanNode(snapshot: { readonly nodes: { values(): readonly ChatConversationViewNode[] } }): ChatConversationViewNode | undefined {
-  return latestPlanNode(snapshot.nodes.values())
-}
-
-/** Dock body; renders nothing without a plan node. */
+/** Dock body; renders nothing without a projected plan. */
 export function PlanDock(props: PlanDockProps): React.ReactElement | null {
-  const node = props.useChat(selectPlanNode)
-  if (node === undefined) return null
-  const data = node.data as EndeavourCardData
+  const useProjection = (props as { readonly useProjection?: UseProjection }).useProjection
+  const projected = typeof useProjection === 'function' ? useProjection('endeavourPlan') : undefined
+  const data = projected as EndeavourCardData | null | undefined
+  if (data === undefined || data === null) return null
   return (
     <PlanView
       data={data}

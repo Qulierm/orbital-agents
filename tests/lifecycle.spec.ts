@@ -47,7 +47,7 @@ function installer(home: string, ...args: string[]) {
   return spawnSync(process.execPath, ['scripts/install-local.mjs', ...args], {
     cwd: REPO,
     encoding: 'utf8',
-    env: { ...process.env, DSH_ENDEAVOUR_HOME: home, DSH_ENDEAVOUR_TEST_PNPM: '1' },
+    env: { ...process.env, DSH_ENDEAVOUR_HOME: home, DSH_ENDEAVOUR_TEST_PNPM: '1', DSH_ENDEAVOUR_TEST_NO_DESKTOP: '1' },
   })
 }
 
@@ -84,7 +84,7 @@ process.exit(0)
 }
 
 function installerWithPath(home: string, bin: string, ...args: string[]) {
-  const env: NodeJS.ProcessEnv = { ...process.env, DSH_ENDEAVOUR_HOME: home, PATH: `${bin}:${process.env.PATH ?? ''}` }
+  const env: NodeJS.ProcessEnv = { ...process.env, DSH_ENDEAVOUR_HOME: home, DSH_ENDEAVOUR_TEST_NO_DESKTOP: '1', PATH: `${bin}:${process.env.PATH ?? ''}` }
   delete env.DSH_ENDEAVOUR_TEST_PNPM
   return spawnSync(process.execPath, ['scripts/install-local.mjs', ...args], { cwd: REPO, encoding: 'utf8', env })
 }

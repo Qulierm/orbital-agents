@@ -8,11 +8,10 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import { en, formatEnglish } from '../src/client/locales.js'
 import { copyFrom } from '../src/client/PlanCard.js'
-import { latestPlanNode, PLAN_DOCK_ID, PLAN_DOCK_ORDER, PlanDock, registerPlanDock, selectPlanNode } from '../src/client/PlanDock.js'
+import { PLAN_DOCK_ID, PLAN_DOCK_ORDER, PlanDock, registerPlanDock } from '../src/client/PlanDock.js'
 import { PlanView } from '../src/client/PlanView.js'
 import { CLASS, ensurePlanStyles, STYLE_ELEMENT_ID, STYLE_TEXT } from '../src/client/styles.js'
 import type { EndeavourCardData } from '../src/client/definition.js'
-import type { ChatConversationViewNode } from '@deepseek-ai/dsh-client-ui-chat/client'
 
 const planData: EndeavourCardData = {
   planId: 'p1',
@@ -29,13 +28,9 @@ const planData: EndeavourCardData = {
   childId: 'child-1',
 }
 
-function node(kind: string, data: unknown): ChatConversationViewNode {
-  return { key: `${kind}-key`, kind, id: `${kind}-id`, target: 'chat', anchorSeq: 1, location: { kind: 'session' }, visibility: 'visible', data } as unknown as ChatConversationViewNode
-}
-
-function renderDock(data: EndeavourCardData | undefined): string {
+function renderDock(data: EndeavourCardData | null | undefined): string {
   return renderToStaticMarkup(createElement(PlanDock, {
-    useChat: (selector: (snapshot: unknown) => unknown) => selector({ nodes: { values: () => (data === undefined ? [] : [node('endeavour-plan', data)]) } }),
+    useProjection: (key: string) => (key === 'endeavourPlan' ? (data ?? null) : undefined),
     t: undefined,
     openSession: () => undefined,
   } as never))
@@ -54,12 +49,11 @@ describe('composer plan dock', () => {
     expect(Number(calls.registered?.order)).toBeLessThan(0)
   })
 
-  it('selects the latest plan node and ignores other kinds or empty chats', () => {
-    expect(latestPlanNode([])).toBeUndefined()
-    expect(selectPlanNode({ nodes: { values: () => [node('todo', {}), node('command', {})] } })).toBeUndefined()
-    const older = node('endeavour-plan', { ...planData, planId: 'old' })
-    const newer = node('endeavour-plan', { ...planData, planId: 'new' })
-    expect((latestPlanNode([older, node('todo', {}), newer])?.data as EndeavourCardData | undefined)?.planId).toBe('new')
+  it('renders only from the projected durable plan and nothing without it', () => {
+    expect(renderDock(null)).toBe('')
+    expect(renderDock(undefined)).toBe('')
+    // The projection carries the latest whole plan even when older than the paged transcript.
+    expect(renderDock({ ...planData, planId: 'projected-old' })).toContain('data-endeavour-plan="projected-old"')
   })
 
   it('renders the attached dock structure with rows, English states, timers, and the ghost action', () => {
