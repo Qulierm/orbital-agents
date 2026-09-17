@@ -29,24 +29,24 @@ const failed = { planId: 'p-fixture-failed', title: 'Extension Test Plan', tasks
 
 const dock = (data) => (
   <PlanDock
-    useChat={(selector) => selector({ nodes: { values: () => [{ key: 'n', kind: 'endeavour-plan', id: data.planId, target: 'chat', anchorSeq: 1, location: { kind: 'session' }, visibility: 'visible', data }] } })}
+    useProjection={(key) => (key === 'endeavourPlan' ? data : undefined)}
     t={copy}
-    openSession={() => {}}
+    openBuilder={() => {}}
   />
 )
 
-/** Native composer context: the variables ConversationRoot publishes. */
+/** Native composer context: the variables ConversationRoot publishes, the
+    real [data-composer-seat] host, and a [data-composer-card] with the actual
+    input surface + elevation token chain. */
 const composer = (active_data) => (
-  <div style={{
+  <div data-composer-seat style={{
     display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 'var(--dsh-composer-stack-gap)',
-    padding: '0 var(--dsh-composer-side-clearance)', fontFamily: 'Inter, system-ui, sans-serif',
+    fontFamily: 'Inter, system-ui, sans-serif',
   }}>
     {dock(active_data)}
-    <div style={{
-      width: '100%', maxWidth: 'var(--dsh-composer-card-max-width)', boxSizing: 'border-box',
-      borderRadius: '22px', background: 'var(--dsw-specific-input-major)', padding: '8px 12px 10px',
-      color: 'var(--dsw-alias-label-tertiary)', fontSize: 14, lineHeight: '24px',
-    }}>Message or run a task, / commands, @ files or sessions</div>
+    <div style={{ boxSizing: 'border-box', width: '100%', padding: '0 var(--dsh-composer-side-clearance)' }}>
+      <div data-composer-card className="fixture-composer-card">Message or run a task, / commands, @ files or sessions</div>
+    </div>
   </div>
 )
 
@@ -65,6 +65,8 @@ const fixture = () => (
     '--dsw-alias-label-caption': '#6b7280',
     '--dsw-alias-border-l1': 'rgba(255,255,255,0.08)',
     '--dsw-alias-border-l2': 'rgba(255,255,255,0.12)',
+    '--dsw-elevation-stroke-color': 'rgba(255,255,255,0.14)',
+    '--dsw-elevation-soft': '0 0 0 0.5px var(--dsw-elevation-stroke-color), 0 12px 32px rgba(0,0,0,0.24), 0 2px 8px rgba(0,0,0,0.18)',
     '--dsw-alias-interactive-bg-hover': 'rgba(255,255,255,0.05)',
     '--dsw-alias-state-success-primary': '#22c55e',
     '--dsw-alias-state-error-primary': '#ef4444',
@@ -84,6 +86,12 @@ const fixture = () => (
 const style = document.createElement('style')
 style.textContent = STYLE_TEXT
 document.head.appendChild(style)
+// Stand-in for InputBar.module.css: a class-based card so the plugin's stable
+// attribute-scoped junction rules can override the corner radii exactly as they
+// do against the real module class.
+const fixtureStyle = document.createElement('style')
+fixtureStyle.textContent = '.fixture-composer-card { box-sizing: border-box; width: 100%; max-width: var(--dsh-composer-card-max-width); margin: 0 auto; border-radius: 22px; background: var(--dsw-specific-input-major); box-shadow: var(--dsw-elevation-soft); color: var(--dsw-alias-label-tertiary); font-size: 14px; line-height: 24px; padding: 8px 12px 10px; }'
+document.head.appendChild(fixtureStyle)
 const root = createRoot(document.getElementById('root'))
 root.render(fixture())
 `

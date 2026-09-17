@@ -68,6 +68,28 @@ export const STYLE_TEXT = `
   --dsh-scrollbar-thumb: var(--dsw-alias-scrollbar-bg-l2);
   --dsh-scrollbar-thumb-hover: var(--dsw-alias-scrollbar-hover-l2);
 }
+/* Connected junction (only while our dock is mounted in the same composer
+   seat): square the composer card's top corners so its curved transparent
+   outside no longer exposes the page, and cover the junction band above the
+   card with the shared surface so neither the card's top hairline nor its top
+   soft-shadow edge reads as a seam. The cover is a pointer-events-none
+   pseudo-element on the card itself (the later-painted sibling), so composer
+   overlay menus are never clipped and no runtime DOM mutation is needed. */
+[data-composer-seat]:has(.dsh-endeavour-dock-wrap) [data-composer-card] {
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+}
+[data-composer-seat]:has(.dsh-endeavour-dock-wrap) [data-composer-card]::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: -4px;
+  height: 4px;
+  background: var(--dsw-specific-input-major);
+  pointer-events: none;
+}
+
 .dsh-endeavour-dock-panel::after {
   position: absolute;
   inset: 0;

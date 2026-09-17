@@ -129,6 +129,22 @@ describe('attached composer stylesheet', () => {
     expect(STYLE_TEXT).not.toContain('--dsw-surface-raised')
   })
 
+
+  it('connects the junction through the stable composer anchors only', () => {
+    const scoped = '[data-composer-seat]:has(.dsh-endeavour-dock-wrap) [data-composer-card]'
+    expect(STYLE_TEXT).toContain(scoped)
+    expect(STYLE_TEXT).toContain('border-top-left-radius: 0')
+    expect(STYLE_TEXT).toContain('border-top-right-radius: 0')
+    // Junction cover: pointer-events none overlay striped with the shared surface.
+    expect(STYLE_TEXT).toContain(`${scoped}::before`)
+    expect(STYLE_TEXT).toMatch(/\[data-composer-card\]::before \{[^}]*background: var\(--dsw-specific-input-major\)/)
+    expect(STYLE_TEXT).toMatch(/\[data-composer-card\]::before \{[^}]*pointer-events: none/)
+    // No standalone (unscoped) card mutation, so the transcript card and any
+    // other composer stay unaffected.
+    const cardRule = /^\[data-composer-card\] \{/m
+    expect(cardRule.test(STYLE_TEXT)).toBe(false)
+  })
+
   it('carries working motion, a distinct finished glyph, and reduced-motion off-switch', () => {
     expect(STYLE_TEXT).toContain('dsh-endeavour-spin')
     expect(STYLE_TEXT).toContain('dsh-endeavour-pulse')
