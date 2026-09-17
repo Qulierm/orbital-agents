@@ -20,6 +20,7 @@ function fakeContext(sessions: ReturnType<typeof fakeSession>[]) {
   const sent: { sender: unknown; target: string; text: string }[] = []
   const starts: unknown[] = []
   const ctx = {
+    reflect: { provide: () => () => undefined },
     sessions: {
       get: (id: string) => sessions.find((session) => session.id === id),
       flush: async () => undefined,

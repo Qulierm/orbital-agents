@@ -18,6 +18,8 @@ const required = [
   'package/lib/prompts/builder.md',
   'package/cordis.patch.yml',
   'package/preset/endeavour.patch.yml',
+  'package/preset/endeavour/agent.cordis.yml',
+  'package/preset/endeavour/preset.yml',
   'package/docs/install.md',
 ]
 const missing = required.filter((path) => !listing.includes(path))

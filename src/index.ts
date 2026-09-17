@@ -1,25 +1,26 @@
 /**
- * dsh-endeavour host plugin: registers the durable orchestration service and
- * the four scoped model-facing tools.
+ * dsh-endeavour global host bundle.
  *
- * Bundled as one Loader row by `cordis.patch.yml`; the browser half lives in
- * `./client` and is loaded by the DSH client module system.
+ * Provides the durable orchestration service through the Cordis service
+ * contract (`Service` → `ctx.provide('endeavour', …)`) so the client and
+ * session orchestration can depend on it. Model-facing tools deliberately live
+ * in the scoped `dsh-endeavour/tools` plugin instead: the standard preset must
+ * not see Endeavour tooling, while an Endeavour-scoped parent and its
+ * inherited Builder child both resolve this provided service.
  */
 
 import type { Context } from '@deepseek-ai/cordis'
 import { EndeavourService, type EndeavourConfig } from './service.js'
-import { registerTools } from './tools.js'
 
 export const name = 'endeavour'
 
-/** Required services: tool registry, continuable subagents, session log. */
-export const inject = ['tools', 'subagents', 'sessions']
+/** Required services: continuable subagents and the session log. */
+export const inject = ['subagents', 'sessions']
 
 /** Accepted row config; every field is optional. */
 export type Config = EndeavourConfig
 
-/** Mount the service and its tools. */
+/** Mount the durable service. Tools are registered by `dsh-endeavour/tools`. */
 export function apply(ctx: Context, config: EndeavourConfig = {}): void {
-  const service = new EndeavourService(ctx, config)
-  registerTools(ctx, service)
+  new EndeavourService(ctx, config)
 }

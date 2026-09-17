@@ -1,0 +1,3 @@
+name: Endeavour
+description: Планировщик Endeavour с durable-планом, дочерним Builder-агентом и карточкой прогресса в чате.
+order: 2

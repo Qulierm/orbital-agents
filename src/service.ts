@@ -7,7 +7,7 @@
  */
 
 import { randomUUID } from 'node:crypto'
-import type { Context } from '@deepseek-ai/cordis'
+import { Service, type Context } from '@deepseek-ai/cordis'
 import type { Agent, AgentOptions } from '@deepseek-ai/dsh-agent'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 import type { Session } from '@deepseek-ai/dsh-session'
@@ -124,12 +124,13 @@ export interface PlanCreation {
  * Root/child orchestration shared by the tools. All session writes go through
  * this service; tools own only argument validation.
  */
-export class EndeavourService {
+export class EndeavourService extends Service {
   readonly #plans = new Map<string, PlanState>()
   readonly #queues = new Map<string, Promise<unknown>>()
   readonly #config: EndeavourConfig
 
-  constructor(readonly ctx: Context, config: EndeavourConfig = {}) {
+  constructor(ctx: Context, config: EndeavourConfig = {}) {
+    super(ctx, 'endeavour')
     this.#config = config
     this.#recoverExistingPlans()
   }
@@ -355,3 +356,10 @@ export function builderBrief(brief: string | undefined, constraints: string | un
 
 /** Typed report accepted from the model (kept separate from the service input). */
 export type { TaskReport }
+
+declare module '@deepseek-ai/cordis' {
+  interface Context {
+    /** Durable Endeavour orchestration service provided by this plugin. */
+    endeavour: EndeavourService
+  }
+}
