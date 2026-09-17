@@ -11,6 +11,10 @@ import type {} from '@deepseek-ai/dsh-client-ui-workspace/client'
 import { endeavourPlanDefinition } from './definition.js'
 import { PlanCard, type EndeavourInjected, type PlanCardProps } from './PlanCard.js'
 import { registerPlanDock } from './PlanDock.js'
+import type { ModelCatalog } from '@deepseek-ai/dsh-api-session-controller/types'
+import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
+import { BuilderRouteControl, type BuilderRouteController } from './BuilderRouteControl.js'
+import { BUILDER_SETTINGS_NAMESPACE, type BuilderRouteSettings } from '../builder-settings-shared.js'
 import { en, NS, type EndeavourKey } from './locales.js'
 import { ensurePlanStyles } from './styles.js'
 
@@ -33,12 +37,20 @@ interface ClientServices {
     open?: (id: SessionId) => void
   }
   readonly uiWorkspace?: { openSession?: (id: SessionId) => void }
+  readonly settingsScope?: {
+    bind<T>(spec: { namespace: string }): {
+      getSnapshot(): { readonly value: T | undefined }
+      set(field: string, value: unknown): Promise<void>
+      unset(field: string): Promise<void>
+    }
+  }
+  readonly remote?: { readonly session?: { modelCatalog(): Promise<unknown> } }
   readonly locale: { register(ns: string, dictionaries: { zh: Record<string, string>; en: Record<string, string> }): () => void }
   effect(callback: () => (() => void) | void, label?: string): void
 }
 
 /** Required services: conversation nodes, slots, addressed sessions, copy. */
-export const inject = ['uiConversation', 'slots', 'sessions', 'locale', 'uiWorkspace']
+export const inject = ['uiConversation', 'slots', 'sessions', 'locale', 'uiWorkspace', 'settingsScope', 'remote']
 
 /**
  * Register the Definition, the transcript card, and the composer dock. Plans
@@ -63,6 +75,41 @@ export function apply(ctx: ClientContext): void {
   }
   const injected = (): EndeavourInjected => ({ openBuilder })
 
+  /** Settings bridge for the Builder route control. */
+  const scope = client.settingsScope?.bind<BuilderRouteSettings>({ namespace: BUILDER_SETTINGS_NAMESPACE })
+  const readSettings = (): BuilderRouteSettings => {
+    const value = scope?.getSnapshot().value
+    return value === undefined ? { mode: 'inherit' } : { ...value }
+  }
+  const writeSettings = async (next: BuilderRouteSettings): Promise<void> => {
+    if (scope === undefined) throw new Error('Builder route settings are unavailable in this deployment')
+    await scope.set('mode', next.mode)
+    if (next.mode === 'custom' && next.provider !== undefined && next.model !== undefined) {
+      await scope.set('provider', next.provider)
+      await scope.set('model', next.model)
+      if (next.reasoningEffort === undefined) await scope.unset('reasoningEffort')
+      else await scope.set('reasoningEffort', next.reasoningEffort)
+    } else {
+      await scope.unset('provider')
+      await scope.unset('model')
+      await scope.unset('reasoningEffort')
+    }
+    if (next.maxTokens === undefined) await scope.unset('maxTokens')
+    else await scope.set('maxTokens', next.maxTokens)
+  }
+  const loadCatalog = async (): Promise<ModelCatalog> => {
+    const session = client.remote?.session
+    if (session === undefined || typeof session.modelCatalog !== 'function') {
+      throw new Error('model catalog is unavailable')
+    }
+    const result = await session.modelCatalog() as { ok?: boolean; value?: ModelCatalog; error?: unknown } | ModelCatalog
+    if ((result as { ok?: boolean }).ok === false) {
+      throw new Error(String((result as { error?: unknown }).error ?? 'model catalog failed'))
+    }
+    return ((result as { value?: ModelCatalog }).value ?? result) as ModelCatalog
+  }
+  const builderRoute: BuilderRouteController = { readSettings, writeSettings, loadCatalog }
+
   client.uiConversation.events.register(endeavourPlanDefinition)
   client.effect(() => ensurePlanStyles(), 'dsh-endeavour: plan styles')
   client.effect(() => client.locale.register(NS, { zh: en, en }), 'dsh-endeavour: dictionaries')
@@ -73,4 +120,11 @@ export function apply(ctx: ClientContext): void {
     inject: injected,
   }, PlanCard as unknown as (props: PlanCardProps) => unknown))
   registerPlanDock(client.slots, injected)
+  client.slots.inject('conversation.input.left', () => client.slots.register({
+    name: 'conversation.input.left',
+    id: 'endeavour-builder',
+    order: 20,
+    locale: NS,
+    inject: () => ({ builderRoute }),
+  }, BuilderRouteControl as unknown as (props: unknown) => unknown))
 }

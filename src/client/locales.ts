@@ -18,6 +18,18 @@ export const en = {
   'stage.finished': 'Finished',
   'stage.confirmed': 'Confirmed',
   'stage.failed': 'Failed',
+  'builder.title': 'Builder model',
+  'builder.inherit': 'Inherit Planner',
+  'builder.inheritHint': 'Use the Planner route for the Builder child',
+  'builder.models': 'Model',
+  'builder.thinking': 'Thinking',
+  'builder.providerDefault': 'Provider default',
+  'builder.notAvailable': 'Not available',
+  'builder.loading': 'Loading models...',
+  'builder.retry': 'Retry',
+  'builder.error': 'Could not load models',
+  'builder.saving': 'Saving...',
+  'builder.saveFailed': 'Could not save the Builder route',
 } as const
 
 export type EndeavourKey = keyof typeof en

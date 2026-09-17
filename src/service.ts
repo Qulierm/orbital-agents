@@ -8,11 +8,19 @@
 
 import { randomUUID } from 'node:crypto'
 import { Service, type Context } from '@deepseek-ai/cordis'
+import { parentAgentOptionsForDelegation } from '@deepseek-ai/dsh-subagent'
+import { ReasoningEffortId } from '@deepseek-ai/dsh-llm'
 import type { Agent, AgentOptions } from '@deepseek-ai/dsh-agent'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 import type { Session } from '@deepseek-ai/dsh-session'
 import type { ToolRestriction } from '@deepseek-ai/dsh-tools'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
+import {
+  defaultBuilderSettings,
+  snapshotBuilderSettings,
+  validateBuilderSettings,
+  type BuilderRouteSettings,
+} from './builder-settings.js'
 import {
   assertChildRole,
   assertRootRole,
@@ -26,6 +34,7 @@ import {
   startTask,
   TaskId,
   verifyTask,
+  type PlanBuilderRoute,
   type PlanEventPayload,
   type PlanState,
   type TaskReport,
@@ -121,11 +130,72 @@ export class EndeavourService extends Service {
   private readonly plans = new Map<string, PlanState>()
   private readonly queues = new Map<string, Promise<unknown>>()
   private readonly serviceConfig: EndeavourConfig
+  private builderSettings: () => BuilderRouteSettings
 
   constructor(ctx: Context, config: EndeavourConfig = {}) {
     super(ctx, 'endeavour')
     this.serviceConfig = config
+    this.builderSettings = () => defaultBuilderSettings(config.builderAgentOptions ?? {})
     this.recoverExistingPlans()
+  }
+
+  /**
+   * Adopt the live settings source installed by the Host Settings section.
+   * The value is snapshotted at every plan creation, so later writes affect
+   * only future Builder children.
+   */
+  setBuilderSettingsSource(source: () => BuilderRouteSettings): void {
+    this.builderSettings = source
+  }
+
+  /** The current stored preference, defensively copied. */
+  currentBuilderSettings(): BuilderRouteSettings {
+    return snapshotBuilderSettings(this.builderSettings())
+  }
+
+  /**
+   * Resolve the exact child options once, at plan creation time.
+   * - custom: provider/model plus optional effort/maxTokens; the parent's
+   *   route-owned effort is intentionally not carried over.
+   * - inherit: the Planner's current route through the public upstream
+   *   delegation helper.
+   */
+  private resolveBuilderRoute(agent: Agent): { options: Partial<AgentOptions>; route: PlanBuilderRoute } {
+    const settings = this.currentBuilderSettings()
+    const valid = validateBuilderSettings(settings).length === 0
+    if (valid && settings.mode === 'custom' && settings.provider !== undefined && settings.model !== undefined) {
+      return {
+        options: {
+          provider: settings.provider,
+          model: settings.model,
+          ...(settings.reasoningEffort === undefined ? {} : { reasoningEffort: ReasoningEffortId(settings.reasoningEffort) }),
+          ...(settings.maxTokens === undefined ? {} : { maxTokens: settings.maxTokens }),
+        },
+        route: {
+          provider: settings.provider,
+          model: settings.model,
+          ...(settings.reasoningEffort === undefined ? {} : { reasoningEffort: settings.reasoningEffort }),
+          inherited: false,
+        },
+      }
+    }
+    let inherited: Partial<AgentOptions>
+    try {
+      inherited = parentAgentOptionsForDelegation(agent)
+    } catch {
+      // Session-less agents (tests, odd callers) fall back to their own options;
+      // production parents always carry the session the helper reads.
+      inherited = { ...(agent as { options?: AgentOptions }).options }
+    }
+    return {
+      options: { ...inherited },
+      route: {
+        provider: inherited.provider ?? '',
+        model: inherited.model ?? '',
+        ...(inherited.reasoningEffort === undefined ? {} : { reasoningEffort: inherited.reasoningEffort }),
+        inherited: true,
+      },
+    }
   }
 
   /** Serialize one mutation per root session. */
@@ -215,13 +285,14 @@ export class EndeavourService extends Service {
       const first = input.tasks[0]
       if (first === undefined) throw new EndeavourError('transition-invalid', 'a plan needs at least one task')
       const subagents = this.subagentHost()
+      const { options: builderOptions, route: builderRoute } = this.resolveBuilderRoute(agent)
       const started = await subagents.startContinuable({
         provider: this.serviceConfig.builderProvider ?? 'spawn',
         label: 'Builder',
         request: {
           parent: agent,
           prompt: [textBlock(builderBrief(input.brief, input.constraints, first))],
-          ...(this.serviceConfig.builderAgentOptions === undefined ? {} : { agentOptions: this.serviceConfig.builderAgentOptions }),
+          agentOptions: builderOptions,
           persona: this.serviceConfig.builderPersona ?? BUILDER_PROMPT,
           ...(this.serviceConfig.builderToolFilter === undefined ? {} : { toolFilter: this.serviceConfig.builderToolFilter }),
           ...(this.serviceConfig.maxDepth === undefined ? {} : { maxDepth: this.serviceConfig.maxDepth }),
@@ -236,6 +307,7 @@ export class EndeavourService extends Service {
         title: input.title,
         tasks: input.tasks,
         at,
+        builderRoute,
       })
       await this.append(rootSessionId, 'plan-created', undefined, plan, at)
       return { planId: plan.planId, childId, taskCount: plan.tasks.length }

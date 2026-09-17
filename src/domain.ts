@@ -70,6 +70,19 @@ export interface TaskReport {
   readonly reportedAt: number
 }
 
+/**
+ * The exact Builder route a plan was spawned with. Durable so an active or
+ * terminal plan stays inspectable after the global preference changes.
+ */
+export interface PlanBuilderRoute {
+  readonly provider: string
+  readonly model: string
+  /** Adapter-owned reasoning effort actually passed to the child, when any. */
+  readonly reasoningEffort?: string
+  /** True when the route followed the Planner instead of a custom pin. */
+  readonly inherited: boolean
+}
+
 /** Durable state of one task. */
 export interface TaskState {
   readonly spec: TaskSpec
@@ -97,6 +110,8 @@ export interface PlanState {
   /** Monotonic event sequence within the plan. */
   readonly sequence: number
   readonly tasks: readonly TaskState[]
+  /** Exact route used to spawn the Builder child, once the plan exists. */
+  readonly builderRoute?: PlanBuilderRoute
   readonly terminal?: {
     readonly outcome: PlanOutcome
     readonly at: number
@@ -146,6 +161,7 @@ export function createPlanState(input: {
   readonly title: string
   readonly tasks: readonly TaskSpec[]
   readonly at: number
+  readonly builderRoute?: PlanBuilderRoute
 }): PlanState {
   if (input.tasks.length === 0) {
     throw new EndeavourError('transition-invalid', 'a plan needs at least one task')
@@ -175,6 +191,7 @@ export function createPlanState(input: {
     updatedAt: input.at,
     sequence: 0,
     tasks: input.tasks.map((spec) => ({ spec, status: 'waiting' as const })),
+    ...(input.builderRoute === undefined ? {} : { builderRoute: input.builderRoute }),
   }
 }
 

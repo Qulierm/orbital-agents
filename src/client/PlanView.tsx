@@ -159,6 +159,13 @@ export function PlanView(props: PlanViewProps): React.ReactElement | null {
       <div className={CLASS.header}>
         <span className={CLASS.title} title={data.title}>{data.title}</span>
         <span className={CLASS.progress}>{copy('plan.progress', { confirmed: data.completedCount, total: data.total })}</span>
+        {data.builderRoute === undefined ? null : (
+          <span className={CLASS.routeHint} title={copy('builder.title')}>
+            {data.builderRoute.inherited
+              ? 'Planner route'
+              : `${data.builderRoute.model}${data.builderRoute.reasoningEffort === undefined ? '' : ` · ${data.builderRoute.reasoningEffort}`}`}
+          </span>
+        )}
         <button
           type="button"
           className={CLASS.chevron}

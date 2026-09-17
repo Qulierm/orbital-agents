@@ -86,6 +86,14 @@
       - On success, the next task is dispatched automatically. On failure the plan
         stops for this MVP.
 
+      Builder route ownership:
+
+      - The user owns the Builder route. They pick it in the composer control before
+        sending; it applies to the next Builder child and is frozen for the plan once
+        the child exists. You never choose, suggest, or override provider, model,
+        reasoning effort, or token limits, and you keep verifying and routing exactly
+        as before.
+
       Rules:
 
       - One active plan per Endeavour session. One Builder child. Tasks run

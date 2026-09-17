@@ -29,6 +29,7 @@ interface RegisteredTool {
 function toolContext() {
   const registered: RegisteredTool[] = []
   const ctx = {
+    inject: () => undefined,
     tools: { register: (tool: RegisteredTool) => { registered.push(tool) } },
     // Valid-shaped host views so the service constructor's recovery scan is a no-op.
     sessions: { get: () => undefined, flush: async () => true, list: () => [] },

@@ -19,6 +19,7 @@ export const CLASS = {
   header: 'dsh-endeavour-header',
   title: 'dsh-endeavour-title',
   progress: 'dsh-endeavour-progress',
+  routeHint: 'dsh-endeavour-route',
   ghost: 'dsh-endeavour-ghost',
   chevron: 'dsh-endeavour-chevron',
   rows: 'dsh-endeavour-rows',
@@ -35,6 +36,7 @@ export const CLASS = {
   glyphFinished: 'dsh-endeavour-glyph--finished',
   glyphPending: 'dsh-endeavour-glyph--pending',
   pulse: 'dsh-endeavour-pulse',
+  builderControl: 'dsh-endeavour-builder-control',
 } as const
 
 /**
@@ -107,6 +109,15 @@ export const STYLE_TEXT = `
   font-weight: 500;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.dsh-endeavour-route {
+  flex: none;
+  color: var(--dsw-alias-label-caption);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 180px;
 }
 .dsh-endeavour-progress {
   flex: none;

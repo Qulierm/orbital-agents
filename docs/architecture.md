@@ -34,6 +34,19 @@ last task succeeded -> plan terminal completed
 - Duplicate starts, duplicate reports, out-of-order tasks, foreign sessions,
   arbitrary parent ids, and second plans are rejected with typed errors.
 
+## Builder route ownership
+
+- The route preference is an official Host Settings section
+  (`endeavour-builder`) owned by this plugin; the root composer control writes
+  it and the service snapshots it once at `createPlan`.
+- Custom mode pins provider/model plus optional effort/maxTokens and never
+  carries the Planner's effort; inherit mode resolves the Planner route through
+  the public upstream delegation helper. The exact resolved route is stored on
+  the durable plan (`builderRoute`) and projected (stateVersion 3) so an active
+  or terminal plan stays inspectable after the preference changes.
+- A spawned Builder is immutable: later settings writes affect only future
+  children.
+
 ## Client
 
 - One `ConversationNodeDefinition` folds the durable event family with

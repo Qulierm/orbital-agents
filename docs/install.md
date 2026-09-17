@@ -67,6 +67,11 @@ keep their existing scope.
 
 ## 4. Builder route (optional)
 
+In the app itself, the root Endeavour composer shows a `Builder · Inherit` chip
+that stores the route for the next Builder child in the `endeavour-builder`
+settings namespace (no restart needed). The commands below manage the
+composition fallback used when no user preference is stored.
+
 The Builder inherits the Planner route unless you configure a separate one:
 
 ```sh

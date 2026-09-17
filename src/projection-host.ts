@@ -53,14 +53,20 @@ const cardSchema: ZodType<EndeavourCardData | null> = zod.union([
       note: zod.string().optional(),
     }).optional(),
     childId: zod.string(),
+    builderRoute: zod.object({
+      provider: zod.string(),
+      model: zod.string(),
+      reasoningEffort: zod.string().optional(),
+      inherited: zod.boolean(),
+    }).optional(),
   }),
   zod.null(),
 ]) as ZodType<EndeavourCardData | null>
 
 /**
  * Register the `endeavourPlan` projection on the global plugin's context.
- * stateVersion 2 adds `rootSessionId` (addressed Builder navigation) and the
- * derived display `stage`/`reportedAt` fields.
+ * stateVersion 3 adds `builderRoute` (the exact durable route), on top of
+ * stateVersion 2's `rootSessionId` and derived `stage`/`reportedAt` fields.
  */
 export function registerEndeavourProjection(ctx: Context): void {
   ctx.sessionProjections.register<'endeavourPlan', EndeavourCardData | null>({
@@ -73,6 +79,6 @@ export function registerEndeavourProjection(ctx: Context): void {
       return state
     },
     wire: { viewSchema: cardSchema, view: (state) => state },
-    stateVersion: 2,
+    stateVersion: 3,
   })
 }

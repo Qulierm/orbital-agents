@@ -1,5 +1,17 @@
 # Builder model configuration
 
+## Composer control (user setting)
+
+The root Endeavour composer carries a `Builder · Inherit` chip. Open it and
+choose `Inherit Planner`, or a provider-grouped model plus its Thinking option
+(the adapter-owned effort list, or `Provider default`). The choice is stored in
+the `endeavour-builder` Host Settings namespace, applies to the **next** Builder
+child only, and never changes a Builder that already exists. The control is
+hidden in Standard chats and in the Builder child itself, and disabled while a
+plan is active or the turn is running.
+
+## Composition base and CLI
+
 By default the Builder **inherits** the Planner route: the child Agent gets
 the same provider/model as the Endeavour chat, so both roles share one bill.
 `--show-builder` prints exactly that state:

@@ -4,7 +4,7 @@
  * transcript definition, and tests all use these functions.
  */
 
-import { foldPlanEvents, type PlanEventPayload, type PlanState, type TaskState, type TaskStatus, type PlanOutcome } from './domain.js'
+import { foldPlanEvents, type PlanBuilderRoute, type PlanEventPayload, type PlanState, type TaskState, type TaskStatus, type PlanOutcome } from './domain.js'
 
 /**
  * Display stage derived from durable state; it never changes the persisted
@@ -45,6 +45,14 @@ export interface EndeavourCardTask {
   readonly note?: string
 }
 
+/** Renderer-facing Builder route for one plan. */
+export interface EndeavourCardRoute {
+  readonly provider: string
+  readonly model: string
+  readonly reasoningEffort?: string
+  readonly inherited: boolean
+}
+
 /** Final renderer payload for one plan card. */
 export interface EndeavourCardData {
   readonly planId: string
@@ -66,6 +74,17 @@ export interface EndeavourCardData {
   }
   /** The Builder child session for the Open Builder action. */
   readonly childId: string
+  /** Exact route the plan's Builder was spawned with, when recorded. */
+  readonly builderRoute?: EndeavourCardRoute
+}
+
+function cardRoute(route: PlanBuilderRoute): EndeavourCardRoute {
+  return {
+    provider: route.provider,
+    model: route.model,
+    ...(route.reasoningEffort === undefined ? {} : { reasoningEffort: route.reasoningEffort }),
+    inherited: route.inherited,
+  }
 }
 
 function taskRow(task: TaskState): EndeavourCardTask {
@@ -96,6 +115,7 @@ export function projectPlanCard(plan: PlanState): EndeavourCardData {
     total: plan.tasks.length,
     ...(currentSpec === undefined ? {} : { currentTitle: currentSpec }),
     checking,
+    ...(plan.builderRoute === undefined ? {} : { builderRoute: cardRoute(plan.builderRoute) }),
     ...(plan.terminal === undefined
       ? {}
       : {
