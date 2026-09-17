@@ -9,12 +9,10 @@
  * nothing. The transcript ConversationNode stays event-based.
  */
 
-import type { Context as ClientContext } from '@deepseek-ai/cordis'
 import type { PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
-import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { EndeavourCardData } from '../plan-projection.js'
 import { NS, type EndeavourKey } from './locales.js'
-import { copyFrom, type EndeavourInjected } from './PlanCard.js'
+import { builderAddress, copyFrom, type EndeavourInjected } from './PlanCard.js'
 import { PlanView } from './PlanView.js'
 
 /** Complete dock renderer props (session scope supplies `useProjection`). */
@@ -36,7 +34,10 @@ export function PlanDock(props: PlanDockProps): React.ReactElement | null {
     <PlanView
       data={data}
       copy={copyFrom(props)}
-      onOpenBuilder={() => { props.openSession(data.childId as SessionId) }}
+      onOpenBuilder={() => {
+        const address = builderAddress(data)
+        if (address !== undefined) props.openBuilder(address)
+      }}
       variant="dock"
     />
   )
@@ -46,13 +47,13 @@ export function PlanDock(props: PlanDockProps): React.ReactElement | null {
 export const PLAN_DOCK_ID = 'endeavour-plan'
 export const PLAN_DOCK_ORDER = -1
 
-/** Registers the composer plan dock. */
-export function registerPlanDock(ctx: ClientContext, slots: {
+/** Registers the composer plan dock with the shared injected navigation. */
+export function registerPlanDock(slots: {
   inject(name: string, callback: () => void): void
-  register(options: { name: string; id: string; order: number; locale: string }, component: unknown): void
-}): void {
+  register(options: { name: string; id: string; order: number; locale: string; inject?: () => unknown }, component: unknown): void
+}, injectProps: () => EndeavourInjected): void {
   slots.inject('conversation.input.dock', () => slots.register(
-    { name: 'conversation.input.dock', id: PLAN_DOCK_ID, order: PLAN_DOCK_ORDER, locale: NS },
+    { name: 'conversation.input.dock', id: PLAN_DOCK_ID, order: PLAN_DOCK_ORDER, locale: NS, inject: injectProps },
     PlanDock as unknown as (props: PlanDockProps) => unknown,
   ))
 }

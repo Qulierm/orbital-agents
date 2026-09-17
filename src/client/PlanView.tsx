@@ -1,13 +1,13 @@
 /**
  * Shared plan presentation for both surfaces: the durable transcript card and
- * the composer plan dock. Renders only short display data — titles, the four
- * states, progress, timers, and a short note. Detailed execution projections
- * (instructions/validation/constraints) never reach this component because the
- * card data type does not carry them.
+ * the composer plan dock. Renders only short display data — titles, derived
+ * display stages, progress, timers, and a short note. Detailed execution
+ * projections (instructions/validation/constraints) never reach this component
+ * because the card data type does not carry them.
  */
 
 import { useEffect, useState } from 'react'
-import type { EndeavourCardData, EndeavourCardTask } from './definition.js'
+import type { EndeavourCardData, EndeavourCardTask, TaskStage } from '../plan-projection.js'
 import type { EndeavourKey } from './locales.js'
 import { CLASS } from './styles.js'
 
@@ -31,14 +31,19 @@ export function formatElapsed(ms: number): string {
   return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`
 }
 
-/** Live elapsed for a running task, frozen duration for a terminal one. */
+/**
+ * Elapsed time for one task: live while waiting/working, frozen at the Builder
+ * report for Finished, and frozen at Endeavour verification for Confirmed or
+ * Failed.
+ */
 export function taskElapsed(task: EndeavourCardTask, now: number): string | undefined {
   if (task.startedAt === undefined) return undefined
-  return formatElapsed((task.finishedAt ?? now) - task.startedAt)
+  const end = task.finishedAt ?? (task.stage === 'finished' ? task.reportedAt : undefined)
+  return formatElapsed((end ?? now) - task.startedAt)
 }
 
-/** Pending: hollow dashed ring, matching the native todo glyph. */
-function PendingGlyph() {
+/** Waiting: hollow dashed ring. */
+function WaitingGlyph() {
   return (
     <svg width={14} height={14} viewBox="0 0 14 14" fill="none" aria-hidden="true">
       <circle cx="7" cy="7" r="6.4" stroke="currentColor" strokeWidth="1.2" strokeDasharray="2.4 2.4" />
@@ -46,8 +51,8 @@ function PendingGlyph() {
   )
 }
 
-/** Running: business-blue partial ring with a subtle pulsing core. */
-function RunningGlyph() {
+/** Working: business-blue partial ring with a subtle pulsing core. */
+function WorkingGlyph() {
   return (
     <span className={CLASS.pulse} style={{ display: 'grid', placeItems: 'center' }}>
       <svg width={14} height={14} viewBox="0 0 14 14" fill="none" aria-hidden="true">
@@ -58,8 +63,18 @@ function RunningGlyph() {
   )
 }
 
-/** Succeeded: success check-ring. */
-function SucceededGlyph() {
+/** Finished: completed work awaiting review — business ring with a pause bar. */
+function FinishedGlyph() {
+  return (
+    <svg width={14} height={14} viewBox="0 0 14 14" fill="none" aria-hidden="true">
+      <circle cx="7" cy="7" r="6.4" stroke="currentColor" strokeWidth="1.2" />
+      <path d="M5.4 7h3.2" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+    </svg>
+  )
+}
+
+/** Confirmed: success check-ring (only after Endeavour verification). */
+function ConfirmedGlyph() {
   return (
     <svg width={14} height={14} viewBox="0 0 14 14" fill="none" aria-hidden="true">
       <circle cx="7" cy="7" r="6.4" stroke="currentColor" strokeWidth="1.2" />
@@ -78,30 +93,33 @@ function FailedGlyph() {
   )
 }
 
-const GLYPH_CLASS: Record<EndeavourCardTask['status'], string> = {
+const GLYPH_CLASS: Record<TaskStage, string> = {
   waiting: CLASS.glyphPending,
-  running: CLASS.glyphRunning,
-  succeeded: CLASS.glyphSucceeded,
+  working: CLASS.glyphRunning,
+  finished: CLASS.glyphFinished,
+  confirmed: CLASS.glyphSucceeded,
   failed: CLASS.glyphFailed,
 }
 
-function StatusGlyph({ status }: { status: EndeavourCardTask['status'] }) {
-  const body = status === 'waiting'
-    ? <PendingGlyph />
-    : status === 'running'
-      ? <RunningGlyph />
-      : status === 'succeeded'
-        ? <SucceededGlyph />
-        : <FailedGlyph />
-  return <span className={`${CLASS.glyph} ${GLYPH_CLASS[status]}`} aria-hidden="true">{body}</span>
+function StageGlyph({ stage }: { stage: TaskStage }) {
+  const body = stage === 'waiting'
+    ? <WaitingGlyph />
+    : stage === 'working'
+      ? <WorkingGlyph />
+      : stage === 'finished'
+        ? <FinishedGlyph />
+        : stage === 'confirmed'
+          ? <ConfirmedGlyph />
+          : <FailedGlyph />
+  return <span className={`${CLASS.glyph} ${GLYPH_CLASS[stage]}`} aria-hidden="true">{body}</span>
 }
 
-/** One plan panel; the timer ticks every second only while a task is running. */
+/** One plan panel; the timer ticks every second only while a task is working. */
 export function PlanView(props: PlanViewProps): React.ReactElement | null {
   const { data, copy, onOpenBuilder, variant = 'card' } = props
   const [now, setNow] = useState(() => Date.now())
   const [collapsed, setCollapsed] = useState(false)
-  const active = data.tasks.some((task) => task.status === 'running')
+  const active = data.tasks.some((task) => task.stage === 'working')
   useEffect(() => {
     if (!active) return undefined
     const handle = setInterval(() => { setNow(Date.now()) }, 1000)
@@ -113,7 +131,7 @@ export function PlanView(props: PlanViewProps): React.ReactElement | null {
     <>
       <div className={CLASS.header}>
         <span className={CLASS.title} title={data.title}>{data.title}</span>
-        <span className={CLASS.progress}>{copy('plan.progress', { completed: data.completedCount, total: data.total })}</span>
+        <span className={CLASS.progress}>{copy('plan.progress', { confirmed: data.completedCount, total: data.total })}</span>
         <button
           type="button"
           className={CLASS.chevron}
@@ -137,13 +155,14 @@ export function PlanView(props: PlanViewProps): React.ReactElement | null {
           {data.tasks.map((task) => (
             <li
               key={task.id}
-              className={`${CLASS.row}${task.status === 'running' ? ` ${CLASS.rowRunning}` : ''}`}
+              className={`${CLASS.row}${task.stage === 'working' ? ` ${CLASS.rowRunning}` : ''}`}
             >
-              <StatusGlyph status={task.status} />
+              <StageGlyph stage={task.stage} />
               <span className={CLASS.rowTitle} title={task.title}>{task.title}</span>
               <span className={CLASS.rowStatus}>
-                {copy(`status.${task.status}` as EndeavourKey)}
-                {task.status === 'running' && data.checking ? ` · ${copy('plan.checking')}` : ''}
+                {copy(`stage.${task.stage}` as EndeavourKey)}
+                {task.stage === 'working' && data.checking ? ` · ${copy('plan.checking')}` : ''}
+                {task.stage === 'failed' && task.note !== undefined ? ` · ${task.note}` : ''}
               </span>
               {taskElapsed(task, now) !== undefined ? (
                 <span className={CLASS.rowTimer} aria-label={`${task.title} elapsed`}>{taskElapsed(task, now)}</span>
@@ -151,12 +170,6 @@ export function PlanView(props: PlanViewProps): React.ReactElement | null {
             </li>
           ))}
         </ul>
-      ) : null}
-      {data.terminal !== undefined ? (
-        <div className={CLASS.note}>
-          {data.terminal.outcome === 'completed' ? copy('plan.completed') : copy('plan.failed')}
-          {data.terminal.note !== undefined ? ` — ${data.terminal.note}` : ''}
-        </div>
       ) : null}
     </>
   )

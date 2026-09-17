@@ -28,14 +28,19 @@ const taskSchema = zod.object({
   id: zod.string(),
   title: zod.string(),
   status: zod.union([zod.literal('waiting'), zod.literal('running'), zod.literal('succeeded'), zod.literal('failed')]),
+  stage: zod.union([
+    zod.literal('waiting'), zod.literal('working'), zod.literal('finished'), zod.literal('confirmed'), zod.literal('failed'),
+  ]),
   startedAt: zod.number().optional(),
   finishedAt: zod.number().optional(),
+  reportedAt: zod.number().optional(),
   note: zod.string().optional(),
 })
 
 const cardSchema: ZodType<EndeavourCardData | null> = zod.union([
   zod.object({
     planId: zod.string(),
+    rootSessionId: zod.string(),
     title: zod.string(),
     tasks: zod.array(taskSchema),
     completedCount: zod.number(),
@@ -52,7 +57,11 @@ const cardSchema: ZodType<EndeavourCardData | null> = zod.union([
   zod.null(),
 ]) as ZodType<EndeavourCardData | null>
 
-/** Register the `endeavourPlan` projection on the global plugin's context. */
+/**
+ * Register the `endeavourPlan` projection on the global plugin's context.
+ * stateVersion 2 adds `rootSessionId` (addressed Builder navigation) and the
+ * derived display `stage`/`reportedAt` fields.
+ */
 export function registerEndeavourProjection(ctx: Context): void {
   ctx.sessionProjections.register<'endeavourPlan', EndeavourCardData | null>({
     key: 'endeavourPlan',
@@ -64,6 +73,6 @@ export function registerEndeavourProjection(ctx: Context): void {
       return state
     },
     wire: { viewSchema: cardSchema, view: (state) => state },
-    stateVersion: 1,
+    stateVersion: 2,
   })
 }

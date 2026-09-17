@@ -32,7 +32,8 @@
         "@deepseek-ai/dsh-client-locale",
         "@deepseek-ai/dsh-client-ui-conversation",
         "@deepseek-ai/dsh-client-ui-chat",
-        "@deepseek-ai/dsh-client-ui-session"
+        "@deepseek-ai/dsh-client-ui-session",
+        "@deepseek-ai/dsh-client-ui-workspace"
       ]
     },
     "compatibility": {
@@ -60,10 +61,12 @@
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.2",
     "@deepseek-ai/dsh-agent": "0.1.5-rc.2",
+    "@deepseek-ai/dsh-api-session-controller": "0.1.5-rc.2",
     "@deepseek-ai/dsh-client-locale": "0.1.5-rc.2",
     "@deepseek-ai/dsh-client-ui-chat": "0.1.5-rc.2",
     "@deepseek-ai/dsh-client-ui-conversation": "0.1.5-rc.2",
     "@deepseek-ai/dsh-client-ui-slots": "0.1.5-rc.2",
+    "@deepseek-ai/dsh-client-ui-workspace": "0.1.5-rc.2",
     "@deepseek-ai/dsh-llm": "0.1.5-rc.2",
     "@deepseek-ai/dsh-session": "0.1.5-rc.2",
     "@deepseek-ai/dsh-session-projection": "0.1.5-rc.2",
@@ -73,10 +76,12 @@
   "devDependencies": {
     "@deepseek-ai/cordis": "4.0.2",
     "@deepseek-ai/dsh-agent": "0.1.5-rc.2",
+    "@deepseek-ai/dsh-api-session-controller": "0.1.5-rc.2",
     "@deepseek-ai/dsh-client-locale": "0.1.5-rc.2",
     "@deepseek-ai/dsh-client-ui-chat": "0.1.5-rc.2",
     "@deepseek-ai/dsh-client-ui-conversation": "0.1.5-rc.2",
     "@deepseek-ai/dsh-client-ui-slots": "0.1.5-rc.2",
+    "@deepseek-ai/dsh-client-ui-workspace": "0.1.5-rc.2",
     "@deepseek-ai/dsh-llm": "0.1.5-rc.2",
     "@deepseek-ai/dsh-session": "0.1.5-rc.2",
     "@deepseek-ai/dsh-session-projection": "0.1.5-rc.2",

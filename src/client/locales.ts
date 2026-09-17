@@ -7,18 +7,17 @@ export const NS = 'endeavour'
 
 export const en = {
   'plan.title': 'Endeavour plan',
-  'plan.progress': 'Completed {completed} of {total}',
+  'plan.progress': '{confirmed} / {total} confirmed',
   'plan.current': 'Current task: {title}',
   'plan.checking': 'Endeavour is checking the result',
   'plan.openBuilder': 'Open Builder',
-  'plan.completed': 'Plan completed',
-  'plan.failed': 'Plan stopped',
   'plan.collapse': 'Collapse plan',
   'plan.expand': 'Expand plan',
-  'status.waiting': 'Waiting to start',
-  'status.running': 'Running',
-  'status.succeeded': 'Succeeded',
-  'status.failed': 'Failed',
+  'stage.waiting': 'Waiting to start',
+  'stage.working': 'Working',
+  'stage.finished': 'Finished',
+  'stage.confirmed': 'Confirmed',
+  'stage.failed': 'Failed',
 } as const
 
 export type EndeavourKey = keyof typeof en

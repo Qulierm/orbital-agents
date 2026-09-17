@@ -1,15 +1,15 @@
 /** Keyed transcript renderer for the durable Endeavour plan card. */
 
 import type { PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
-import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { ChatConversationViewNode } from '@deepseek-ai/dsh-client-ui-chat/client'
-import type { EndeavourCardData } from './definition.js'
+import type { SubagentAddress } from '@deepseek-ai/dsh-subagent/client'
+import type { EndeavourCardData } from '../plan-projection.js'
 import { formatEnglish, type EndeavourKey } from './locales.js'
 import { PlanView } from './PlanView.js'
 
-/** Navigation injected from the plugin's own Session Controller access. */
+/** Addressed continuation navigation injected from the plugin's own services. */
 export interface EndeavourInjected {
-  readonly openSession: (id: SessionId) => void
+  readonly openBuilder: (address: SubagentAddress) => void
 }
 
 /** Complete keyed Chat renderer props. */
@@ -29,6 +29,16 @@ export function copyFrom(props: { readonly t?: unknown }): (key: EndeavourKey, p
   }
 }
 
+/**
+ * Exact continuable address for the plan's Builder child. Returns undefined for
+ * malformed data so navigation is a no-op instead of opening a wrong session.
+ */
+export function builderAddress(data: EndeavourCardData): SubagentAddress | undefined {
+  if (typeof data.rootSessionId !== 'string' || data.rootSessionId === '') return undefined
+  if (typeof data.childId !== 'string' || data.childId === '') return undefined
+  return { parentSessionId: data.rootSessionId as never, childSessionId: data.childId as never, mode: 'continuable' }
+}
+
 /** One plan card in the transcript; shares its presentation with the dock. */
 export function PlanCard(props: PlanCardProps): React.ReactElement | null {
   const node = (props as { readonly node?: ChatConversationViewNode }).node
@@ -38,7 +48,10 @@ export function PlanCard(props: PlanCardProps): React.ReactElement | null {
     <PlanView
       data={data}
       copy={copyFrom(props)}
-      onOpenBuilder={() => { props.openSession(data.childId as SessionId) }}
+      onOpenBuilder={() => {
+        const address = builderAddress(data)
+        if (address !== undefined) props.openBuilder(address)
+      }}
       variant="card"
     />
   )

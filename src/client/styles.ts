@@ -32,6 +32,7 @@ export const CLASS = {
   glyphRunning: 'dsh-endeavour-glyph--running',
   glyphSucceeded: 'dsh-endeavour-glyph--succeeded',
   glyphFailed: 'dsh-endeavour-glyph--failed',
+  glyphFinished: 'dsh-endeavour-glyph--finished',
   glyphPending: 'dsh-endeavour-glyph--pending',
   pulse: 'dsh-endeavour-pulse',
 } as const
@@ -42,32 +43,35 @@ export const CLASS = {
  * composer variables published by ConversationRoot.
  */
 export const STYLE_TEXT = `
+/* Same outer width axis as InputBar: side clearance only, no dock inset, so
+   the computed width equals the composer card exactly. */
 .dsh-endeavour-dock-wrap {
   box-sizing: border-box;
   flex: none;
-  width: calc(
-    100% - var(--dsh-composer-side-clearance) - var(--dsh-composer-side-clearance)
-    - var(--dsh-composer-dock-inset) - var(--dsh-composer-dock-inset)
-  );
-  max-width: calc(var(--dsh-composer-card-max-width) - var(--dsh-composer-dock-inset) - var(--dsh-composer-dock-inset));
+  width: calc(100% - var(--dsh-composer-side-clearance) - var(--dsh-composer-side-clearance));
+  max-width: var(--dsh-composer-card-max-width);
   margin: 0 auto calc(0px - var(--dsh-composer-stack-gap) - 3px);
-  padding: 0 var(--dsh-composer-dock-inset);
+  padding: 0;
 }
+/* Same surface, stroke, radius, and elevation family as the InputBar card, with
+   a square bottom so the input card's own top edge closes the attached shape. */
 .dsh-endeavour-dock-panel {
   position: relative;
   overflow: hidden;
   width: 100%;
   padding: 2px 0 6px;
-  border-radius: 12px 12px 0 0;
-  background: var(--dsw-specific-tip);
+  border-radius: 22px 22px 0 0;
+  background: var(--dsw-specific-input-major);
   color: var(--dsw-alias-label-primary);
+  --dsw-elevation-stroke-color: var(--dsw-alias-border-l2);
+  box-shadow: var(--dsw-elevation-soft);
   --dsh-scrollbar-thumb: var(--dsw-alias-scrollbar-bg-l2);
   --dsh-scrollbar-thumb-hover: var(--dsw-alias-scrollbar-hover-l2);
 }
 .dsh-endeavour-dock-panel::after {
   position: absolute;
   inset: 0;
-  border: 0.5px solid var(--dsw-alias-border-l1);
+  border: 0.5px solid var(--dsw-alias-border-l2);
   border-bottom: none;
   border-radius: inherit;
   content: '';
@@ -199,6 +203,7 @@ export const STYLE_TEXT = `
   color: var(--dsw-alias-state-business-primary);
   animation: dsh-endeavour-spin 1s linear infinite;
 }
+.dsh-endeavour-glyph--finished { color: var(--dsw-alias-state-business-primary); }
 .dsh-endeavour-glyph--succeeded { color: var(--dsw-alias-state-success-primary); }
 .dsh-endeavour-glyph--failed { color: var(--dsw-alias-state-error-primary); }
 .dsh-endeavour-pulse {

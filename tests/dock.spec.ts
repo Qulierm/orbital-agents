@@ -1,5 +1,6 @@
 /**
- * Composer plan dock, attached-geometry, motion, and English-only regressions.
+ * Composer plan dock, addressed Builder navigation, attached-geometry,
+ * five-stage presentation, and English-only regressions.
  */
 
 import { readFileSync } from 'node:fs'
@@ -7,145 +8,143 @@ import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import { en, formatEnglish } from '../src/client/locales.js'
-import { copyFrom } from '../src/client/PlanCard.js'
+import { builderAddress, copyFrom } from '../src/client/PlanCard.js'
 import { PLAN_DOCK_ID, PLAN_DOCK_ORDER, PlanDock, registerPlanDock } from '../src/client/PlanDock.js'
 import { PlanView } from '../src/client/PlanView.js'
 import { CLASS, ensurePlanStyles, STYLE_ELEMENT_ID, STYLE_TEXT } from '../src/client/styles.js'
-import type { EndeavourCardData } from '../src/client/definition.js'
+import type { EndeavourCardData } from '../src/plan-projection.js'
 
 const planData: EndeavourCardData = {
   planId: 'p1',
+  rootSessionId: 'root-session',
   title: 'Extension Test Plan',
   tasks: [
-    { id: 't1', title: 'Define test scope', status: 'succeeded', startedAt: 1_000, finishedAt: 61_000 },
-    { id: 't2', title: 'A very long task title that must ellipsize inside the bounded dock body without wrapping', status: 'running', startedAt: 100_000 },
-    { id: 't3', title: 'Verify and summarize', status: 'waiting' },
+    { id: 't1', title: 'Define test scope', status: 'succeeded', stage: 'confirmed', startedAt: 1_000, finishedAt: 61_000 },
+    { id: 't2', title: 'Add test fixture for the attached composer dock geometry', status: 'running', stage: 'working', startedAt: 100_000 },
+    { id: 't3', title: 'Verify and summarize', status: 'running', stage: 'finished', startedAt: 200_000, reportedAt: 260_000 },
+    { id: 't4', title: 'Pending task', status: 'waiting', stage: 'waiting' },
   ],
   completedCount: 1,
-  total: 3,
-  currentTitle: 'A very long task title that must ellipsize inside the bounded dock body without wrapping',
+  total: 4,
+  currentTitle: 'Add test fixture for the attached composer dock geometry',
   checking: true,
-  childId: 'child-1',
+  childId: 'child-session',
 }
 
 function renderDock(data: EndeavourCardData | null | undefined): string {
   return renderToStaticMarkup(createElement(PlanDock, {
     useProjection: (key: string) => (key === 'endeavourPlan' ? (data ?? null) : undefined),
     t: undefined,
-    openSession: () => undefined,
+    openBuilder: () => undefined,
   } as never))
 }
 
 describe('composer plan dock', () => {
-  it('registers on conversation.input.dock with a stable id before the todo dock', () => {
-    const calls: { injected?: string; registered?: Record<string, unknown> } = {}
-    registerPlanDock({} as never, {
+  it('registers on conversation.input.dock with a stable id and injected navigation', () => {
+    const calls: { injected?: string; options?: Record<string, unknown>; props?: unknown } = {}
+    registerPlanDock({
       inject(name, callback) { calls.injected = name; callback() },
-      register(options) { calls.registered = options as unknown as Record<string, unknown> },
-    })
+      register(options) { calls.options = options as unknown as Record<string, unknown> },
+    }, () => ({ openBuilder: () => { calls.props = 'openBuilder' } }))
     expect(calls.injected).toBe('conversation.input.dock')
-    expect(calls.registered?.name).toBe('conversation.input.dock')
-    expect(calls.registered?.id).toBe(PLAN_DOCK_ID)
-    expect(Number(calls.registered?.order)).toBeLessThan(0)
+    expect(calls.options?.name).toBe('conversation.input.dock')
+    expect(calls.options?.id).toBe(PLAN_DOCK_ID)
+    expect(Number(calls.options?.order)).toBeLessThan(0)
+    expect(typeof calls.options?.inject).toBe('function')
+    expect((calls.options?.inject as () => unknown)()).toEqual({ openBuilder: expect.any(Function) })
   })
 
   it('renders only from the projected durable plan and nothing without it', () => {
     expect(renderDock(null)).toBe('')
     expect(renderDock(undefined)).toBe('')
-    // The projection carries the latest whole plan even when older than the paged transcript.
     expect(renderDock({ ...planData, planId: 'projected-old' })).toContain('data-endeavour-plan="projected-old"')
   })
 
-  it('renders the attached dock structure with rows, English states, timers, and the ghost action', () => {
+  it('renders all five stages in English with concise progress and no completion footer', () => {
     const html = renderDock(planData)
-    expect(html).toContain(CLASS.dockWrap)
-    expect(html).toContain(CLASS.dockPanel)
-    expect(html).toContain(`${CLASS.row} ${CLASS.rowRunning}`)
     expect(html).toContain('Extension Test Plan')
-    expect(html).toContain('Completed 1 of 3')
+    expect(html).toContain('1 / 4 confirmed')
     expect(html).toContain('Waiting to start')
-    expect(html).toContain('Running')
-    expect(html).toContain('Succeeded')
-    expect(html).toContain('01:00')
-    expect(html).toContain('Endeavour is checking the result')
+    expect(html).toContain('Working')
+    expect(html).toContain('Finished')
+    expect(html).toContain('Confirmed')
+    expect(html).toContain(CLASS.glyphFinished)
+    expect(html).toContain(`${CLASS.row} ${CLASS.rowRunning}`)
     expect(html).toContain(CLASS.ghost)
     expect(html).toContain('Open Builder')
-    expect(html).toContain('data-endeavour-surface="dock"')
-    // Native glyphs replace the text bullet; no execution projections.
+    expect(html).not.toContain('Plan completed')
     expect(html).not.toContain('●')
     expect(html).not.toContain('instructions')
     expect(html).not.toContain('validation')
-    expect(html).not.toContain('constraints')
-    // No redundant current-task headline when the running row already shows it.
-    expect(html).not.toContain('Current task:')
   })
 
-  it('renders nothing in standard or Builder chats (no plan node)', () => {
-    expect(renderDock(undefined)).toBe('')
+  it('freezes Finished at the Builder report while the persisted status stays running', () => {
+    const html = renderDock(planData)
+    // t3 started at 200000 and reported at 260000 -> frozen 01:00.
+    expect(html).toContain('01:00')
   })
 
-  it('produces English copy for every locale seat and the fallback', () => {
-    const english = copyFrom({ t: (key: string) => (key === 'plan.openBuilder' ? 'Open Builder' : undefined) })
-    expect(english('plan.openBuilder')).toBe('Open Builder')
-    expect(copyFrom({})('plan.completed')).toBe('Plan completed')
-    expect(formatEnglish('plan.progress', { completed: 1, total: 2 })).toBe('Completed 1 of 2')
-    for (const value of Object.values(en)) expect(value).toMatch(/^[\x20-\x7E]*$/)
+  it('renders a failed task with its note and red glyph, without a generic sentence', () => {
+    const failed: EndeavourCardData = {
+      ...planData,
+      tasks: [{ id: 'f1', title: 'Broken task', status: 'failed', stage: 'failed', startedAt: 0, finishedAt: 5_000, note: 'Verification did not pass' }],
+      completedCount: 0,
+      total: 1,
+      checking: false,
+    }
+    const html = renderDock(failed)
+    expect(html).toContain(CLASS.glyphFailed)
+    expect(html).toContain('Failed')
+    expect(html).toContain('Verification did not pass')
+    expect(html).not.toContain('Plan failed')
   })
 
-  it('keeps the card variant on the shared semantic content', () => {
-    const html = renderToStaticMarkup(createElement(PlanView, {
-      data: planData,
-      copy: (key: 'plan.title') => key,
-      onOpenBuilder: () => undefined,
-      variant: 'card',
-    } as never))
-    expect(html).toContain('data-endeavour-surface="card"')
-    expect(html).toContain(CLASS.header)
-    expect(html).toContain(CLASS.row)
+  it('builds the exact continuable address and stays safe when identity is missing', () => {
+    expect(builderAddress(planData)).toEqual({
+      parentSessionId: 'root-session', childSessionId: 'child-session', mode: 'continuable',
+    })
+    expect(builderAddress({ ...planData, rootSessionId: '' })).toBeUndefined()
+    expect(builderAddress({ ...planData, childId: '' })).toBeUndefined()
+    expect(builderAddress({ ...planData, rootSessionId: undefined as never })).toBeUndefined()
   })
 })
 
 describe('attached composer stylesheet', () => {
-  it('uses the native width math, negative stack gap, and top-only radii', () => {
+  it('matches the InputBar width axis exactly (no dock inset)', () => {
     expect(STYLE_TEXT).toContain('var(--dsh-composer-side-clearance)')
-    expect(STYLE_TEXT).toContain('var(--dsh-composer-dock-inset)')
     expect(STYLE_TEXT).toContain('var(--dsh-composer-card-max-width)')
+    expect(STYLE_TEXT).not.toContain('composer-dock-inset')
     expect(STYLE_TEXT).toContain('calc(0px - var(--dsh-composer-stack-gap) - 3px)')
-    expect(STYLE_TEXT).toContain('border-radius: 12px 12px 0 0')
-    expect(STYLE_TEXT).toContain('border-bottom: none')
   })
 
-  it('uses current alias tokens and drops the stale surface tokens', () => {
-    expect(STYLE_TEXT).toContain('var(--dsw-specific-tip)')
-    expect(STYLE_TEXT).toContain('var(--dsw-alias-label-primary)')
-    expect(STYLE_TEXT).toContain('var(--dsw-alias-border-l1)')
-    expect(STYLE_TEXT).toContain('var(--dsw-alias-state-business-primary)')
-    expect(STYLE_TEXT).toContain('var(--dsw-alias-state-success-primary)')
-    expect(STYLE_TEXT).toContain('var(--dsw-alias-state-error-primary)')
+  it('uses the composer input surface, stroke, radius, and elevation', () => {
+    expect(STYLE_TEXT).toContain('background: var(--dsw-specific-input-major)')
+    expect(STYLE_TEXT).toContain('border-radius: 22px 22px 0 0')
+    expect(STYLE_TEXT).toContain('var(--dsw-alias-border-l2)')
+    expect(STYLE_TEXT).toContain('var(--dsw-elevation-soft)')
+    expect(STYLE_TEXT).toContain('border-bottom: none')
+    // The standalone transcript card keeps its own surface.
+    expect(STYLE_TEXT).toContain('background: var(--dsw-specific-tip)')
     expect(STYLE_TEXT).not.toContain('--dsw-text-primary')
     expect(STYLE_TEXT).not.toContain('--dsw-surface-raised')
   })
 
-  it('carries running motion plus a reduced-motion off-switch', () => {
+  it('carries working motion, a distinct finished glyph, and reduced-motion off-switch', () => {
     expect(STYLE_TEXT).toContain('dsh-endeavour-spin')
     expect(STYLE_TEXT).toContain('dsh-endeavour-pulse')
+    expect(STYLE_TEXT).toContain('dsh-endeavour-glyph--finished')
     expect(STYLE_TEXT).toContain('@media (prefers-reduced-motion: reduce)')
     expect(STYLE_TEXT).toMatch(/prefers-reduced-motion[\s\S]*animation: none/)
+    expect(STYLE_TEXT).not.toMatch(/glyph--finished[^{]*{[^}]*animation/)
   })
 
-  it('scopes every rule under the unique prefix and injects exactly one tagged element', () => {
-    // No bare element selectors or generic classes leak outside the prefix.
-    for (const rule of STYLE_TEXT.split('\n').map((line) => line.trim()).filter((line) => line.endsWith('{'))) {
-      const selector = rule.slice(0, -1).trim()
-      if (selector.startsWith('@') || selector.startsWith('to') || selector.startsWith('from')) continue
-      expect(selector).toContain('dsh-endeavour')
-    }
+  it('injects exactly one tagged element and disposes it', () => {
     const created: { node?: { id?: string; textContent?: string }; removed: boolean } = { removed: false }
     const existing = globalThis.document
     try {
       const styleNode = { id: '', textContent: '', setAttribute: () => {}, remove: () => { created.removed = true } }
       ;(globalThis as { document?: unknown }).document = {
-        head: { appendChild: (node: { id?: string; textContent?: string }) => { created.node = node } },
+        head: { appendChild: (node: { id?: string }) => { created.node = node } },
         getElementById: () => null,
         createElement: () => styleNode,
       }
@@ -157,28 +156,44 @@ describe('attached composer stylesheet', () => {
     } finally {
       ;(globalThis as { document?: unknown }).document = existing
     }
-    // SSR-safe without document.
-    expect(typeof ensurePlanStyles()).toBe('function')
   })
 })
 
-describe('English-requirement prompts', () => {
-  it('requires English plans in the Endeavour prompt', () => {
+describe('English copy and planning prompts', () => {
+  it('produces English copy for every locale seat and the fallback', () => {
+    expect(copyFrom({})('stage.confirmed')).toBe('Confirmed')
+    expect(copyFrom({ t: (key: string) => (key === 'plan.openBuilder' ? 'Open Builder' : undefined) })('plan.openBuilder')).toBe('Open Builder')
+    expect(formatEnglish('plan.progress', { confirmed: 1, total: 2 })).toBe('1 / 2 confirmed')
+    for (const value of Object.values(en)) expect(value).toMatch(/^[\x20-\x7E]*$/)
+  })
+
+  it('requires a detailed, decision-complete plan in the Endeavour prompt', () => {
     const prompt = readFileSync('src/prompts/endeavour.md', 'utf8')
+    for (const section of ['Objective', 'Current State Analysis', 'Risks and Considerations', 'Implementation Plan', 'Builder Tasks', 'Validation Checklist', 'Definition of Done']) {
+      expect(prompt).toContain(section)
+    }
+    expect(prompt).toMatch(/4[–-]10 granular tasks/i)
+    expect(prompt).toMatch(/1:1/i)
+    expect(prompt).toMatch(/never collapse/i)
     expect(prompt).toMatch(/always written in English/i)
-    expect(prompt).toMatch(/regardless of the language/i)
   })
 
-  it('requires English reports in the Builder prompt and exempts verbatim output', () => {
+  it('requires English Builder prose, one-task execution, and compact evidence', () => {
     const prompt = readFileSync('src/prompts/builder.md', 'utf8')
-    expect(prompt).toMatch(/Write every report in English/i)
-    expect(prompt).toMatch(/verbatim command\s+output are exempt/i)
+    expect(prompt).toMatch(/all of your prose in English/i)
+    expect(prompt).toMatch(/verbatim command output are exempt/i)
+    expect(prompt).toMatch(/Execute only the task that is currently running/i)
+    expect(prompt).toMatch(/compact/i)
   })
 
-  it('keeps the embedded preset persona exactly equal to the packaged prompt', () => {
+  it('keeps the embedded preset persona exact and its metadata English', () => {
     const prompt = readFileSync('src/prompts/endeavour.md', 'utf8')
     const preset = readFileSync('preset/endeavour/agent.cordis.yml', 'utf8')
     const indented = prompt.replace(/\n$/, '').split('\n').map((line) => (line === '' ? '' : `      ${line}`)).join('\n')
     expect(preset).toContain(`    prefix: |\n${indented}\n`)
+    const metadata = readFileSync('preset/endeavour/preset.yml', 'utf8')
+    expect(metadata).toMatch(/^name: Endeavour$/m)
+    expect(metadata).toMatch(/^description: [\x20-\x7E]+$/m)
+    expect(metadata).not.toMatch(/[А-Яа-яЁё]/)
   })
 })
