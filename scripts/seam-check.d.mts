@@ -2,6 +2,19 @@
 
 export function encodePng(width: number, height: number, rgba: Buffer): Buffer
 export function decodePng(buffer: Buffer): { width: number; height: number; rgba: Buffer }
+export function checkEdgeProfiles(
+  image: { width: number; height: number; rgba: Buffer },
+  options: {
+    leftEdge: number
+    rightEdge: number
+    planY: number
+    inputY: number
+    page?: number[]
+    surface?: number[]
+    tolerance?: number
+    span?: number
+  },
+): { failures: string[] }
 export function checkSeam(
   image: { width: number; height: number; rgba: Buffer },
   options: {

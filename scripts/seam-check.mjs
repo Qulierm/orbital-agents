@@ -173,6 +173,79 @@ export function checkSeam(image, options) {
   return { failures, stats: { pagePixels, bandSamples } }
 }
 
+
+function pixelAt(image, px, py) {
+  const index = (py * image.width + px) * 4
+  return [image.rgba[index], image.rgba[index + 1], image.rgba[index + 2]]
+}
+
+function isBackgroundish(value, page, tolerance) {
+  return Math.abs(value[0] - page[0]) <= tolerance
+    && Math.abs(value[1] - page[1]) <= tolerance
+    && Math.abs(value[2] - page[2]) <= tolerance
+}
+
+/**
+ * Compare the vertical edge profile of the plan surface against the composer
+ * surface on both sides. A one-pixel protrusion, outward shadow, notch, or
+ * horizontal shift at either straight edge fails.
+ *
+ * @param options.leftEdge - expected x of the first surface pixel on the left.
+ * @param options.rightEdge - expected x of the last surface pixel on the right.
+ * @param options.planY - a row inside the plan surface's straight side.
+ * @param options.inputY - a row inside the composer surface's straight side.
+ */
+export function checkEdgeProfiles(image, options) {
+  const page = options.page ?? [15, 17, 21]
+  const surface = options.surface ?? [44, 44, 46]
+  const tolerance = options.tolerance ?? 14
+  const span = options.span ?? 2
+  const failures = []
+
+  const checkSide = (side, y, region) => {
+    const exteriorX = side === 'left' ? options.leftEdge - 1 : options.rightEdge + 1
+    const interiorX = side === 'left' ? options.leftEdge : options.rightEdge
+    for (let dy = -span; dy <= span; dy += 1) {
+      const py = y + dy
+      if (py < 0 || py >= image.height) continue
+      const exterior = pixelAt(image, exteriorX, py)
+      if (!close(exterior, page, tolerance)) {
+        failures.push(`${region} ${side}: protrudes with rgba(${exterior.join(',')}) at (${String(exteriorX)},${String(py)}) instead of page background`)
+        return
+      }
+      const interior = pixelAt(image, interiorX, py)
+      if (!close(interior, surface, tolerance)) {
+        failures.push(`${region} ${side}: interior at (${String(interiorX)},${String(py)}) is rgba(${interior.join(',')}) instead of the shared surface`)
+        return
+      }
+    }
+  }
+
+  checkSide('left', options.planY, 'plan')
+  checkSide('right', options.planY, 'plan')
+  checkSide('left', options.inputY, 'composer')
+  checkSide('right', options.inputY, 'composer')
+
+  // Horizontal shift: the first non-background column must coincide between the
+  // plan and composer rows on each side.
+  const edgeOf = (side, y) => {
+    for (let px = side === 'left' ? options.leftEdge - 3 : options.rightEdge + 3;
+      side === 'left' ? px <= options.leftEdge + 3 : px >= options.rightEdge - 3;
+      px += side === 'left' ? 1 : -1) {
+      if (!isBackgroundish(pixelAt(image, px, y), page, tolerance)) return px
+    }
+    return null
+  }
+  for (const side of ['left', 'right']) {
+    const planEdge = edgeOf(side, options.planY)
+    const inputEdge = edgeOf(side, options.inputY)
+    if (planEdge !== null && inputEdge !== null && planEdge !== inputEdge) {
+      failures.push(`${side}: horizontal edge shift between plan (x${String(planEdge)}) and composer (x${String(inputEdge)})`)
+    }
+  }
+  return { failures }
+}
+
 const invokedDirectly = process.argv[1] !== undefined && import.meta.url.endsWith(process.argv[1].split('/').pop() ?? '')
 if (invokedDirectly) {
   const [png, ...rest] = process.argv.slice(2)
@@ -182,6 +255,28 @@ if (invokedDirectly) {
   }
   const numbers = (value, fallback) => (typeof value === 'string' ? value.split(',').map(Number) : fallback)
   const image = decodePng(readFileSync(png))
+  const edgeLeft = rest.indexOf('--edge-left') >= 0 ? Number(rest[rest.indexOf('--edge-left') + 1]) : undefined
+  const edgeRight = rest.indexOf('--edge-right') >= 0 ? Number(rest[rest.indexOf('--edge-right') + 1]) : undefined
+  const planY = rest.indexOf('--plan-y') >= 0 ? Number(rest[rest.indexOf('--plan-y') + 1]) : undefined
+  const inputY = rest.indexOf('--input-y') >= 0 ? Number(rest[rest.indexOf('--input-y') + 1]) : undefined
+  if (edgeLeft !== undefined && edgeRight !== undefined && planY !== undefined && inputY !== undefined) {
+    const edge = checkEdgeProfiles(image, {
+      leftEdge: edgeLeft,
+      rightEdge: edgeRight,
+      planY,
+      inputY,
+      page: numbers(arg('--page'), undefined),
+      surface: numbers(arg('--surface'), undefined),
+      tolerance: Number(arg('--tolerance', '14')),
+    })
+    if (edge.failures.length > 0) {
+      console.log(`seam-check: EDGE FAIL ${png}`)
+      for (const failure of edge.failures) console.log(`  ${failure}`)
+      process.exitCode = 1
+    } else {
+      console.log(`seam-check: EDGE PASS ${png} (left x${String(edgeLeft)}, right x${String(edgeRight)})`)
+    }
+  }
   const result = checkSeam(image, {
     x: Number(arg('--x', '0')),
     y: Number(arg('--y', '0')),

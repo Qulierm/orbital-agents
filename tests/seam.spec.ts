@@ -4,7 +4,7 @@
  */
 
 import { describe, expect, it } from 'vitest'
-import { checkSeam, decodePng, encodePng } from '../scripts/seam-check.mjs'
+import { checkEdgeProfiles, checkSeam, decodePng, encodePng } from '../scripts/seam-check.mjs'
 
 const SURFACE: [number, number, number] = [44, 44, 46]
 const PAGE: [number, number, number] = [15, 17, 21]
@@ -23,6 +23,42 @@ function image(width: number, height: number, painter: (x: number, y: number) =>
   }
   return rgba
 }
+
+
+describe('edge profile continuity', () => {
+  const surface = [44, 44, 46] as [number, number, number]
+  const page = [15, 17, 21] as [number, number, number]
+
+  function build(protrudeInput: boolean): Buffer {
+    // 40x24: plan rows (y 4..9) and composer rows (y 14..19), surfaces from x=10.
+    return image(40, 24, (x, y) => {
+      const planRow = y >= 4 && y <= 9
+      const inputRow = y >= 14 && y <= 19
+      if (planRow) {
+        if (x === 9) return page
+        if (x >= 10 && x <= 29) return surface
+        return page
+      }
+      if (inputRow) {
+        if (x === 9) return protrudeInput ? [49, 49, 51] : page
+        if (x >= 10 && x <= 29) return surface
+        return page
+      }
+      return page
+    })
+  }
+
+  it('accepts matching straight edges and rejects a one-pixel exterior protrusion', () => {
+    const clean = checkEdgeProfiles(decodePng(encodePng(40, 24, build(false))), {
+      leftEdge: 10, rightEdge: 29, planY: 6, inputY: 16, page, surface,
+    })
+    expect(clean.failures).toEqual([])
+    const protruded = checkEdgeProfiles(decodePng(encodePng(40, 24, build(true))), {
+      leftEdge: 10, rightEdge: 29, planY: 6, inputY: 16, page, surface,
+    })
+    expect(protruded.failures.some((failure) => failure.includes('protrudes with rgba(49,49,51)'))).toBe(true)
+  })
+})
 
 describe('seam pixel checker', () => {
   it('round-trips a PNG through encode/decode', () => {

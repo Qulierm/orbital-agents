@@ -186,17 +186,20 @@ describe('attached composer stylesheet', () => {
     expect(STYLE_TEXT).toContain(scoped)
     expect(STYLE_TEXT).toContain('border-top-left-radius: 0')
     expect(STYLE_TEXT).toContain('border-top-right-radius: 0')
-    // Junction cover: pointer-events none overlay striped with the shared surface.
-    expect(STYLE_TEXT).toContain(`${scoped}::before`)
-    expect(STYLE_TEXT).toMatch(/\[data-composer-card\]::before \{[^}]*background: var\(--dsw-specific-input-major\)/)
-    // Junction cover stays tiny: at most 4px, no fake-gap band.
-    expect(STYLE_TEXT).toMatch(/\[data-composer-card\]::before \{[^}]*height: 3px/)
-    expect(STYLE_TEXT).not.toMatch(/height: 56px/)
-    expect(STYLE_TEXT).toMatch(/\[data-composer-card\]::before \{[^}]*pointer-events: none/)
-    // No standalone (unscoped) card mutation, so the transcript card and any
-    // other composer stay unaffected.
-    const cardRule = /^\[data-composer-card\] \{/m
-    expect(cardRule.test(STYLE_TEXT)).toBe(false)
+    // Connected mode drops the card's native elevation entirely and uses no
+    // junction pseudo-element, so both halves share one borderless edge.
+    const block = STYLE_TEXT.slice(STYLE_TEXT.indexOf(scoped), STYLE_TEXT.indexOf('}', STYLE_TEXT.indexOf(scoped)))
+    expect(block).toContain('box-shadow: none')
+    expect(STYLE_TEXT).not.toContain('[data-composer-card]::before')
+    // No standalone (unscoped) card mutation: normal composers keep their native elevation.
+    expect(/^\[data-composer-card\] \{/m.test(STYLE_TEXT)).toBe(false)
+  })
+
+  it('keeps the expanded panel compact', () => {
+    expect(STYLE_TEXT).toMatch(/\.dsh-endeavour-header \{[^}]*height: 32px/)
+    expect(STYLE_TEXT).toMatch(/\.dsh-endeavour-row \{[^}]*min-height: 27px/)
+    expect(STYLE_TEXT).toMatch(/\.dsh-endeavour-rows \{[^}]*gap: 2px/)
+    expect(STYLE_TEXT).toMatch(/\.dsh-endeavour-dock-panel \{[^}]*padding: 1px 0 1px/)
   })
 
   it('carries working motion, a distinct finished glyph, and reduced-motion off-switch', () => {

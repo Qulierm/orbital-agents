@@ -43,15 +43,16 @@ const otherOccupant = (label, height) => (
   </div>
 )
 
-/** Native composer context: seat, occupants, PlanDock last, then InputBar. */
-const composer = (data) => (
+/** Native composer context: seat, occupants, PlanDock last, then InputBar.
+    withDock=false renders a normal composer that must keep native elevation. */
+const composer = (data, withDock = true) => (
   <div data-composer-seat style={{
     display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 'var(--dsh-composer-stack-gap)',
     fontFamily: 'Inter, system-ui, sans-serif',
   }}>
     {otherOccupant('todo strip (native order 0)', 36)}
     {otherOccupant('cost strip (order 5)', 22)}
-    {dock(data)}
+    {withDock ? dock(data) : null}
     <div style={{ boxSizing: 'border-box', width: '100%', padding: '0 var(--dsh-composer-side-clearance)' }}>
       <div data-composer-card className="fixture-composer-card">Message or run a task, / commands, @ files or sessions</div>
     </div>
@@ -85,6 +86,8 @@ const fixture = () => (
     <div style={{ width: 1280, margin: '0 auto' }}>{composer(active)}</div>
     <div style={{ color: '#8a8f98', fontSize: 12, textAlign: 'center' }}>narrow composer — active plan (expanded)</div>
     <div style={{ width: 640, margin: '0 auto' }}>{composer(active)}</div>
+    <div style={{ color: '#8a8f98', fontSize: 12, textAlign: 'center' }}>normal composer — no plan dock (native elevation preserved)</div>
+    <div style={{ width: 1280, margin: '0 auto' }}>{composer(active, false)}</div>
   </div>
 )
 
