@@ -45,12 +45,13 @@ interface ClientServices {
     }
   }
   readonly remote?: { readonly session?: { modelCatalog(): Promise<unknown> } }
+  readonly [serviceName: string]: unknown
   readonly locale: { register(ns: string, dictionaries: { zh: Record<string, string>; en: Record<string, string> }): () => void }
   effect(callback: () => (() => void) | void, label?: string): void
 }
 
 /** Required services: conversation nodes, slots, addressed sessions, copy. */
-export const inject = ['uiConversation', 'slots', 'sessions', 'locale', 'uiWorkspace', 'settingsScope', 'remote']
+export const inject = ['uiConversation', 'slots', 'sessions', 'locale', 'uiWorkspace', 'settingsScope', 'remote', 'remote.session']
 
 /**
  * Register the Definition, the transcript card, and the composer dock. Plans
@@ -98,15 +99,21 @@ export function apply(ctx: ClientContext): void {
     else await scope.set('maxTokens', next.maxTokens)
   }
   const loadCatalog = async (): Promise<ModelCatalog> => {
-    const session = client.remote?.session
+    // The controller is reachable as ctx.remote.session; some deployments keep
+    // the dotted service name directly, so both access paths are tried.
+    const dotted = (client as { 'remote.session'?: { modelCatalog?: () => Promise<unknown> } })['remote.session']
+    const session = client.remote?.session ?? (typeof dotted?.modelCatalog === 'function' ? dotted : undefined)
     if (session === undefined || typeof session.modelCatalog !== 'function') {
       throw new Error('model catalog is unavailable')
     }
-    const result = await session.modelCatalog() as { ok?: boolean; value?: ModelCatalog; error?: unknown } | ModelCatalog
-    if ((result as { ok?: boolean }).ok === false) {
-      throw new Error(String((result as { error?: unknown }).error ?? 'model catalog failed'))
+    const raw = await session.modelCatalog() as { ok?: boolean; value?: ModelCatalog; error?: unknown; type?: string } | ModelCatalog
+    if ((raw as { ok?: boolean }).ok === false) {
+      throw new Error(String((raw as { error?: unknown }).error ?? 'model catalog failed'))
     }
-    return ((result as { value?: ModelCatalog }).value ?? result) as ModelCatalog
+    const unwrapped = (raw as { value?: ModelCatalog }).value ?? raw
+    const catalog = ((unwrapped as { value?: ModelCatalog }).value ?? unwrapped) as ModelCatalog
+    if (!Array.isArray(catalog.groups)) throw new Error('model catalog response had no groups')
+    return catalog
   }
   const builderRoute: BuilderRouteController = { readSettings, writeSettings, loadCatalog }
 

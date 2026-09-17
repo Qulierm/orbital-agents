@@ -255,7 +255,7 @@ export function BuilderRouteControl(props: BuilderRouteControlProps): React.Reac
           {catalog.kind === 'loading' ? <div style={{ padding: '6px 8px', fontSize: 12 }}>{copy('builder.loading')}</div> : null}
           {catalog.kind === 'error' ? (
             <div style={{ padding: '6px 8px', fontSize: 12, display: 'flex', gap: 8, alignItems: 'center' }}>
-              <span>{copy('builder.error')}</span>
+              <span title={catalog.message}>{copy('builder.error')}</span>
               <button type="button" className={CLASS.ghost} onClick={loadCatalog}>{copy('builder.retry')}</button>
             </div>
           ) : null}
