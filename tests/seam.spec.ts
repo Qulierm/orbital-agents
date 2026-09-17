@@ -49,9 +49,9 @@ describe('seam pixel checker', () => {
 
   it('rejects a positive layout gap between dock bottom and card top', () => {
     const clean = image(60, 20, () => SURFACE)
-    const result = checkSeam(decodePng(encodePng(60, 20, clean)), { x: 0, y: 10, w: 60, page: PAGE, surface: SURFACE, dockBottom: 14 })
-    expect(result.failures.some((failure) => failure.includes('positive gap'))).toBe(true)
-    const overlapping = checkSeam(decodePng(encodePng(60, 20, clean)), { x: 0, y: 10, w: 60, page: PAGE, surface: SURFACE, dockBottom: 8 })
+    const gap = checkSeam(decodePng(encodePng(60, 20, clean)), { x: 0, y: 10, w: 60, page: PAGE, surface: SURFACE, dockBottom: 6 })
+    expect(gap.failures.some((failure) => failure.includes('positive gap'))).toBe(true)
+    const overlapping = checkSeam(decodePng(encodePng(60, 20, clean)), { x: 0, y: 10, w: 60, page: PAGE, surface: SURFACE, dockBottom: 14 })
     expect(overlapping.failures).toEqual([])
   })
 

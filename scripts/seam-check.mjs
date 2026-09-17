@@ -131,9 +131,10 @@ export function checkSeam(image, options) {
   const failures = []
   let pagePixels = 0
   let bandSamples = 0
-  // Positive layout gap: the dock must reach (overlap) the composer card top.
-  if (typeof options.dockBottom === 'number' && options.dockBottom > y) {
-    failures.push(`layout: positive gap of ${String(options.dockBottom - y)}px between the dock bottom and the composer card top`)
+  // Positive layout gap: the dock's bottom edge must reach or pass the card
+  // top. A dock bottom above the card top leaves page background between them.
+  if (typeof options.dockBottom === 'number' && options.dockBottom < y) {
+    failures.push(`layout: positive gap of ${String(y - options.dockBottom)}px between the dock bottom and the composer card top`)
   }
   const pixel = (px, py) => {
     const index = (py * image.width + px) * 4
@@ -188,6 +189,7 @@ if (invokedDirectly) {
     page: numbers(arg('--page'), undefined),
     surface: numbers(arg('--surface'), undefined),
     tolerance: Number(arg('--tolerance', '14')),
+    dockBottom: arg('--dock-bottom') === undefined ? undefined : Number(arg('--dock-bottom')),
   })
   console.log(`seam-check: ${result.failures.length === 0 ? 'PASS' : 'FAIL'} ${png} (${String(image.width)}x${String(image.height)}; ${String(result.stats.bandSamples)} samples, ${String(result.stats.pagePixels)} page pixels)`)
   for (const failure of result.failures) console.log(`  ${failure}`)
