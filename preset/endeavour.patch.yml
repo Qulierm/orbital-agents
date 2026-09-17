@@ -1,0 +1,15 @@
+# Endeavour custom preset overlay (stable DSH 0.1.5-rc.2 family).
+#
+# The preset is an overlay patch on top of the standard desktop profile:
+# the profile keeps its existing bundle order and this patch appends the
+# scoped Endeavour runtime row. Apply it with the Desktop profile's patch
+# mechanism (or add `dsh-endeavour` to `dsh.profile.bundles`) after the
+# package is installed from the tarball.
+#
+# Scoped roles:
+# - Endeavour persona:  lib/prompts/endeavour.md (planner role)
+# - Builder persona:    lib/prompts/builder.md   (passed per child via
+#   `builderPersona`, defaults to the packaged Builder prompt)
+- insert:
+    - id: endeavour
+      name: dsh-endeavour

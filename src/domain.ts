@@ -1,0 +1,344 @@
+/**
+ * Endeavour plan domain: strongly typed ids, whole-value checkpoint events, the
+ * legal four-state task machine, and pure transition functions.
+ *
+ * Every durable event carries the complete plan snapshot (`plan`) plus the
+ * transition that produced it, so tail replay only needs the newest event and
+ * a truncated log never yields a half-folded plan.
+ */
+
+/** Durable identity of one Endeavour plan. */
+export type PlanId = string & { readonly __brand: 'PlanId' }
+/** Durable identity of one plan task. */
+export type TaskId = string & { readonly __brand: 'TaskId' }
+
+/** Brand a raw string as a {@link PlanId}. */
+export function PlanId(value: string): PlanId {
+  return value as PlanId
+}
+
+/** Brand a raw string as a {@link TaskId}. */
+export function TaskId(value: string): TaskId {
+  return value as TaskId
+}
+
+/** The exact four user-visible task states. */
+export type TaskStatus = 'waiting' | 'running' | 'succeeded' | 'failed'
+
+/** Russian status phrases the client locale surface renders. */
+export const TASK_STATUS_PHRASES: Readonly<Record<TaskStatus, string>> = {
+  waiting: 'Ожидает начала',
+  running: 'Выполняется',
+  succeeded: 'Выполнился успешно',
+  failed: 'Не выполнился',
+}
+
+/** Terminal plan outcome. */
+export type PlanOutcome = 'completed' | 'failed'
+
+/** The short projection of a task that the user sees on the card. */
+export interface TaskDisplay {
+  /** Short user-visible title. */
+  readonly title: string
+}
+
+/**
+ * The detailed projection of a task. It is stored in the durable plan for the
+ * Builder and the verification seam, and MUST NOT be rendered by the card.
+ */
+export interface TaskExecution {
+  /** Full instructions for the Builder. */
+  readonly instructions: string
+  /** Acceptance criteria the Builder must validate against. */
+  readonly validation: string
+  /** Optional execution constraints carried into the Builder brief. */
+  readonly constraints?: string
+}
+
+/** One planned task: a public title plus a private execution projection. */
+export interface TaskSpec {
+  readonly id: TaskId
+  readonly display: TaskDisplay
+  readonly execution: TaskExecution
+}
+
+/** Structured evidence submitted by the Builder. */
+export interface TaskReport {
+  readonly summary: string
+  readonly files: readonly string[]
+  readonly validation: string
+  readonly blocker?: string
+  readonly failure?: string
+  /** Durable event time of the report. */
+  readonly reportedAt: number
+}
+
+/** Durable state of one task. */
+export interface TaskState {
+  readonly spec: TaskSpec
+  readonly status: TaskStatus
+  /** Set by the Builder's explicit start, never by Endeavour. */
+  readonly startedAt?: number
+  /** Set when Endeavour records the terminal outcome. */
+  readonly finishedAt?: number
+  readonly report?: TaskReport
+  /** Short verification or failure note shown on the card. */
+  readonly note?: string
+}
+
+/** Durable lifecycle of one plan. */
+export interface PlanState {
+  readonly planId: PlanId
+  /** Root/Endeavour session that owns the plan events. */
+  readonly rootSessionId: string
+  /** The single continuable Builder child. */
+  readonly childId: string
+  /** Short plan title shown on the card. */
+  readonly title: string
+  readonly createdAt: number
+  readonly updatedAt: number
+  /** Monotonic event sequence within the plan. */
+  readonly sequence: number
+  readonly tasks: readonly TaskState[]
+  readonly terminal?: {
+    readonly outcome: PlanOutcome
+    readonly at: number
+    readonly note?: string
+  }
+}
+
+/** Transition kinds persisted inside every checkpoint payload. */
+export type PlanEventKind =
+  | 'plan-created'
+  | 'task-started'
+  | 'task-reported'
+  | 'task-verified'
+  | 'plan-finalized'
+
+/** The durable payload appended to the root session for every mutation. */
+export interface PlanEventPayload {
+  readonly kind: PlanEventKind
+  readonly at: number
+  readonly plan: PlanState
+}
+
+/** Error codes for rejected transitions and authorization failures. */
+export type EndeavourErrorCode =
+  | 'transition-invalid'
+  | 'task-unknown'
+  | 'task-not-current'
+  | 'plan-active'
+  | 'plan-terminal'
+  | 'role-forbidden'
+  | 'lineage-mismatch'
+  | 'report-duplicate'
+
+/** Typed failure for rejected plan operations. */
+export class EndeavourError extends Error {
+  override readonly name = 'EndeavourError'
+  constructor(readonly code: EndeavourErrorCode, message: string) {
+    super(message)
+  }
+}
+
+/** Build the initial plan snapshot for a freshly created plan. */
+export function createPlanState(input: {
+  readonly planId: PlanId
+  readonly rootSessionId: string
+  readonly childId: string
+  readonly title: string
+  readonly tasks: readonly TaskSpec[]
+  readonly at: number
+}): PlanState {
+  if (input.tasks.length === 0) {
+    throw new EndeavourError('transition-invalid', 'a plan needs at least one task')
+  }
+  const ids = new Set<string>()
+  for (const task of input.tasks) {
+    if (ids.has(task.id)) {
+      throw new EndeavourError('transition-invalid', `duplicate task id ${task.id}`)
+    }
+    ids.add(task.id)
+    if (task.display.title.trim() === '') {
+      throw new EndeavourError('transition-invalid', `task ${task.id} has an empty display title`)
+    }
+    if (task.execution.instructions.trim() === '') {
+      throw new EndeavourError('transition-invalid', `task ${task.id} has empty instructions`)
+    }
+    if (task.execution.validation.trim() === '') {
+      throw new EndeavourError('transition-invalid', `task ${task.id} has empty validation`)
+    }
+  }
+  return {
+    planId: input.planId,
+    rootSessionId: input.rootSessionId,
+    childId: input.childId,
+    title: input.title,
+    createdAt: input.at,
+    updatedAt: input.at,
+    sequence: 0,
+    tasks: input.tasks.map((spec) => ({ spec, status: 'waiting' as const })),
+  }
+}
+
+function replaceTask(plan: PlanState, taskId: TaskId, update: (task: TaskState) => TaskState): PlanState {
+  const index = plan.tasks.findIndex((task) => task.spec.id === taskId)
+  if (index < 0) throw new EndeavourError('task-unknown', `unknown task ${taskId}`)
+  const tasks = plan.tasks.map((task, at) => (at === index ? update(task) : task))
+  return { ...plan, tasks }
+}
+
+function assertActive(plan: PlanState): void {
+  if (plan.terminal !== undefined) {
+    throw new EndeavourError('plan-terminal', `plan ${plan.planId} is ${plan.terminal.outcome}`)
+  }
+}
+
+/** The first task that has not reached a terminal state, in plan order. */
+export function currentTask(plan: PlanState): TaskState | undefined {
+  return plan.tasks.find((task) => task.status !== 'succeeded' && task.status !== 'failed')
+}
+
+/** Index of the current eligible task, or -1. */
+export function currentTaskIndex(plan: PlanState): number {
+  return plan.tasks.findIndex((task) => task.status !== 'succeeded' && task.status !== 'failed')
+}
+
+/**
+ * Start the current task. Legal only from `waiting` on the first non-terminal
+ * task; duplicates and out-of-order starts are rejected.
+ */
+export function startTask(plan: PlanState, taskId: TaskId, at: number): PlanState {
+  assertActive(plan)
+  const current = currentTask(plan)
+  if (current === undefined || current.spec.id !== taskId) {
+    throw new EndeavourError('task-not-current', `task ${taskId} is not the current eligible task`)
+  }
+  if (current.status !== 'waiting') {
+    throw new EndeavourError('transition-invalid', `task ${taskId} is already ${current.status}`)
+  }
+  return {
+    ...replaceTask(plan, taskId, (task) => ({ ...task, status: 'running', startedAt: at })),
+    updatedAt: at,
+  }
+}
+
+/**
+ * Submit the Builder's structured report. Legal only from `running`; the public
+ * row stays running while Endeavour checks, and the report is evidence only.
+ */
+export function reportTask(plan: PlanState, taskId: TaskId, report: Omit<TaskReport, 'reportedAt'>, at: number): PlanState {
+  assertActive(plan)
+  const task = plan.tasks.find((candidate) => candidate.spec.id === taskId)
+  if (task === undefined) throw new EndeavourError('task-unknown', `unknown task ${taskId}`)
+  if (task.status === 'waiting') {
+    throw new EndeavourError('transition-invalid', `task ${taskId} has not started`)
+  }
+  if (task.status !== 'running') {
+    throw new EndeavourError('report-duplicate', `task ${taskId} already has a terminal outcome`)
+  }
+  if (task.report !== undefined) {
+    throw new EndeavourError('report-duplicate', `task ${taskId} already reported`)
+  }
+  return {
+    ...replaceTask(plan, taskId, (state) => ({ ...state, report: { ...report, reportedAt: at } })),
+    updatedAt: at,
+  }
+}
+
+/**
+ * Record Endeavour's quick-check verdict. Legal only from `running` with a
+ * submitted report. Freezes the duration at `at` and finalizes the plan when
+ * the last task succeeds or any task fails.
+ */
+export function verifyTask(
+  plan: PlanState,
+  taskId: TaskId,
+  outcome: 'succeeded' | 'failed',
+  note: string | undefined,
+  at: number,
+): PlanState {
+  assertActive(plan)
+  const task = plan.tasks.find((candidate) => candidate.spec.id === taskId)
+  if (task === undefined) throw new EndeavourError('task-unknown', `unknown task ${taskId}`)
+  if (task.report === undefined) {
+    throw new EndeavourError('transition-invalid', `task ${taskId} has no submitted report`)
+  }
+  if (task.status !== 'running') {
+    throw new EndeavourError('transition-invalid', `task ${taskId} is already ${task.status}`)
+  }
+  const withVerdict = replaceTask(plan, taskId, (state) => ({
+    ...state,
+    status: outcome,
+    finishedAt: at,
+    ...(note === undefined ? {} : { note }),
+  }))
+  const allSucceeded = withVerdict.tasks.every((state) => state.status === 'succeeded')
+  const failed = withVerdict.tasks.some((state) => state.status === 'failed')
+  const terminal = outcome === 'failed'
+    ? { outcome: 'failed' as const, at, ...(note === undefined ? {} : { note }) }
+    : allSucceeded
+      ? { outcome: 'completed' as const, at }
+      : undefined
+  return {
+    ...withVerdict,
+    updatedAt: at,
+    ...(terminal === undefined ? {} : { terminal }),
+  }
+}
+
+/** Task states that need a Builder continuation, i.e. the next detailed brief. */
+export function nextDispatch(plan: PlanState, taskId: TaskId): TaskSpec | undefined {
+  if (plan.terminal !== undefined) return undefined
+  const index = plan.tasks.findIndex((state) => state.spec.id === taskId)
+  if (index < 0) return undefined
+  return plan.tasks[index + 1]?.spec
+}
+
+/** Live or frozen duration of one task, in milliseconds. */
+export function taskDurationMs(task: TaskState, now: number): number | undefined {
+  if (task.startedAt === undefined) return undefined
+  return Math.max(0, (task.finishedAt ?? now) - task.startedAt)
+}
+
+/** Public status mapping: an internal report awaiting verification stays running. */
+export function publicTaskStatus(task: TaskState): TaskStatus {
+  return task.status
+}
+
+/** Rebuild the newest plan snapshot from a replayed event tail. */
+export function foldPlanEvents(events: readonly PlanEventPayload[]): PlanState | undefined {
+  let newest: PlanState | undefined
+  for (const event of events) {
+    if (newest === undefined || event.plan.sequence >= newest.sequence) newest = event.plan
+  }
+  return newest
+}
+
+/** Build the checkpoint payload appended for one transition. */
+export function planEventPayload(kind: PlanEventKind, previous: PlanState | undefined, plan: PlanState, at: number): PlanEventPayload {
+  return {
+    kind,
+    at,
+    plan: { ...plan, sequence: (previous?.sequence ?? 0) + 1, updatedAt: at },
+  }
+}
+
+/** Authorization helpers -------------------------------------------------- */
+
+/** Accept only the plan's owning root session. */
+export function assertRootRole(plan: PlanState, sessionId: string): void {
+  if (plan.rootSessionId !== sessionId) {
+    throw new EndeavourError('role-forbidden', `session ${sessionId} is not the plan root`)
+  }
+}
+
+/** Accept only the exact continuable child under its exact direct parent. */
+export function assertChildRole(plan: PlanState, sessionId: string, parentSessionId: string | undefined): void {
+  if (plan.childId !== sessionId) {
+    throw new EndeavourError('lineage-mismatch', `session ${sessionId} is not the plan Builder child`)
+  }
+  if (parentSessionId === undefined || plan.rootSessionId !== parentSessionId) {
+    throw new EndeavourError('lineage-mismatch', 'Builder session is not a direct child of the plan root')
+  }
+}
