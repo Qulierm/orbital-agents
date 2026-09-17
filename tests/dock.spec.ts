@@ -10,7 +10,7 @@ import { describe, expect, it } from 'vitest'
 import { en, formatEnglish } from '../src/client/locales.js'
 import { builderAddress, copyFrom } from '../src/client/PlanCard.js'
 import { PLAN_DOCK_ID, PLAN_DOCK_ORDER, PlanDock, registerPlanDock } from '../src/client/PlanDock.js'
-import { PlanView } from '../src/client/PlanView.js'
+import { initialCollapsed, PlanView, shouldAutoCollapse } from '../src/client/PlanView.js'
 import { CLASS, ensurePlanStyles, STYLE_ELEMENT_ID, STYLE_TEXT } from '../src/client/styles.js'
 import type { EndeavourCardData } from '../src/plan-projection.js'
 
@@ -49,7 +49,12 @@ describe('composer plan dock', () => {
     expect(calls.injected).toBe('conversation.input.dock')
     expect(calls.options?.name).toBe('conversation.input.dock')
     expect(calls.options?.id).toBe(PLAN_DOCK_ID)
-    expect(Number(calls.options?.order)).toBeLessThan(0)
+    // Last occupant before InputBar: a deliberate very-high finite order above
+    // dsh-cost-meter (5) and native todo (0); sorting stays stable.
+    expect(Number(calls.options?.order)).toBe(PLAN_DOCK_ORDER)
+    expect(PLAN_DOCK_ORDER).toBeGreaterThan(5)
+    expect(PLAN_DOCK_ORDER).toBeGreaterThan(0)
+    expect(Number.isFinite(PLAN_DOCK_ORDER)).toBe(true)
     expect(typeof calls.options?.inject).toBe('function')
     expect((calls.options?.inject as () => unknown)()).toEqual({ openBuilder: expect.any(Function) })
   })
@@ -109,6 +114,40 @@ describe('composer plan dock', () => {
   })
 })
 
+
+describe('plan collapse lifecycle', () => {
+  it('starts completed plans collapsed and active or failed plans expanded', () => {
+    expect(initialCollapsed(true)).toBe(true)
+    expect(initialCollapsed(false)).toBe(false)
+  })
+
+  it('auto-collapses once on a terminal transition and persists a manual reopen', () => {
+    // Transition to completed: collapse exactly once.
+    expect(shouldAutoCollapse(false, true, false)).toBe(true)
+    // Settled terminal state no longer collapses (manual reopen stays open).
+    expect(shouldAutoCollapse(true, true, true)).toBe(false)
+    // Repeated renders while terminal never trigger another collapse.
+    expect(shouldAutoCollapse(true, true, false)).toBe(false)
+    // Active and failed plans never auto-collapse.
+    expect(shouldAutoCollapse(false, false, false)).toBe(false)
+  })
+
+  it('renders collapsed markup for a completed plan and rows for an active plan', () => {
+    const completed: EndeavourCardData = {
+      ...planData,
+      tasks: planData.tasks.map((task) => ({ ...task, status: 'succeeded', stage: 'confirmed' as const })),
+      completedCount: planData.total,
+      terminal: { outcome: 'completed', at: 1 },
+    }
+    const collapsedHtml = renderDock(completed)
+    expect(collapsedHtml).toContain('4 / 4 confirmed')
+    expect(collapsedHtml).not.toContain(CLASS.rows)
+    expect(collapsedHtml).toContain(CLASS.ghost)
+    const activeHtml = renderDock(planData)
+    expect(activeHtml).toContain(CLASS.rows)
+  })
+})
+
 describe('attached composer stylesheet', () => {
   it('matches the InputBar width axis exactly (no dock inset)', () => {
     expect(STYLE_TEXT).toContain('var(--dsh-composer-side-clearance)')
@@ -120,9 +159,12 @@ describe('attached composer stylesheet', () => {
   it('uses the composer input surface, stroke, radius, and elevation', () => {
     expect(STYLE_TEXT).toContain('background: var(--dsw-specific-input-major)')
     expect(STYLE_TEXT).toContain('border-radius: 22px 22px 0 0')
-    expect(STYLE_TEXT).toContain('var(--dsw-alias-border-l2)')
-    expect(STYLE_TEXT).toContain('var(--dsw-elevation-soft)')
-    expect(STYLE_TEXT).toContain('border-bottom: none')
+    // Borderless like the input: no dock stroke token, no panel stroke
+    // overlay, no independent elevation on the dock (the composer keeps its own).
+    expect(STYLE_TEXT).not.toContain('var(--dsw-alias-border-l2)')
+    expect(STYLE_TEXT).not.toContain('.dsh-endeavour-dock-panel::after')
+    expect(STYLE_TEXT).not.toMatch(/\.dsh-endeavour-dock-panel \{[^}]*box-shadow/)
+    expect(STYLE_TEXT).not.toContain('.dsh-endeavour-dock-wrap::after')
     // The standalone transcript card keeps its own surface.
     expect(STYLE_TEXT).toContain('background: var(--dsw-specific-tip)')
     expect(STYLE_TEXT).not.toContain('--dsw-text-primary')
@@ -131,14 +173,12 @@ describe('attached composer stylesheet', () => {
 
 
 
-  it('fills the composer layout gap with the shared surface behind the card', () => {
-    // The docking wrapper is a positioning context and paints the surface band
-    // below itself, so the real composer offset cannot show page background.
-    expect(STYLE_TEXT).toMatch(/\.dsh-endeavour-dock-wrap \{[^}]*position: relative/)
-    expect(STYLE_TEXT).toContain('.dsh-endeavour-dock-wrap::after')
-    expect(STYLE_TEXT).toMatch(/\.dsh-endeavour-dock-wrap::after \{[^}]*top: 100%/)
-    expect(STYLE_TEXT).toMatch(/\.dsh-endeavour-dock-wrap::after \{[^}]*background: var\(--dsw-specific-input-major\)/)
-    expect(STYLE_TEXT).toMatch(/\.dsh-endeavour-dock-wrap::after \{[^}]*pointer-events: none/)
+
+  it('keeps the expanded panel compact', () => {
+    expect(STYLE_TEXT).toMatch(/\.dsh-endeavour-header \{[^}]*height: 32px/)
+    expect(STYLE_TEXT).toMatch(/\.dsh-endeavour-row \{[^}]*min-height: 27px/)
+    expect(STYLE_TEXT).toMatch(/\.dsh-endeavour-rows \{[^}]*gap: 2px/)
+    expect(STYLE_TEXT).toMatch(/\.dsh-endeavour-dock-panel \{[^}]*padding: 1px 0 1px/)
   })
 
   it('connects the junction through the stable composer anchors only', () => {
@@ -149,6 +189,9 @@ describe('attached composer stylesheet', () => {
     // Junction cover: pointer-events none overlay striped with the shared surface.
     expect(STYLE_TEXT).toContain(`${scoped}::before`)
     expect(STYLE_TEXT).toMatch(/\[data-composer-card\]::before \{[^}]*background: var\(--dsw-specific-input-major\)/)
+    // Junction cover stays tiny: at most 4px, no fake-gap band.
+    expect(STYLE_TEXT).toMatch(/\[data-composer-card\]::before \{[^}]*height: 3px/)
+    expect(STYLE_TEXT).not.toMatch(/height: 56px/)
     expect(STYLE_TEXT).toMatch(/\[data-composer-card\]::before \{[^}]*pointer-events: none/)
     // No standalone (unscoped) card mutation, so the transcript card and any
     // other composer stay unaffected.

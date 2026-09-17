@@ -60,31 +60,13 @@ export const STYLE_TEXT = `
   position: relative;
   overflow: hidden;
   width: 100%;
-  padding: 2px 0 6px;
+  padding: 1px 0 1px;
   border-radius: 22px 22px 0 0;
   background: var(--dsw-specific-input-major);
   color: var(--dsw-alias-label-primary);
-  --dsw-elevation-stroke-color: var(--dsw-alias-border-l2);
-  box-shadow: var(--dsw-elevation-soft);
   --dsh-scrollbar-thumb: var(--dsw-alias-scrollbar-bg-l2);
   --dsh-scrollbar-thumb-hover: var(--dsw-alias-scrollbar-hover-l2);
 }
-/* Gap fill: the composer's layout keeps a vertical offset between the dock slot
-   and the composer root, so the two surfaces would read as separated cards with
-   page background between them. This band paints the shared surface from the
-   dock's bottom edge down behind the composer card (the later sibling paints
-   over it), closing the gap without clipping overlays or mutating the DOM. */
-.dsh-endeavour-dock-wrap::after {
-  content: '';
-  position: absolute;
-  left: 0;
-  right: 0;
-  top: 100%;
-  height: 56px;
-  background: var(--dsw-specific-input-major);
-  pointer-events: none;
-}
-
 /* Connected junction (only while our dock is mounted in the same composer
    seat): square the composer card's top corners so its curved transparent
    outside no longer exposes the page, and cover the junction band above the
@@ -101,21 +83,12 @@ export const STYLE_TEXT = `
   position: absolute;
   left: 0;
   right: 0;
-  top: -4px;
-  height: 4px;
+  top: -3px;
+  height: 3px;
   background: var(--dsw-specific-input-major);
   pointer-events: none;
 }
 
-.dsh-endeavour-dock-panel::after {
-  position: absolute;
-  inset: 0;
-  border: 0.5px solid var(--dsw-alias-border-l2);
-  border-bottom: none;
-  border-radius: inherit;
-  content: '';
-  pointer-events: none;
-}
 .dsh-endeavour-card {
   box-sizing: border-box;
   width: 100%;
@@ -132,8 +105,8 @@ export const STYLE_TEXT = `
   align-items: center;
   gap: 10px;
   width: 100%;
-  height: 36px;
-  padding: 4px 12px;
+  height: 32px;
+  padding: 2px 12px;
   color: var(--dsw-alias-label-primary);
   font-size: 13px;
   line-height: 24px;
@@ -188,11 +161,11 @@ export const STYLE_TEXT = `
 .dsh-endeavour-rows {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 2px;
   margin: 0;
   padding: 0 12px;
   list-style: none;
-  max-height: 180px;
+  max-height: 160px;
   overflow-y: auto;
 }
 .dsh-endeavour-row {
@@ -200,7 +173,7 @@ export const STYLE_TEXT = `
   align-items: center;
   gap: 10px;
   min-width: 0;
-  min-height: 32px;
+  min-height: 27px;
   padding: 0 6px;
   border-radius: 8px;
   color: var(--dsw-alias-label-secondary);

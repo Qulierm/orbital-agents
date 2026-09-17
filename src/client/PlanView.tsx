@@ -6,7 +6,7 @@
  * because the card data type does not carry them.
  */
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { EndeavourCardData, EndeavourCardTask, TaskStage } from '../plan-projection.js'
 import type { EndeavourKey } from './locales.js'
 import { CLASS } from './styles.js'
@@ -21,6 +21,23 @@ export interface PlanViewProps {
   readonly onOpenBuilder: () => void
   /** `dock` attaches above the composer; `card` is the transcript card. */
   readonly variant?: 'card' | 'dock'
+}
+
+/**
+ * Initial collapse state: a plan that is already successfully terminal when
+ * mounted starts collapsed; active and failed plans start expanded.
+ */
+export function initialCollapsed(terminalCompleted: boolean): boolean {
+  return terminalCompleted
+}
+
+/**
+ * Whether a terminal transition should auto-collapse exactly once. A manual
+ * re-expand afterwards stays open because the transition is consumed here and
+ * the settled terminal flag no longer triggers a collapse.
+ */
+export function shouldAutoCollapse(previousTerminal: boolean, terminal: boolean, autoCollapsed: boolean): boolean {
+  return terminal && !previousTerminal && !autoCollapsed
 }
 
 /** Format milliseconds as mm:ss, clamped at zero. */
@@ -118,7 +135,17 @@ function StageGlyph({ stage }: { stage: TaskStage }) {
 export function PlanView(props: PlanViewProps): React.ReactElement | null {
   const { data, copy, onOpenBuilder, variant = 'card' } = props
   const [now, setNow] = useState(() => Date.now())
-  const [collapsed, setCollapsed] = useState(false)
+  const terminalCompleted = data.terminal?.outcome === 'completed'
+  const [collapsed, setCollapsed] = useState(() => initialCollapsed(terminalCompleted))
+  const previousTerminal = useRef(terminalCompleted)
+  const autoCollapsed = useRef(terminalCompleted)
+  useEffect(() => {
+    if (shouldAutoCollapse(previousTerminal.current, terminalCompleted, autoCollapsed.current)) {
+      autoCollapsed.current = true
+      setCollapsed(true)
+    }
+    previousTerminal.current = terminalCompleted
+  }, [terminalCompleted])
   const active = data.tasks.some((task) => task.stage === 'working')
   useEffect(() => {
     if (!active) return undefined

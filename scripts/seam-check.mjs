@@ -131,6 +131,10 @@ export function checkSeam(image, options) {
   const failures = []
   let pagePixels = 0
   let bandSamples = 0
+  // Positive layout gap: the dock must reach (overlap) the composer card top.
+  if (typeof options.dockBottom === 'number' && options.dockBottom > y) {
+    failures.push(`layout: positive gap of ${String(options.dockBottom - y)}px between the dock bottom and the composer card top`)
+  }
   const pixel = (px, py) => {
     const index = (py * image.width + px) * 4
     return [image.rgba[index], image.rgba[index + 1], image.rgba[index + 2], image.rgba[index + 3]]

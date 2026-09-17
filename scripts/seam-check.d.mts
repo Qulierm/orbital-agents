@@ -11,5 +11,6 @@ export function checkSeam(
     page?: number[]
     surface?: number[]
     tolerance?: number
+    dockBottom?: number
   },
 ): { failures: string[]; stats: { pagePixels: number; bandSamples: number } }

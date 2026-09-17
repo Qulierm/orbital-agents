@@ -43,9 +43,15 @@ export function PlanDock(props: PlanDockProps): React.ReactElement | null {
   )
 }
 
-/** Stable dock id and order (before the built-in todo dock at order 0). */
+/**
+ * Stable dock id and deliberate very-high finite order: the plan dock is the
+ * attached-to-composer surface, so it must be the LAST `conversation.input.dock`
+ * occupant before InputBar. Native todo (0) and third-party strips such as
+ * dsh-cost-meter (5) sort above it and can never render between the dock and
+ * the composer. Sorting stays stable.
+ */
 export const PLAN_DOCK_ID = 'endeavour-plan'
-export const PLAN_DOCK_ORDER = -1
+export const PLAN_DOCK_ORDER = 1000
 
 /** Registers the composer plan dock with the shared injected navigation. */
 export function registerPlanDock(slots: {
