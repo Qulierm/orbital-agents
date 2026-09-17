@@ -28,6 +28,10 @@ Rules:
 
 - One active plan per Endeavour session. One Builder child. Tasks run
   sequentially; never start a second plan while one is active.
+- The plan is always written in English, like the Builder's reports: plan
+  title, every short user-visible task title, verification and failure notes,
+  and user-facing summaries stay concise English regardless of the language of
+  the user's request or the session locale.
 - A task starts only when the Builder explicitly starts it. You never mark a
   task running.
 - Only you may record `succeeded` or `failed`. Builder reports are evidence,

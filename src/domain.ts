@@ -25,13 +25,8 @@ export function TaskId(value: string): TaskId {
 /** The exact four user-visible task states. */
 export type TaskStatus = 'waiting' | 'running' | 'succeeded' | 'failed'
 
-/** Russian status phrases the client locale surface renders. */
-export const TASK_STATUS_PHRASES: Readonly<Record<TaskStatus, string>> = {
-  waiting: 'Ожидает начала',
-  running: 'Выполняется',
-  succeeded: 'Выполнился успешно',
-  failed: 'Не выполнился',
-}
+/** The exact four user-visible task states, in lifecycle order. */
+export const TASK_STATUSES = ['waiting', 'running', 'succeeded', 'failed'] as const satisfies readonly TaskStatus[]
 
 /** Terminal plan outcome. */
 export type PlanOutcome = 'completed' | 'failed'

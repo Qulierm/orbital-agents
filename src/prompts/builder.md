@@ -18,6 +18,10 @@ Rules:
 
 - Execute only the task that is currently running. Do not start tasks out of
   order, do not submit duplicate reports, and do not skip validation.
+- Write every report in English so Endeavour can verify it consistently:
+  summary, validation text, and notes stay concise English regardless of the
+  task's request language. Code identifiers, file names, and verbatim command
+  output are exempt and stay exactly as observed.
 - You cannot declare success. Only Endeavour records the terminal outcome after
   a quick acceptance check.
 - Keep reports compact and factual: what changed, which commands were run, what

@@ -1,20 +1,9 @@
-/** Plan-card locale copy: Russian primary, English fallback. */
+/**
+ * Plan UI copy: English only, for every supported DSH locale and the fallback.
+ * Plans are always authored and displayed in English, like Builder reports.
+ */
 
 export const NS = 'endeavour'
-
-export const ru = {
-  'plan.title': 'План Endeavour',
-  'plan.progress': 'Выполнено {completed} из {total}',
-  'plan.current': 'Текущая задача: {title}',
-  'plan.checking': 'Endeavour проверяет результат',
-  'plan.openBuilder': 'Открыть Builder',
-  'plan.completed': 'План завершён',
-  'plan.failed': 'План остановлен',
-  'status.waiting': 'Ожидает начала',
-  'status.running': 'Выполняется',
-  'status.succeeded': 'Выполнился успешно',
-  'status.failed': 'Не выполнился',
-} as const
 
 export const en = {
   'plan.title': 'Endeavour plan',
@@ -24,10 +13,19 @@ export const en = {
   'plan.openBuilder': 'Open Builder',
   'plan.completed': 'Plan completed',
   'plan.failed': 'Plan stopped',
+  'plan.collapse': 'Collapse plan',
+  'plan.expand': 'Expand plan',
   'status.waiting': 'Waiting to start',
   'status.running': 'Running',
   'status.succeeded': 'Succeeded',
   'status.failed': 'Failed',
 } as const
 
-export type EndeavourKey = keyof typeof ru
+export type EndeavourKey = keyof typeof en
+
+/** Render English copy with `{placeholder}` interpolation (fallback path). */
+export function formatEnglish(key: EndeavourKey, params?: Record<string, string | number>): string {
+  let text: string = en[key]
+  for (const [name, value] of Object.entries(params ?? {})) text = text.replace(`{${name}}`, String(value))
+  return text
+}

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { TASK_STATUS_PHRASES } from '../src/domain.js'
-import { en, NS, ru } from '../src/client/locales.js'
-import { formatElapsed } from '../src/client/PlanCard.js'
+import { TASK_STATUSES } from '../src/domain.js'
+import { en, formatEnglish, NS } from '../src/client/locales.js'
+import { formatElapsed } from '../src/client/PlanView.js'
 import { projectPlanCard, endeavourPlanDefinition } from '../src/client/definition.js'
 import {
   createPlanState, PlanId, startTask, TaskId, verifyTask, reportTask, type TaskSpec,
@@ -15,20 +15,22 @@ function spec(id: string, title: string): TaskSpec {
   }
 }
 
-describe('locale surface', () => {
-  it('carries the four exact Russian status phrases in both dictionaries', () => {
-    expect(TASK_STATUS_PHRASES).toEqual({
-      waiting: 'Ожидает начала',
-      running: 'Выполняется',
-      succeeded: 'Выполнился успешно',
-      failed: 'Не выполнился',
-    })
-    expect(ru['status.waiting']).toBe('Ожидает начала')
-    expect(ru['status.running']).toBe('Выполняется')
-    expect(ru['status.succeeded']).toBe('Выполнился успешно')
-    expect(ru['status.failed']).toBe('Не выполнился')
+describe('English-only copy surface', () => {
+  it('declares exactly the four states and renders every one in English', () => {
+    expect(TASK_STATUSES).toEqual(['waiting', 'running', 'succeeded', 'failed'])
+    expect(en['status.waiting']).toBe('Waiting to start')
+    expect(en['status.running']).toBe('Running')
+    expect(en['status.succeeded']).toBe('Succeeded')
+    expect(en['status.failed']).toBe('Failed')
     expect(NS).toBe('endeavour')
-    expect(Object.keys(en).sort()).toEqual(Object.keys(ru).sort())
+  })
+
+  it('interpolates English fallback copy and never falls back to another language', () => {
+    expect(formatEnglish('plan.progress', { completed: 2, total: 3 })).toBe('Completed 2 of 3')
+    expect(formatEnglish('plan.current', { title: 'Task' })).toBe('Current task: Task')
+    expect(formatEnglish('plan.openBuilder')).toBe('Open Builder')
+    // No copy value contains non-ASCII (i.e. no Cyrillic or other localized text).
+    for (const value of Object.values(en)) expect(value).toMatch(/^[\x20-\x7E]*$/)
   })
 
   it('formats the elapsed timer as mm:ss', () => {
@@ -42,19 +44,19 @@ describe('locale surface', () => {
 describe('plan card projection', () => {
   it('never exposes detailed instructions on the card', () => {
     const plan = createPlanState({
-      planId: PlanId('p1'), rootSessionId: 'root', childId: 'child', title: 'План',
-      tasks: [spec('t1', 'Коротко'), spec('t2', 'Ещё короче')], at: 0,
+      planId: PlanId('p1'), rootSessionId: 'root', childId: 'child', title: 'Plan',
+      tasks: [spec('t1', 'Short one'), spec('t2', 'Short two')], at: 0,
     })
     const card = projectPlanCard(plan)
     expect(JSON.stringify(card)).not.toContain('instructions')
-    expect(card.tasks.map((task) => task.title)).toEqual(['Коротко', 'Ещё короче'])
+    expect(card.tasks.map((task) => task.title)).toEqual(['Short one', 'Short two'])
     expect(card.total).toBe(2)
   })
 
   it('projects running, checking, and frozen duration states', () => {
     let plan = createPlanState({
-      planId: PlanId('p1'), rootSessionId: 'root', childId: 'child', title: 'План',
-      tasks: [spec('t1', 'Раз'), spec('t2', 'Два')], at: 0,
+      planId: PlanId('p1'), rootSessionId: 'root', childId: 'child', title: 'Plan',
+      tasks: [spec('t1', 'One'), spec('t2', 'Two')], at: 0,
     })
     plan = startTask(plan, TaskId('t1'), 1_000)
     expect(projectPlanCard(plan).checking).toBe(false)
@@ -71,8 +73,8 @@ describe('plan card projection', () => {
 describe('conversation node definition', () => {
   it('matches only the durable endeavour/plan family', () => {
     const plan = createPlanState({
-      planId: PlanId('p1'), rootSessionId: 'root', childId: 'child', title: 'План',
-      tasks: [spec('t1', 'Раз')], at: 0,
+      planId: PlanId('p1'), rootSessionId: 'root', childId: 'child', title: 'Plan',
+      tasks: [spec('t1', 'One')], at: 0,
     })
     const startEvent = { type: 'endeavour/plan', data: { kind: 'plan-created', at: 0, plan }, seq: 1 }
     const updateEvent = { type: 'endeavour/plan', data: { kind: 'task-started', at: 1, plan: { ...plan, sequence: 1 } }, seq: 2 }
@@ -85,8 +87,8 @@ describe('conversation node definition', () => {
 
   it('ignores stale whole-value replays during update', () => {
     const plan = createPlanState({
-      planId: PlanId('p1'), rootSessionId: 'root', childId: 'child', title: 'План',
-      tasks: [spec('t1', 'Раз')], at: 0,
+      planId: PlanId('p1'), rootSessionId: 'root', childId: 'child', title: 'Plan',
+      tasks: [spec('t1', 'One')], at: 0,
     })
     const newer = { ...plan, sequence: 5 }
     const context = { state: newer } as never

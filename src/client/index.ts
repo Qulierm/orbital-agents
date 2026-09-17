@@ -1,4 +1,4 @@
-/** Browser plugin entry: register the plan definition, copy, and keyed renderer. */
+/** Browser plugin entry: plan definition, English copy, transcript card, dock. */
 
 import type { Context as ClientContext } from '@deepseek-ai/cordis'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
@@ -7,11 +7,12 @@ import type {} from '@deepseek-ai/dsh-client-ui-chat/client'
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import { endeavourPlanDefinition } from './definition.js'
 import { PlanCard, type EndeavourInjected, type PlanCardProps } from './PlanCard.js'
-import { en, NS, ru, type EndeavourKey } from './locales.js'
+import { registerPlanDock } from './PlanDock.js'
+import { en, NS, type EndeavourKey } from './locales.js'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface LocaleNamespaceMap {
-    /** Endeavour plan-card copy. */
+    /** Endeavour plan copy (English only, all locales). */
     endeavour: EndeavourKey
   }
 }
@@ -28,14 +29,13 @@ interface ClientServices {
   effect(callback: () => (() => void) | void, label?: string): void
 }
 
-/** Required services for the Definition, keyed renderer, and copy. */
+/** Required services for the Definition, renderers, and copy. */
 export const inject = ['uiConversation', 'slots', 'sessions', 'locale']
 
 /**
- * Register the Definition, dictionary, and keyed Chat renderer. The v0.1.5
- * locale surface accepts only `zh`/`en`, so the exact Russian status phrases
- * are rendered from the plugin's own copy while the service dictionary backs
- * the remaining labels.
+ * Register the Definition, the transcript card, and the composer dock. Plans
+ * are always English: the dictionary registers English for every supported DSH
+ * locale and the fallback is English too.
  */
 export function apply(ctx: ClientContext): void {
   const client = ctx as unknown as ClientServices
@@ -49,5 +49,5 @@ export function apply(ctx: ClientContext): void {
       openSession: (id: SessionId) => { client.sessions.open(id) },
     }),
   }, PlanCard as unknown as (props: PlanCardProps) => unknown))
-  void ru
+  registerPlanDock(ctx, client.slots)
 }
