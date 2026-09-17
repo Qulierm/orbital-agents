@@ -26,6 +26,8 @@ export const en = {
   'builder.thinking': 'Thinking',
   'builder.providerDefault': 'Provider default',
   'builder.notAvailable': 'Not available',
+  'builder.inherited': 'Inherited',
+  'builder.back': 'Back',
   'builder.loading': 'Loading models...',
   'builder.retry': 'Retry',
   'builder.error': 'Could not load models',

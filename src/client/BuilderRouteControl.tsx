@@ -2,17 +2,19 @@
  * Builder route control for the root Endeavour composer.
  *
  * Renders a compact chip (integrated with the composer toolbar) whose menu
- * selects the route for the NEXT Builder child: Inherit Planner or a custom
- * provider/model with adapter-owned thinking options. It is visible only in an
- * Endeavour root session, disabled while a plan is active or the turn runs, and
- * never touches an already-spawned Builder.
+ * selects the route for the NEXT Builder child. The menu mirrors the upstream
+ * ModelSelect shape: a root pane with exactly two drill rows ("Model" and
+ * "Thinking"), a model pane (Back + Inherit Planner + provider-grouped models),
+ * and a thinking pane (Back + the adapter-owned efforts of the selected model).
+ * It is visible only in an Endeavour root session, disabled while a plan is
+ * active or the turn runs, and never touches an already-spawned Builder.
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
-import type { ModelCatalog } from '@deepseek-ai/dsh-api-session-controller/types'
+import type { ModelCatalog, ModelCatalogModel } from '@deepseek-ai/dsh-api-session-controller/types'
 import type { BuilderRouteSettings } from '../builder-settings.js'
-import { NS, type EndeavourKey } from './locales.js'
+
 import { copyFrom } from './PlanCard.js'
 import {
   builderChipLabel,
@@ -45,13 +47,18 @@ type CatalogState =
   | { readonly kind: 'ready'; readonly catalog: ModelCatalog }
   | { readonly kind: 'error'; readonly message: string }
 
-/** One flat menu row for keyboard navigation. */
+/** Menu panes: root drills into Model or Thinking; Back returns to root. */
+type Pane = 'root' | 'model' | 'thinking'
+
+/** One menu row (header rows are labels and never focusable). */
 interface MenuRow {
   readonly id: string
+  readonly kind: 'drill' | 'radio' | 'back' | 'header' | 'note'
   readonly label: string
   readonly description?: string
-  readonly selected: boolean
+  readonly selected?: boolean
   readonly disabled?: boolean
+  readonly value?: string
   readonly action?: () => void
 }
 
@@ -79,6 +86,7 @@ export function BuilderRouteControl(props: BuilderRouteControlProps): React.Reac
   const [settings, setSettings] = useState<BuilderRouteSettings>(() => props.builderRoute.readSettings())
   const [catalog, setCatalog] = useState<CatalogState>({ kind: 'idle' })
   const [open, setOpen] = useState(false)
+  const [pane, setPane] = useState<Pane>('root')
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | undefined>(undefined)
   const [activeIndex, setActiveIndex] = useState(0)
@@ -93,10 +101,12 @@ export function BuilderRouteControl(props: BuilderRouteControlProps): React.Reac
     )
   }
 
-  // Refresh from the live settings source whenever the control opens.
+  // Refresh from the live settings source whenever the control opens; the chip
+  // always starts on the root pane.
   useEffect(() => {
     if (!open) return undefined
     setSettings(props.builderRoute.readSettings())
+    setPane('root')
     if (catalog.kind === 'idle') loadCatalog()
     const onPointerDown = (event: MouseEvent): void => {
       if (rootRef.current !== null && !rootRef.current.contains(event.target as Node)) setOpen(false)
@@ -106,10 +116,22 @@ export function BuilderRouteControl(props: BuilderRouteControlProps): React.Reac
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open])
 
+  const catalogValue = catalog.kind === 'ready' ? catalog.catalog : undefined
   const selectedModel = useMemo(
-    () => findCatalogModel(catalog.kind === 'ready' ? catalog.catalog : undefined, settings.provider, settings.model),
-    [catalog, settings.provider, settings.model],
+    () => findCatalogModel(catalogValue, settings.provider, settings.model),
+    [catalogValue, settings.provider, settings.model],
   )
+  const selectedHasThinking = settings.mode === 'custom' && modelHasThinking(selectedModel)
+  const modelValue = settings.mode === 'custom'
+    ? (selectedModel?.name ?? settings.model ?? copy('builder.inherit'))
+    : copy('builder.inherit')
+  const thinkingValue = settings.mode !== 'custom'
+    ? copy('builder.inherited')
+    : catalog.kind === 'ready' && !modelHasThinking(selectedModel)
+      ? copy('builder.notAvailable')
+      : settings.reasoningEffort === undefined
+        ? copy('builder.providerDefault')
+        : effortLabel(selectedModel, settings.reasoningEffort)
 
   const save = (next: BuilderRouteSettings): void => {
     setSettings(next)
@@ -125,9 +147,9 @@ export function BuilderRouteControl(props: BuilderRouteControlProps): React.Reac
     )
   }
 
-  const chooseInherit = (): void => { save({ mode: 'inherit' }) }
+  const chooseInherit = (): void => { save({ mode: 'inherit' }); setPane('root') }
   const chooseModel = (provider: string, modelId: string): void => {
-    const model = findCatalogModel(catalog.kind === 'ready' ? catalog.catalog : undefined, provider, modelId)
+    const model = findCatalogModel(catalogValue, provider, modelId)
     const effort = resetEffortForModel(model)
     save({
       mode: 'custom',
@@ -136,6 +158,8 @@ export function BuilderRouteControl(props: BuilderRouteControlProps): React.Reac
       ...(effort === undefined ? {} : { reasoningEffort: effort }),
       ...(settings.maxTokens === undefined ? {} : { maxTokens: settings.maxTokens }),
     })
+    // Stay open on the root pane so Thinking is immediately discoverable.
+    setPane('root')
   }
   const chooseEffort = (effort: string | undefined): void => {
     if (settings.mode !== 'custom') return
@@ -146,67 +170,111 @@ export function BuilderRouteControl(props: BuilderRouteControlProps): React.Reac
       ...(effort === undefined ? {} : { reasoningEffort: effort }),
       ...(settings.maxTokens === undefined ? {} : { maxTokens: settings.maxTokens }),
     })
+    setPane('root')
   }
 
   const rows: readonly MenuRow[] = useMemo(() => {
     if (!open) return []
+    if (pane === 'root') {
+      return [
+        {
+          id: 'drill:model', kind: 'drill', label: copy('builder.models'), value: modelValue,
+          selected: false, action: () => { setPane('model') },
+        },
+        {
+          id: 'drill:thinking', kind: 'drill', label: copy('builder.thinking'), value: thinkingValue,
+          selected: false,
+          disabled: !selectedHasThinking,
+          action: () => { if (selectedHasThinking) setPane('thinking') },
+        },
+      ]
+    }
+    const back: MenuRow = {
+      id: 'back', kind: 'back', label: copy('builder.back'), selected: false, action: () => { setPane('root') },
+    }
+    if (pane === 'thinking') {
+      if (!selectedHasThinking) return [back]
+      return [
+        back,
+        ...thinkingOptions(selectedModel, settings.reasoningEffort).map<MenuRow>((option) => ({
+          id: `effort:${option.effort ?? 'default'}`,
+          kind: 'radio',
+          label: option.effort === undefined ? copy('builder.providerDefault') : option.label,
+          ...(option.description === undefined ? {} : { description: option.description }),
+          selected: option.selected,
+          action: () => { chooseEffort(option.effort) },
+        })),
+      ]
+    }
     const list: MenuRow[] = [
+      back,
       {
-        id: 'inherit',
-        label: copy('builder.inherit'),
-        description: copy('builder.inheritHint'),
-        selected: settings.mode !== 'custom',
-        action: chooseInherit,
+        id: 'inherit', kind: 'radio', label: copy('builder.inherit'), description: copy('builder.inheritHint'),
+        selected: settings.mode !== 'custom', action: chooseInherit,
       },
     ]
-    if (catalog.kind === 'ready') {
-      for (const group of catalog.catalog.groups) {
+    if (catalog.kind === 'loading') list.push({ id: 'loading', kind: 'note', label: copy('builder.loading') })
+    if (catalog.kind === 'error') {
+      list.push({ id: 'error', kind: 'note', label: copy('builder.error'), description: catalog.message })
+    }
+    if (catalogValue !== undefined) {
+      for (const group of catalogValue.groups) {
+        list.push({ id: `group:${group.id}`, kind: 'header', label: group.name })
         for (const model of group.models) {
           list.push({
             id: `model:${group.id}:${model.id}`,
-            label: `${model.name} · ${group.name}`,
+            kind: 'radio',
+            label: model.name,
             ...(model.description === undefined ? {} : { description: model.description }),
             selected: settings.mode === 'custom' && settings.provider === group.id && settings.model === model.id,
             action: () => { chooseModel(group.id, model.id) },
           })
         }
       }
-      if (settings.mode === 'custom' && modelHasThinking(selectedModel)) {
-        for (const option of thinkingOptions(selectedModel, settings.reasoningEffort)) {
-          list.push({
-            id: `effort:${option.effort ?? 'default'}`,
-            label: option.effort === undefined ? copy('builder.providerDefault') : option.label,
-            ...(option.description === undefined ? {} : { description: option.description }),
-            selected: option.selected,
-            action: () => { chooseEffort(option.effort) },
-          })
-        }
-      }
     }
     return list
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, catalog, settings, selectedModel])
+  }, [open, pane, catalog, catalogValue, settings, selectedModel, selectedHasThinking])
 
-  const enabledRows = rows.filter((row) => row.disabled !== true)
+  const enabledRows = rows.filter((row) => row.kind !== 'header' && row.kind !== 'note' && row.disabled !== true)
+  const activeRow = enabledRows[Math.min(activeIndex, Math.max(enabledRows.length - 1, 0))]
+
+  // Focus lands on the selected row of the pane that is opening.
+  useEffect(() => {
+    if (!open) return
+    const selectedIndex = enabledRows.findIndex((row) => row.selected === true)
+    setActiveIndex(selectedIndex >= 0 ? selectedIndex : 0)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, pane, catalog.kind])
+
+  const close = (): void => {
+    setOpen(false)
+    setPane('root')
+    chipRef.current?.focus()
+  }
 
   const onKeyDown = (event: React.KeyboardEvent): void => {
     if (event.key === 'Escape') {
-      setOpen(false)
-      chipRef.current?.focus()
+      event.preventDefault()
+      if (pane !== 'root') { setPane('root'); return }
+      close()
       return
     }
-    if (event.key === 'ArrowDown') {
+    if (event.key === 'Tab') {
+      // Menu semantics: Tab leaves the menu and hands focus back to the chip.
       event.preventDefault()
-      setActiveIndex((index) => Math.min(index + 1, enabledRows.length - 1))
+      close()
       return
     }
-    if (event.key === 'ArrowUp') {
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
       event.preventDefault()
-      setActiveIndex((index) => Math.max(index - 1, 0))
+      if (enabledRows.length === 0) return
+      const delta = event.key === 'ArrowDown' ? 1 : -1
+      setActiveIndex((index) => (index + delta + enabledRows.length) % enabledRows.length)
       return
     }
     if (event.key === 'Enter' || event.key === ' ') {
-      const row = enabledRows[activeIndex]
+      const row = activeRow
       if (row?.action !== undefined) {
         event.preventDefault()
         row.action()
@@ -215,12 +283,11 @@ export function BuilderRouteControl(props: BuilderRouteControlProps): React.Reac
   }
 
   if (!visible) return null
-  const label = settings.mode === 'custom'
+  const chipLabel = settings.mode === 'custom'
     ? builderChipLabel(settings, selectedModel?.name)
-    : copy('builder.inherit')
-  const chipLabel = settings.mode === 'custom' ? label : `Builder · ${copy('builder.chipInherit')}`
+    : `Builder · ${copy('builder.chipInherit')}`
   return (
-    <div ref={rootRef} className={CLASS.builderControl} style={{ position: 'relative', display: 'inline-flex' }} onKeyDown={onKeyDown}>
+    <div ref={rootRef} className={CLASS.builderControl} onKeyDown={onKeyDown}>
       <button
         ref={chipRef}
         type="button"
@@ -230,7 +297,7 @@ export function BuilderRouteControl(props: BuilderRouteControlProps): React.Reac
         aria-expanded={open}
         disabled={disabledReason !== undefined}
         title={disabledReason ?? copy('builder.title')}
-        onClick={() => { setOpen((value) => !value) }}
+        onClick={() => { setOpen((value) => !value); setPane('root') }}
       >
         {chipLabel}
         {saving ? ` · ${copy('builder.saving')}` : ''}
@@ -239,58 +306,61 @@ export function BuilderRouteControl(props: BuilderRouteControlProps): React.Reac
         </svg>
       </button>
       {open ? (
-        <div
-          role="menu"
-          aria-label={copy('builder.title')}
-          style={{
-            position: 'absolute', bottom: '100%', left: 0, zIndex: 30, marginBottom: 6,
-            minWidth: 260, maxWidth: 360, maxHeight: 320, overflowY: 'auto',
-            border: '1px solid var(--dsw-alias-border-l1)', borderRadius: 10,
-            background: 'var(--dsw-specific-tip)', color: 'var(--dsw-alias-label-primary)',
-            padding: 4, display: 'flex', flexDirection: 'column', gap: 1,
-            boxShadow: 'var(--dsw-elevation-soft)',
-          }}
-        >
-          <div style={{ padding: '4px 8px', fontSize: 11, color: 'var(--dsw-alias-label-tertiary)' }}>{copy('builder.models')}</div>
-          {catalog.kind === 'loading' ? <div style={{ padding: '6px 8px', fontSize: 12 }}>{copy('builder.loading')}</div> : null}
-          {catalog.kind === 'error' ? (
-            <div style={{ padding: '6px 8px', fontSize: 12, display: 'flex', gap: 8, alignItems: 'center' }}>
-              <span title={catalog.message}>{copy('builder.error')}</span>
-              <button type="button" className={CLASS.ghost} onClick={loadCatalog}>{copy('builder.retry')}</button>
-            </div>
-          ) : null}
-          {rows.map((row, index) => (
-            <button
-              key={row.id}
-              type="button"
-              role="menuitemradio"
-              aria-checked={row.selected}
-              disabled={row.disabled === true}
-              onMouseEnter={() => { setActiveIndex(index) }}
-              onClick={() => { row.action?.() }}
-              style={{
-                display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 1,
-                border: 'none', textAlign: 'left', cursor: 'pointer',
-                background: index === activeIndex ? 'var(--dsw-alias-interactive-bg-hover)' : 'transparent',
-                color: 'var(--dsw-alias-label-primary)', borderRadius: 6, padding: '5px 8px', fontSize: 13,
-              }}
-            >
-              <span>{row.selected ? '✓ ' : ''}{row.label}</span>
-              {row.description === undefined ? null : (
-                <span style={{ fontSize: 11, color: 'var(--dsw-alias-label-tertiary)' }}>{row.description}</span>
-              )}
-            </button>
-          ))}
-          {catalog.kind === 'ready' && settings.mode === 'custom' && !modelHasThinking(selectedModel) ? (
-            <div style={{ padding: '4px 8px', fontSize: 11, color: 'var(--dsw-alias-label-tertiary)' }}>
-              {copy('builder.thinking')}: {copy('builder.notAvailable')}
-            </div>
-          ) : null}
+        <div role="menu" aria-label={copy('builder.title')} data-endeavour-builder-pane={pane} className={CLASS.menu}>
+          {rows.map((row) => {
+            if (row.kind === 'header') {
+              return <div key={row.id} className={CLASS.menuHeader}>{row.label}</div>
+            }
+            if (row.kind === 'note') {
+              return (
+                <div key={row.id} className={CLASS.menuNote} title={row.description}>
+                  <span>{row.label}</span>
+                  {row.id === 'error' ? (
+                    <button type="button" className={CLASS.ghost} onClick={loadCatalog}>{copy('builder.retry')}</button>
+                  ) : null}
+                </div>
+              )
+            }
+            const active = row === activeRow
+            return (
+              <button
+                key={row.id}
+                type="button"
+                role={row.kind === 'radio' ? 'menuitemradio' : 'menuitem'}
+                aria-checked={row.kind === 'radio' ? row.selected === true : undefined}
+                aria-haspopup={row.kind === 'drill' ? 'menu' : undefined}
+                disabled={row.disabled === true}
+                onMouseEnter={() => { setActiveIndex(enabledRows.indexOf(row)) }}
+                onClick={() => { row.action?.() }}
+                className={active ? CLASS.menuRowActive : CLASS.menuRow}
+              >
+                <span className={CLASS.menuRowLabel}>
+                  {row.kind === 'radio' && row.selected === true ? '✓ ' : ''}
+                  {row.label}
+                </span>
+                {row.kind === 'drill' ? <span className={CLASS.menuRowValue}>{row.value}</span> : null}
+                {row.kind === 'drill' ? (
+                  <svg width={12} height={12} viewBox="0 0 12 12" fill="none" aria-hidden="true">
+                    <path d="M4.5 2.5 8 6l-3.5 3.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                ) : null}
+                {row.kind !== 'drill' && row.description === undefined ? null : (
+                  row.kind === 'radio' && row.description !== undefined ? <span className={CLASS.menuRowDescription}>{row.description}</span> : null
+                )}
+              </button>
+            )
+          })}
           {saveError === undefined ? null : (
-            <div style={{ padding: '4px 8px', fontSize: 11, color: 'var(--dsw-alias-state-error-primary)' }}>{copy('builder.saveFailed')}</div>
+            <div className={CLASS.menuError}>{copy('builder.saveFailed')}</div>
           )}
         </div>
       ) : null}
     </div>
   )
+}
+
+/** Effort display label for the root Thinking row. */
+function effortLabel(model: ModelCatalogModel | undefined, effort: string): string {
+  const match = thinkingOptions(model, effort).find((option) => option.effort === effort)
+  return match?.label ?? effort
 }

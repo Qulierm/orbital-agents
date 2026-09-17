@@ -20,6 +20,15 @@ export const CLASS = {
   title: 'dsh-endeavour-title',
   progress: 'dsh-endeavour-progress',
   routeHint: 'dsh-endeavour-route',
+  menu: 'dsh-endeavour-menu',
+  menuRow: 'dsh-endeavour-menu-row',
+  menuRowActive: 'dsh-endeavour-menu-row dsh-endeavour-menu-row--active',
+  menuRowLabel: 'dsh-endeavour-menu-label',
+  menuRowValue: 'dsh-endeavour-menu-value',
+  menuRowDescription: 'dsh-endeavour-menu-description',
+  menuHeader: 'dsh-endeavour-menu-header',
+  menuNote: 'dsh-endeavour-menu-note',
+  menuError: 'dsh-endeavour-menu-error',
   ghost: 'dsh-endeavour-ghost',
   chevron: 'dsh-endeavour-chevron',
   rows: 'dsh-endeavour-rows',
@@ -110,6 +119,48 @@ export const STYLE_TEXT = `
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.dsh-endeavour-menu {
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  z-index: 30;
+  margin-bottom: 6px;
+  min-width: 240px;
+  max-width: min(360px, calc(100vw - 24px));
+  max-height: 320px;
+  overflow-y: auto;
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: 10px;
+  background: var(--dsw-specific-tip);
+  color: var(--dsw-alias-label-primary);
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  box-shadow: var(--dsw-elevation-soft);
+}
+.dsh-endeavour-menu-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 1px 6px;
+  border: none;
+  text-align: left;
+  cursor: pointer;
+  background: transparent;
+  color: var(--dsw-alias-label-primary);
+  border-radius: 6px;
+  padding: 5px 8px;
+  font-size: 13px;
+}
+.dsh-endeavour-menu-row--active { background: var(--dsw-alias-interactive-bg-hover); }
+.dsh-endeavour-menu-row:disabled { cursor: default; color: var(--dsw-alias-label-tertiary); }
+.dsh-endeavour-menu-label { flex: 1 1 auto; }
+.dsh-endeavour-menu-value { flex: 0 1 auto; max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--dsw-alias-label-caption); font-size: 11px; }
+.dsh-endeavour-menu-description { flex: 1 1 100%; color: var(--dsw-alias-label-tertiary); font-size: 11px; }
+.dsh-endeavour-menu-header { padding: 4px 8px; font-size: 11px; color: var(--dsw-alias-label-tertiary); }
+.dsh-endeavour-menu-note { display: flex; gap: 8px; align-items: center; padding: 6px 8px; font-size: 12px; }
+.dsh-endeavour-menu-error { padding: 4px 8px; font-size: 11px; color: var(--dsw-alias-state-error-primary); }
 .dsh-endeavour-route {
   flex: none;
   color: var(--dsw-alias-label-caption);
