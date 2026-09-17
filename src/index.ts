@@ -21,6 +21,5 @@ export type Config = EndeavourConfig
 /** Mount the service and its tools. */
 export function apply(ctx: Context, config: EndeavourConfig = {}): void {
   const service = new EndeavourService(ctx, config)
-  ctx.set('endeavour', service)
   registerTools(ctx, service)
 }
