@@ -12,7 +12,7 @@ import { join } from 'node:path'
 import { KNOWN_SESSION_EVENT_TYPES } from '@deepseek-ai/dsh-session'
 import { afterEach, describe, expect, it } from 'vitest'
 import { createPlanState, PlanId, planEventPayload, TaskId, type TaskSpec } from '../src/domain.js'
-import { markLine, repairSessionEvents } from '../scripts/repair-session-events.mjs'
+import { markLine, parseZstdFrames, repairSessionEvents } from '../scripts/repair-session-events.mjs'
 import { admitEndeavourEvents } from '../src/index.js'
 
 const homes: string[] = []
@@ -81,7 +81,12 @@ function writeSessionFile(root: string, project: string, lines: string[]): strin
   const dir = join(root, project)
   mkdirSync(dir, { recursive: true })
   const file = join(dir, 'session.v3.jsonl.zstd')
-  execFileSync('zstd', ['-q', '-f', '-o', file], { input: Buffer.from(`${lines.join('\n')}\n`, 'utf8') })
+  const frame = (text: string) => execFileSync('zstd', ['-q', '-f', '-c'], { input: Buffer.from(text, 'utf8') })
+  // Real layout: frame 1 is exactly the header line; events follow in later frames.
+  const header = `${JSON.stringify({ version: 3, id: project })}\n`
+  const parts = [frame(header)]
+  if (lines.length > 0) parts.push(frame(`${lines.join('\n')}\n`))
+  writeFileSync(file, Buffer.concat(parts))
   return file
 }
 
@@ -131,6 +136,38 @@ describe('offline session repair', () => {
     expect(readSessionFile(file)).toContain('"ignorable":true')
   })
 
+
+  it('preserves the first-frame header contract when rewriting framed logs', () => {
+    const home = tempHome()
+    const sessionsRoot = join(home, 'sessions')
+    const backupRoot = join(home, 'backups')
+    const dir = join(sessionsRoot, '--proj--')
+    mkdirSync(dir, { recursive: true })
+    const file = join(dir, 'session.v3.jsonl.zstd')
+    const header = `${JSON.stringify({ version: 3, id: 'session-x' })}\n`
+    const body = [
+      JSON.stringify({ seq: 0, type: 'turn/start', data: { turn: 1 } }),
+      JSON.stringify({ seq: 20, type: 'endeavour/plan', data: planPayload() }),
+      JSON.stringify({ seq: 21, type: 'user/message', data: { role: 'user' } }),
+    ].join('\n') + '\n'
+    const frame = (text: string) => execFileSync('zstd', ['-q', '-f', '-c'], { input: Buffer.from(text, 'utf8') })
+    writeFileSync(file, Buffer.concat([frame(header), frame(body)]))
+
+    const applied = repairSessionEvents({ sessionsRoot, backupRoot, write: true, isRunning: () => false })
+    expect(applied.totals.repairedRows).toBe(1)
+    const frames = parseZstdFrames(readFileSync(file))
+    expect(frames.length).toBeGreaterThanOrEqual(2)
+    // The reader's contract: frame 1 decodes to exactly the header line.
+    const first = execFileSync('zstd', ['-dc'], { input: frames[0] }).toString('utf8')
+    expect(first).toBe(header)
+    expect(first.split('\n').length).toBe(2)
+    // Full content keeps every row and gains only the marker.
+    const total = frames.map((f) => execFileSync('zstd', ['-dc'], { input: f }).toString('utf8')).join('')
+    expect(total).toContain('"ignorable":true')
+    expect(total).toContain('"type":"user/message"')
+    expect(total.startsWith(header)).toBe(true)
+  })
+
   it('keeps a marked session replayable for an unmarked process (restart integration)', () => {
     const home = tempHome()
     const sessionsRoot = join(home, 'sessions')
@@ -142,7 +179,9 @@ describe('offline session repair', () => {
     const stored = readSessionFile(file).trim().split('\n').map((line) => JSON.parse(line) as { type: string; ignorable?: boolean; data: { plan: { tasks: { spec: { display: { title: string } } }[] } } })
     const knownWithout = new Set(KNOWN_SESSION_EVENT_TYPES)
     knownWithout.delete('endeavour/plan')
-    for (const envelope of stored) expect(accepts(knownWithout, envelope)).toBe(true)
-    expect(stored[0]?.data.plan.tasks[0]?.spec.display.title).toBe('One')
+    const planEnvelopes = stored.filter((envelope) => envelope.type === 'endeavour/plan')
+    expect(planEnvelopes.length).toBeGreaterThan(0)
+    for (const envelope of planEnvelopes) expect(accepts(knownWithout, envelope)).toBe(true)
+    expect(planEnvelopes[0]?.data.plan.tasks[0]?.spec.display.title).toBe('One')
   })
 })

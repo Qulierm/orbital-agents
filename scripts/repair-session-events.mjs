@@ -36,12 +36,56 @@ export function desktopRunning() {
   return result.status === 0 && (result.stdout ?? '').trim() !== ''
 }
 
-function decodeZstd(path) {
-  return execFileSync('zstd', ['-dc', path], { maxBuffer: 256 * 1024 * 1024 }).toString('utf8')
+const ZSTD_MAGIC = Buffer.from([0x28, 0xb5, 0x2f, 0xfd])
+
+/**
+ * Split a zstd byte stream into frames (RFC 8878 framing), so rewrites keep
+ * the reader's first-frame contract: frame 1 must decode to exactly the header
+ * line.
+ */
+export function parseZstdFrames(buffer) {
+  const frames = []
+  let offset = 0
+  while (offset < buffer.length) {
+    const start = offset
+    if (!buffer.subarray(offset, offset + 4).equals(ZSTD_MAGIC)) {
+      throw new Error(`repair-session-events: byte ${String(offset)} is not a zstd frame magic`)
+    }
+    offset += 4
+    const descriptor = buffer[offset]
+    offset += 1
+    const fcsFlag = descriptor >> 6
+    const singleSegment = (descriptor & 0x20) !== 0
+    const checksum = (descriptor & 0x04) !== 0
+    const didFlag = descriptor & 0x03
+    if (!singleSegment) offset += 1 // window descriptor
+    offset += [0, 1, 2, 4][didFlag]
+    if (fcsFlag === 0) offset += singleSegment ? 1 : 0
+    else offset += [0, 2, 4, 8][fcsFlag]
+    for (;;) {
+      const header = buffer.readUIntLE(offset, 3)
+      offset += 3
+      const last = (header & 1) === 1
+      const type = (header >> 1) & 0x03
+      const size = header >> 3
+      if (type === 0) offset += size
+      else if (type === 1) offset += 1
+      else if (type === 2) offset += size
+      else throw new Error('repair-session-events: reserved zstd block type')
+      if (last) break
+    }
+    if (checksum) offset += 4
+    frames.push(buffer.subarray(start, offset))
+  }
+  return frames
 }
 
-function encodeZstd(text, outPath) {
-  execFileSync('zstd', ['-q', '-f', '-o', outPath], { input: Buffer.from(text, 'utf8') })
+function decompressZstd(buffer) {
+  return execFileSync('zstd', ['-dc'], { input: buffer, maxBuffer: 256 * 1024 * 1024 }).toString('utf8')
+}
+
+function compressZstd(text) {
+  return execFileSync('zstd', ['-q', '-f', '-c'], { input: Buffer.from(text, 'utf8'), maxBuffer: 256 * 1024 * 1024 })
 }
 
 /** Insert the marker into one line, or return null when nothing applies. */
@@ -91,10 +135,24 @@ function sessionFiles(sessionsRoot) {
 
 function processFile(path, { write, backupDir, sessionsRoot }) {
   const compressed = path.endsWith('.zstd')
-  const text = compressed ? decodeZstd(path) : readFileSync(path, 'utf8')
-  const lines = text.split('\n')
+  const originalBytes = readFileSync(path)
+  let headerText = null
+  let originalText
+  let headerFrame = null
+  if (compressed) {
+    const frames = parseZstdFrames(originalBytes)
+    headerFrame = frames[0]
+    headerText = decompressZstd(headerFrame)
+    if (!headerText.endsWith('\n') || headerText.split('\n').length !== 2) {
+      throw new Error('repair-session-events: refusing a file whose first frame is not exactly one header line')
+    }
+    originalText = frames.map((frame) => decompressZstd(frame)).join('')
+  } else {
+    originalText = originalBytes.toString('utf8')
+  }
+  const lines = originalText.split('\n')
   let changed = 0
-  const updated = lines.map((line) => {
+  const updatedLines = lines.map((line) => {
     const next = markLine(line)
     if (next === null) return line
     changed += 1
@@ -102,18 +160,43 @@ function processFile(path, { write, backupDir, sessionsRoot }) {
   })
   if (changed === 0) return { file: path, changed: 0 }
   if (!write) return { file: path, changed, written: false }
+  const expectedText = updatedLines.join('\n')
+
+  // Preserve frame 1 byte-for-byte (the header line) and re-encode the
+  // remainder as one frame; only the first-frame contract is load-bearing.
+  let nextBytes
+  if (headerFrame === null) {
+    nextBytes = Buffer.from(expectedText, 'utf8')
+  } else {
+    const remainder = expectedText.slice(headerText.length)
+    nextBytes = Buffer.concat([headerFrame, compressZstd(remainder)])
+  }
+
+  if (compressed) {
+    const checkFrames = parseZstdFrames(nextBytes)
+    const decoded = checkFrames.map((frame) => decompressZstd(frame)).join('')
+    if (decoded !== expectedText) throw new Error('repair-session-events: rewrite failed full-decode validation')
+    const firstFrameText = decompressZstd(checkFrames[0])
+    if (!firstFrameText.endsWith('\n') || firstFrameText.split('\n').length !== 2) {
+      throw new Error('repair-session-events: rewrite would break the first-frame header contract')
+    }
+  }
+
   const relativePath = relative(sessionsRoot, path)
   const backupPath = join(backupDir, relativePath)
   mkdirSync(join(backupPath, '..'), { recursive: true })
   copyFileSync(path, backupPath, 1) // COPYFILE_EXCL: never overwrite a backup
-  const nextText = updated.join('\n')
   const tempPath = `${path}.repair-tmp-${String(process.pid)}`
-  if (compressed) encodeZstd(nextText, tempPath)
-  else writeFileSync(tempPath, nextText)
+  writeFileSync(tempPath, nextBytes)
   const fd = openSync(tempPath, 'r+')
   fsyncSync(fd)
   closeSync(fd)
-  renameSync(tempPath, path)
+  try {
+    renameSync(tempPath, path)
+  } catch (error) {
+    copyFileSync(backupPath, path) // restore on any failure after the backup
+    throw error
+  }
   return { file: path, changed, written: true, backupPath }
 }
 

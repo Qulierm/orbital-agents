@@ -3,6 +3,7 @@
 export const EVENT_TYPE: string
 export const MARKER_TEXT: string
 export function desktopRunning(): boolean
+export function parseZstdFrames(buffer: Buffer): Buffer[]
 export function markLine(line: string): string | null
 export interface RepairResult {
   readonly results: readonly { readonly file: string; readonly changed: number; readonly written?: boolean; readonly backupPath?: string }[]
