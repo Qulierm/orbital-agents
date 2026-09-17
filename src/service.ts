@@ -125,47 +125,47 @@ export interface PlanCreation {
  * this service; tools own only argument validation.
  */
 export class EndeavourService extends Service {
-  readonly #plans = new Map<string, PlanState>()
-  readonly #queues = new Map<string, Promise<unknown>>()
-  readonly #config: EndeavourConfig
+  private readonly plans = new Map<string, PlanState>()
+  private readonly queues = new Map<string, Promise<unknown>>()
+  private readonly serviceConfig: EndeavourConfig
 
   constructor(ctx: Context, config: EndeavourConfig = {}) {
     super(ctx, 'endeavour')
-    this.#config = config
-    this.#recoverExistingPlans()
+    this.serviceConfig = config
+    this.recoverExistingPlans()
   }
 
   /** Serialize one mutation per root session. */
-  #enqueue<T>(rootSessionId: string, operation: () => Promise<T>): Promise<T> {
-    const previous = this.#queues.get(rootSessionId) ?? Promise.resolve()
+  private enqueue<T>(rootSessionId: string, operation: () => Promise<T>): Promise<T> {
+    const previous = this.queues.get(rootSessionId) ?? Promise.resolve()
     const next = previous.then(operation, operation)
-    this.#queues.set(rootSessionId, next.catch(() => undefined))
+    this.queues.set(rootSessionId, next.catch(() => undefined))
     return next
   }
 
   /** The active (non-terminal) plan for a root session, if any. */
   getActivePlan(rootSessionId: string): PlanState | undefined {
-    const plan = this.#plans.get(rootSessionId)
+    const plan = this.plans.get(rootSessionId)
     return plan !== undefined && plan.terminal === undefined ? plan : undefined
   }
 
   /** The plan whose Builder child is this session, if any. */
   getPlanByChild(childId: string): PlanState | undefined {
-    for (const plan of this.#plans.values()) if (plan.childId === childId) return plan
+    for (const plan of this.plans.values()) if (plan.childId === childId) return plan
     return undefined
   }
 
   /** Rebuild in-memory plans from already-loaded root sessions (replay recovery). */
-  #recoverExistingPlans(): void {
-    const host = this.#sessionHost()
+  private recoverExistingPlans(): void {
+    const host = this.sessionHost()
     for (const session of host?.list() ?? []) this.adoptSession(session)
   }
 
-  #sessionHost(): SessionHost | undefined {
+  private sessionHost(): SessionHost | undefined {
     return (this.ctx as unknown as { sessions?: SessionHost }).sessions
   }
 
-  #subagentHost(): SubagentHost {
+  private subagentHost(): SubagentHost {
     const host = (this.ctx as unknown as { subagents?: SubagentHost }).subagents
     if (host === undefined) {
       throw new EndeavourError('role-forbidden', 'subagent service is unavailable')
@@ -183,13 +183,13 @@ export class EndeavourService extends Service {
       events.push(event.data)
     }
     const plan = foldPlanEvents(events)
-    if (plan !== undefined) this.#plans.set(plan.rootSessionId, plan)
+    if (plan !== undefined) this.plans.set(plan.rootSessionId, plan)
     return plan
   }
 
   /** Append one checkpoint to its owning root session and flush durability. */
-  async #append(rootSessionId: string, kind: PlanEventPayload['kind'], previous: PlanState | undefined, plan: PlanState, at: number): Promise<void> {
-    const sessions = this.#sessionHost()
+  private async append(rootSessionId: string, kind: PlanEventPayload['kind'], previous: PlanState | undefined, plan: PlanState, at: number): Promise<void> {
+    const sessions = this.sessionHost()
     const session = sessions?.get(rootSessionId)
     if (session === undefined) {
       throw new EndeavourError('role-forbidden', `root session ${rootSessionId} is not loaded`)
@@ -197,7 +197,7 @@ export class EndeavourService extends Service {
     const payload = planEventPayload(kind, previous, plan, at)
     session.append(ENDEAVOUR_EVENT_TYPE, payload)
     await sessions?.flush(session)
-    this.#plans.set(rootSessionId, payload.plan)
+    this.plans.set(rootSessionId, payload.plan)
   }
 
   /**
@@ -213,7 +213,7 @@ export class EndeavourService extends Service {
   }): Promise<PlanCreation> {
     const rootSessionId = agentSessionId(agent)
     if (rootSessionId === undefined) throw new EndeavourError('role-forbidden', 'calling agent has no session id')
-    return this.#enqueue(rootSessionId, async () => {
+    return this.enqueue(rootSessionId, async () => {
       if (this.getActivePlan(rootSessionId) !== undefined) {
         throw new EndeavourError('plan-active', 'this Endeavour session already has an active plan')
       }
@@ -221,17 +221,17 @@ export class EndeavourService extends Service {
       const planId = PlanId(randomUUID())
       const first = input.tasks[0]
       if (first === undefined) throw new EndeavourError('transition-invalid', 'a plan needs at least one task')
-      const subagents = this.#subagentHost()
+      const subagents = this.subagentHost()
       const started = await subagents.startContinuable({
-        provider: this.#config.builderProvider ?? 'spawn',
+        provider: this.serviceConfig.builderProvider ?? 'spawn',
         label: 'Builder',
         request: {
           parent: agent,
           prompt: [textBlock(builderBrief(input.brief, input.constraints, first))],
-          ...(this.#config.builderAgentOptions === undefined ? {} : { agentOptions: this.#config.builderAgentOptions }),
-          persona: this.#config.builderPersona ?? BUILDER_PROMPT,
-          ...(this.#config.builderToolFilter === undefined ? {} : { toolFilter: this.#config.builderToolFilter }),
-          ...(this.#config.maxDepth === undefined ? {} : { maxDepth: this.#config.maxDepth }),
+          ...(this.serviceConfig.builderAgentOptions === undefined ? {} : { agentOptions: this.serviceConfig.builderAgentOptions }),
+          persona: this.serviceConfig.builderPersona ?? BUILDER_PROMPT,
+          ...(this.serviceConfig.builderToolFilter === undefined ? {} : { toolFilter: this.serviceConfig.builderToolFilter }),
+          ...(this.serviceConfig.maxDepth === undefined ? {} : { maxDepth: this.serviceConfig.maxDepth }),
         },
         signal: new AbortController().signal,
       })
@@ -244,7 +244,7 @@ export class EndeavourService extends Service {
         tasks: input.tasks,
         at,
       })
-      await this.#append(rootSessionId, 'plan-created', undefined, plan, at)
+      await this.append(rootSessionId, 'plan-created', undefined, plan, at)
       return { planId: plan.planId, childId, taskCount: plan.tasks.length }
     })
   }
@@ -255,12 +255,12 @@ export class EndeavourService extends Service {
     if (childId === undefined) throw new EndeavourError('role-forbidden', 'calling agent has no session id')
     const plan = this.getPlanByChild(childId)
     if (plan === undefined) throw new EndeavourError('role-forbidden', `session ${childId} is not a plan Builder`)
-    return this.#enqueue(plan.rootSessionId, async () => {
-      const current = this.#plans.get(plan.rootSessionId) ?? plan
+    return this.enqueue(plan.rootSessionId, async () => {
+      const current = this.plans.get(plan.rootSessionId) ?? plan
       assertChildRole(current, childId, agentParentSessionId(agent) ?? current.rootSessionId)
       const at = Date.now()
       const next = startTask(current, TaskId(taskId), at)
-      await this.#append(current.rootSessionId, 'task-started', current, next, at)
+      await this.append(current.rootSessionId, 'task-started', current, next, at)
       return next
     })
   }
@@ -274,8 +274,8 @@ export class EndeavourService extends Service {
     if (childId === undefined) throw new EndeavourError('role-forbidden', 'calling agent has no session id')
     const plan = this.getPlanByChild(childId)
     if (plan === undefined) throw new EndeavourError('role-forbidden', `session ${childId} is not a plan Builder`)
-    return this.#enqueue(plan.rootSessionId, async () => {
-      const current = this.#plans.get(plan.rootSessionId) ?? plan
+    return this.enqueue(plan.rootSessionId, async () => {
+      const current = this.plans.get(plan.rootSessionId) ?? plan
       assertChildRole(current, childId, agentParentSessionId(agent) ?? current.rootSessionId)
       const at = Date.now()
       const next = reportTask(current, TaskId(taskId), {
@@ -285,9 +285,9 @@ export class EndeavourService extends Service {
         ...(report.blocker === undefined ? {} : { blocker: report.blocker }),
         ...(report.failure === undefined ? {} : { failure: report.failure }),
       }, at)
-      await this.#append(current.rootSessionId, 'task-reported', current, next, at)
+      await this.append(current.rootSessionId, 'task-reported', current, next, at)
       const task = next.tasks.find((candidate) => candidate.spec.id === taskId)
-      const subagents = this.#subagentHost()
+      const subagents = this.subagentHost()
       await subagents.sendMessage(agent, current.rootSessionId, [
         textBlock([
           `Builder report for task "${task?.spec.display.title ?? taskId}" (${taskId}).`,
@@ -311,18 +311,18 @@ export class EndeavourService extends Service {
   async verifyTask(agent: Agent, taskId: string, outcome: 'succeeded' | 'failed', note?: string): Promise<PlanState> {
     const rootSessionId = agentSessionId(agent)
     if (rootSessionId === undefined) throw new EndeavourError('role-forbidden', 'calling agent has no session id')
-    const plan = this.#plans.get(rootSessionId)
+    const plan = this.plans.get(rootSessionId)
     if (plan === undefined) throw new EndeavourError('role-forbidden', `session ${rootSessionId} has no plan`)
-    return this.#enqueue(rootSessionId, async () => {
-      const current = this.#plans.get(rootSessionId) ?? plan
+    return this.enqueue(rootSessionId, async () => {
+      const current = this.plans.get(rootSessionId) ?? plan
       assertRootRole(current, rootSessionId)
       const at = Date.now()
       const next = verifyTask(current, TaskId(taskId), outcome, note, at)
-      await this.#append(rootSessionId, next.terminal === undefined ? 'task-verified' : 'plan-finalized', current, next, at)
+      await this.append(rootSessionId, next.terminal === undefined ? 'task-verified' : 'plan-finalized', current, next, at)
       if (next.terminal === undefined && outcome === 'succeeded') {
         const dispatch = nextDispatch(current, TaskId(taskId))
         if (dispatch !== undefined) {
-          const subagents = this.#subagentHost()
+          const subagents = this.subagentHost()
           await subagents.sendMessage(agent, next.childId, [
             textBlock(builderBrief(undefined, undefined, dispatch)),
           ], { signal: new AbortController().signal })
