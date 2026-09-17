@@ -9,6 +9,7 @@ import { endeavourPlanDefinition } from './definition.js'
 import { PlanCard, type EndeavourInjected, type PlanCardProps } from './PlanCard.js'
 import { registerPlanDock } from './PlanDock.js'
 import { en, NS, type EndeavourKey } from './locales.js'
+import { ensurePlanStyles } from './styles.js'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface LocaleNamespaceMap {
@@ -40,6 +41,7 @@ export const inject = ['uiConversation', 'slots', 'sessions', 'locale']
 export function apply(ctx: ClientContext): void {
   const client = ctx as unknown as ClientServices
   client.uiConversation.events.register(endeavourPlanDefinition)
+  client.effect(() => ensurePlanStyles(), 'dsh-endeavour: plan styles')
   client.effect(() => client.locale.register(NS, { zh: en, en }), 'dsh-endeavour: dictionaries')
   client.slots.inject('conversation.chat.node', () => client.slots.register({
     name: 'conversation.chat.node',

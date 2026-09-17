@@ -6,9 +6,10 @@
  * card data type does not carry them.
  */
 
-import { useEffect, useState, type CSSProperties } from 'react'
+import { useEffect, useState } from 'react'
 import type { EndeavourCardData, EndeavourCardTask } from './definition.js'
 import type { EndeavourKey } from './locales.js'
+import { CLASS } from './styles.js'
 
 /** Copy lookup shared by both surfaces. */
 export type PlanCopy = (key: EndeavourKey, params?: Record<string, string | number>) => string
@@ -18,7 +19,7 @@ export interface PlanViewProps {
   readonly data: EndeavourCardData
   readonly copy: PlanCopy
   readonly onOpenBuilder: () => void
-  /** `dock` spans the composer width; `card` is the transcript card. */
+  /** `dock` attaches above the composer; `card` is the transcript card. */
   readonly variant?: 'card' | 'dock'
 }
 
@@ -36,11 +37,63 @@ export function taskElapsed(task: EndeavourCardTask, now: number): string | unde
   return formatElapsed((task.finishedAt ?? now) - task.startedAt)
 }
 
-const STATUS_COLOR: Record<EndeavourCardTask['status'], string> = {
-  waiting: 'var(--dsw-text-tertiary, #8a8f98)',
-  running: 'var(--dsw-accent-primary, #4d6bfe)',
-  succeeded: 'var(--dsw-status-success, #22c55e)',
-  failed: 'var(--dsw-status-error, #ef4444)',
+/** Pending: hollow dashed ring, matching the native todo glyph. */
+function PendingGlyph() {
+  return (
+    <svg width={14} height={14} viewBox="0 0 14 14" fill="none" aria-hidden="true">
+      <circle cx="7" cy="7" r="6.4" stroke="currentColor" strokeWidth="1.2" strokeDasharray="2.4 2.4" />
+    </svg>
+  )
+}
+
+/** Running: business-blue partial ring with a subtle pulsing core. */
+function RunningGlyph() {
+  return (
+    <span className={CLASS.pulse} style={{ display: 'grid', placeItems: 'center' }}>
+      <svg width={14} height={14} viewBox="0 0 14 14" fill="none" aria-hidden="true">
+        <circle cx="7" cy="7" r="6.4" stroke="currentColor" strokeWidth="1.2" strokeDasharray="26 14" strokeLinecap="round" />
+        <circle cx="7" cy="7" r="2.2" fill="currentColor" opacity="0.5" />
+      </svg>
+    </span>
+  )
+}
+
+/** Succeeded: success check-ring. */
+function SucceededGlyph() {
+  return (
+    <svg width={14} height={14} viewBox="0 0 14 14" fill="none" aria-hidden="true">
+      <circle cx="7" cy="7" r="6.4" stroke="currentColor" strokeWidth="1.2" />
+      <path d="M4.4 7.2 6.2 9l3.6-3.8" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  )
+}
+
+/** Failed: failure mark. */
+function FailedGlyph() {
+  return (
+    <svg width={14} height={14} viewBox="0 0 14 14" fill="none" aria-hidden="true">
+      <circle cx="7" cy="7" r="6.4" stroke="currentColor" strokeWidth="1.2" />
+      <path d="M5 5l4 4M9 5l-4 4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+    </svg>
+  )
+}
+
+const GLYPH_CLASS: Record<EndeavourCardTask['status'], string> = {
+  waiting: CLASS.glyphPending,
+  running: CLASS.glyphRunning,
+  succeeded: CLASS.glyphSucceeded,
+  failed: CLASS.glyphFailed,
+}
+
+function StatusGlyph({ status }: { status: EndeavourCardTask['status'] }) {
+  const body = status === 'waiting'
+    ? <PendingGlyph />
+    : status === 'running'
+      ? <RunningGlyph />
+      : status === 'succeeded'
+        ? <SucceededGlyph />
+        : <FailedGlyph />
+  return <span className={`${CLASS.glyph} ${GLYPH_CLASS[status]}`} aria-hidden="true">{body}</span>
 }
 
 /** One plan panel; the timer ticks every second only while a task is running. */
@@ -56,77 +109,66 @@ export function PlanView(props: PlanViewProps): React.ReactElement | null {
   }, [active])
 
   const dock = variant === 'dock'
-  const container: CSSProperties = {
-    boxSizing: 'border-box',
-    width: dock ? '100%' : undefined,
-    maxWidth: dock ? '100%' : '560px',
-    border: '1px solid var(--dsw-border-subtle, #2a2f3a)',
-    borderRadius: '10px',
-    background: 'var(--dsw-surface-raised, #171a21)',
-    color: 'var(--dsw-text-primary, #e6e8ec)',
-    padding: dock ? '8px 12px' : '12px 14px',
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '4px',
-  }
-  const progress = copy('plan.progress', { completed: data.completedCount, total: data.total })
-  return (
-    <section style={container} data-endeavour-plan={data.planId} data-endeavour-surface={variant} aria-label={data.title}>
-      <header style={{ display: 'flex', alignItems: 'baseline', gap: '10px', minWidth: 0 }}>
-        <strong style={{ fontSize: dock ? '13px' : '14px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>
-          {data.title}
-        </strong>
-        <span style={{ color: 'var(--dsw-text-secondary, #a6adbb)', fontSize: '12px', flexShrink: 0 }}>{progress}</span>
-        <span style={{ flex: 1 }} />
+  const body = (
+    <>
+      <div className={CLASS.header}>
+        <span className={CLASS.title} title={data.title}>{data.title}</span>
+        <span className={CLASS.progress}>{copy('plan.progress', { completed: data.completedCount, total: data.total })}</span>
         <button
           type="button"
+          className={CLASS.chevron}
           aria-expanded={!collapsed}
           aria-label={collapsed ? copy('plan.expand') : copy('plan.collapse')}
           onClick={() => { setCollapsed((value) => !value) }}
-          style={{ border: 'none', background: 'transparent', color: 'var(--dsw-text-tertiary, #8a8f98)', fontSize: '12px', cursor: 'pointer', padding: 0, flexShrink: 0 }}
         >
-          {collapsed ? '▸' : '▾'}
+          <svg width={12} height={12} viewBox="0 0 12 12" fill="none" aria-hidden="true" style={{ transform: collapsed ? 'rotate(-90deg)' : undefined }}>
+            <path d="M2.5 4.5 6 8l3.5-3.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
         </button>
-        <button
-          type="button"
-          onClick={onOpenBuilder}
-          style={{ border: '1px solid var(--dsw-border-subtle, #2a2f3a)', background: 'transparent', color: 'var(--dsw-accent-primary, #4d6bfe)', borderRadius: '6px', padding: '3px 9px', fontSize: '12px', cursor: 'pointer', flexShrink: 0 }}
-        >
+        <button type="button" className={CLASS.ghost} onClick={onOpenBuilder}>
           {copy('plan.openBuilder')}
+          <svg width={12} height={12} viewBox="0 0 12 12" fill="none" aria-hidden="true">
+            <path d="M4.5 2.5 8 6l-3.5 3.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
         </button>
-      </header>
-      {!collapsed && (data.currentTitle !== undefined || data.checking) && data.terminal === undefined ? (
-        <div style={{ color: 'var(--dsw-text-secondary, #a6adbb)', fontSize: '12px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-          {data.currentTitle === undefined ? '' : copy('plan.current', { title: data.currentTitle })}
-          {data.checking ? `${data.currentTitle === undefined ? '' : ' · '}${copy('plan.checking')}` : ''}
-        </div>
-      ) : null}
+      </div>
       {!collapsed ? (
-        <ul style={{ listStyle: 'none', margin: 0, padding: 0, maxHeight: '240px', overflowY: 'auto' }}>
+        <ul className={CLASS.rows}>
           {data.tasks.map((task) => (
-            <li key={task.id} style={{ display: 'flex', alignItems: 'baseline', gap: '8px', padding: '3px 0', fontSize: '13px', minWidth: 0 }}>
-              <span aria-hidden="true" style={{ color: STATUS_COLOR[task.status], fontSize: '11px', flexShrink: 0 }}>●</span>
-              <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={task.title}>
-                {task.title}
-              </span>
-              <span style={{ color: 'var(--dsw-text-secondary, #a6adbb)', fontSize: '12px', flexShrink: 0 }}>
+            <li
+              key={task.id}
+              className={`${CLASS.row}${task.status === 'running' ? ` ${CLASS.rowRunning}` : ''}`}
+            >
+              <StatusGlyph status={task.status} />
+              <span className={CLASS.rowTitle} title={task.title}>{task.title}</span>
+              <span className={CLASS.rowStatus}>
                 {copy(`status.${task.status}` as EndeavourKey)}
+                {task.status === 'running' && data.checking ? ` · ${copy('plan.checking')}` : ''}
               </span>
               {taskElapsed(task, now) !== undefined ? (
-                <span style={{ color: 'var(--dsw-text-tertiary, #8a8f98)', fontSize: '12px', fontVariantNumeric: 'tabular-nums', flexShrink: 0 }} aria-label={`${task.title} elapsed`}>
-                  {taskElapsed(task, now)}
-                </span>
+                <span className={CLASS.rowTimer} aria-label={`${task.title} elapsed`}>{taskElapsed(task, now)}</span>
               ) : null}
             </li>
           ))}
         </ul>
       ) : null}
       {data.terminal !== undefined ? (
-        <div style={{ color: 'var(--dsw-text-secondary, #a6adbb)', fontSize: '12px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        <div className={CLASS.note}>
           {data.terminal.outcome === 'completed' ? copy('plan.completed') : copy('plan.failed')}
           {data.terminal.note !== undefined ? ` — ${data.terminal.note}` : ''}
         </div>
       ) : null}
-    </section>
+    </>
+  )
+
+  if (!dock) {
+    return <section className={CLASS.card} data-endeavour-plan={data.planId} data-endeavour-surface="card" aria-label={data.title}>{body}</section>
+  }
+  return (
+    <div className={CLASS.dockWrap}>
+      <section className={CLASS.dockPanel} data-endeavour-plan={data.planId} data-endeavour-surface="dock" aria-label={data.title}>
+        {body}
+      </section>
+    </div>
   )
 }
