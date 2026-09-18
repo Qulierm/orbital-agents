@@ -130,12 +130,25 @@ export class PeerLifecycle {
 
   constructor(
     private readonly provisioner: PeerProvisioner,
-    private readonly deps: { readonly readPair: (sessionId: string) => PeerState | undefined; readonly onError?: (error: unknown) => void },
+    private readonly deps: {
+      readonly readPair: (sessionId: string) => PeerState | undefined
+      /** Live metadata; when provided only ordinary Endeavour sessions qualify. */
+      readonly readMeta?: (sessionId: string) => PeerSessionMeta | undefined
+      readonly onError?: (error: unknown) => void
+    },
   ) {}
 
   /** Observe one session id; safe to call repeatedly and from HMR re-mounts. */
   observe(sessionId: string): void {
     if (this.seen.has(sessionId)) return
+    if (this.deps.readMeta !== undefined) {
+      const meta = this.deps.readMeta(sessionId)
+      // Ordinary Endeavour sessions only: Standard chats, subagent sessions and
+      // the Challenger peer itself are ignored, so observing the peer's own
+      // create announcement can never recurse. An unresolvable session is left
+      // unseen so a later announcement/list snapshot can retry it.
+      if (meta === undefined || meta.origin === 'subagent' || meta.agentPreset !== 'endeavour') return
+    }
     this.seen.add(sessionId)
     if (this.deps.readPair(sessionId) !== undefined) return
     void this.provisioner.ensure(sessionId).catch((error: unknown) => { this.deps.onError?.(error) })

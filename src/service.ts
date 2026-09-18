@@ -305,7 +305,10 @@ export class EndeavourService extends Service {
         },
         now: () => Date.now(),
       })
-      this.lifecycle = new PeerLifecycle(this.provisioner, { readPair: (sessionId) => this.peers.get(sessionId) })
+      this.lifecycle = new PeerLifecycle(this.provisioner, {
+        readPair: (sessionId) => this.peers.get(sessionId),
+        readMeta: (sessionId) => seam.sessionMeta(sessionId),
+      })
     }
     return this.provisioner
   }
@@ -349,16 +352,48 @@ export class EndeavourService extends Service {
   }
 
   /**
-   * Additive lifecycle hook: observe only the CURRENT session so startup
-   * recovery never mass-creates peers for cold history. Challenger, Standard
-   * and subagent sessions are rejected by the provisioner and swallowed.
+   * Correct Host lifecycle wiring for peer provisioning.
+   *
+   * 1. Every session that is ALREADY ATTACHED at mount time (`sessions.list()`,
+   *    i.e. live entries only — never cold persisted history) is observed once.
+   * 2. `session/created` announcements observe NEWLY created or resumed
+   *    sessions as they attach, so a Challenger exists as soon as its Endeavour
+   *    session exists, without waiting for `endeavour_plan`.
+   *
+   * Eligibility (ordinary, preset `endeavour`, no subagent origin and no
+   * existing pair) lives in `PeerLifecycle`, so Standard chats, subagent
+   * sessions and the Challenger's own creation announcement are ignored and can
+   * never recurse. Returns a disposer that unsubscribes for HMR/unmount.
    */
-  observeCurrentSession(): void {
-    const host = this.sessionHost() as unknown as { list?: () => readonly { id: string }[]; current?: () => string | undefined }
-    const current = host?.current?.()
-    if (typeof current !== 'string' || current === '') return
-    this.peerProvisioner()
-    this.lifecycle?.observe(current)
+  observeSessionLifecycle(): () => void {
+    let runtime: PeerRuntimeDeps
+    try {
+      runtime = this.peerRuntime()
+    } catch {
+      // Peer provisioning is additive; a missing host seam must not break plans.
+      return () => {}
+    }
+    const lifecycle = this.lifecycle ?? new PeerLifecycle(runtime.provisioner, {
+      readPair: (sessionId) => this.peers.get(sessionId),
+      readMeta: (sessionId) => {
+        try {
+          return runtime.seam.sessionMeta(sessionId)
+        } catch {
+          return undefined
+        }
+      },
+      onError: () => {},
+    })
+    this.lifecycle = lifecycle
+    for (const sessionId of runtime.seam.listSessionIds()) lifecycle.observe(sessionId)
+    const events = this.ctx as unknown as { on?: (name: string, listener: (session: unknown) => void) => (() => void) | undefined }
+    const off = events.on?.('session/created', (session: unknown) => {
+      const id = (session as { readonly id?: unknown } | undefined)?.id
+      if (typeof id === 'string' && id !== '') lifecycle.observe(id)
+    })
+    return () => {
+      if (typeof off === 'function') off()
+    }
   }
 
   /** Append one checkpoint to its owning root session and flush durability. */
