@@ -203,6 +203,105 @@ describe('installer lifecycle', () => {
     expect(existsSync(join(home, '.dsh', '.agent-presets', 'endeavour'))).toBe(false)
   })
 
+  it('installs both owned presets with per-preset state and no plugin link on Challenger', () => {
+    const home = tempHome()
+    seedProfile(home)
+    expect(installer(home, '--tarball', tarball()).status).toBe(0)
+    const root = join(home, '.dsh', '.agent-presets')
+    for (const id of ['endeavour', 'challenger']) {
+      expect(existsSync(join(root, id, 'agent.cordis.yml'))).toBe(true)
+      expect(existsSync(join(root, id, 'preset.yml'))).toBe(true)
+      expect(existsSync(join(root, id, '.dsh-endeavour-owned'))).toBe(true)
+    }
+    expect(existsSync(join(root, 'endeavour', 'node_modules', 'dsh-endeavour'))).toBe(true)
+    // Challenger is a plain coding preset: no plugin link, no delegation rows.
+    expect(existsSync(join(root, 'challenger', 'node_modules'))).toBe(false)
+    const agent = readFileSync(join(root, 'challenger', 'agent.cordis.yml'), 'utf8')
+    expect(agent).not.toMatch(/tool-subagent|send_message|subagent_fork/)
+    expect(readFileSync(join(root, 'challenger', 'preset.yml'), 'utf8')).toContain('Challenger')
+    const state = JSON.parse(readFileSync(join(home, '.dsh', 'backups', 'endeavour', latestStamp(home), 'state.json'), 'utf8'))
+    expect(state.presetExisted).toBe(false)
+    expect(state.presets.endeavour).toEqual({ dir: join(root, 'endeavour'), existed: false, owned: false })
+    expect(state.presets.challenger.existed).toBe(false)
+  })
+
+  it('upgrades a legacy Endeavour-only install and restores both sides', () => {
+    const home = tempHome()
+    seedProfile(home)
+    const file = tarball()
+    expect(installer(home, '--tarball', file).status).toBe(0)
+    const root = join(home, '.dsh', '.agent-presets')
+    // Simulate the pre-roster world: only the Endeavour preset is installed.
+    rmSync(join(root, 'challenger'), { recursive: true, force: true })
+    const upgraded = installer(home, '--tarball', file)
+    expect(upgraded.status).toBe(0)
+    expect(existsSync(join(root, 'endeavour'))).toBe(true)
+    expect(existsSync(join(root, 'challenger'))).toBe(true)
+    const stamp = /--rollback (\S+)/.exec(upgraded.stdout)?.[1]
+    expect(stamp).toBeTruthy()
+    // Rollback restores the state captured BEFORE that install: the legacy
+    // Endeavour preset stays, the newly added Challenger disappears.
+    expect(installer(home, '--rollback', stamp!).status).toBe(0)
+    expect(existsSync(join(root, 'endeavour'))).toBe(true)
+    expect(existsSync(join(root, 'challenger'))).toBe(false)
+  })
+
+  it('aborts on a foreign Challenger preset with zero partial mutation', () => {
+    const home = tempHome()
+    seedProfile(home)
+    const root = join(home, '.dsh', '.agent-presets')
+    mkdirSync(join(root, 'challenger'), { recursive: true })
+    writeFileSync(join(root, 'challenger', 'preset.yml'), 'name: MyOwnChallenger\n')
+    const refused = installer(home, '--tarball', tarball())
+    expect(refused.status).not.toBe(0)
+    // Nothing moved: no bundle row, no Endeavour preset, no foreign overwrite.
+    expect(manifest(home).dsh.profile.bundles).toEqual(['@deepseek-ai/dsh-base', 'dsh-context'])
+    expect(existsSync(join(root, 'endeavour'))).toBe(false)
+    expect(readFileSync(join(root, 'challenger', 'preset.yml'), 'utf8')).toBe('name: MyOwnChallenger\n')
+    expect(existsSync(join(home, '.dsh', 'backups', 'endeavour'))).toBe(false)
+  })
+
+  it('uninstalls every owned preset and preserves nothing foreign', () => {
+    const home = tempHome()
+    seedProfile(home)
+    expect(installer(home, '--tarball', tarball()).status).toBe(0)
+    expect(installer(home, '--uninstall').status).toBe(0)
+    const root = join(home, '.dsh', '.agent-presets')
+    expect(existsSync(join(root, 'endeavour'))).toBe(false)
+    expect(existsSync(join(root, 'challenger'))).toBe(false)
+    expect(manifest(home).dsh.profile.bundles).not.toContain('dsh-endeavour')
+  })
+
+  it('rolls back a missing owned preset to its prior present state', () => {
+    const home = tempHome()
+    seedProfile(home)
+    expect(installer(home, '--tarball', tarball()).status).toBe(0)
+    // Second mutation takes a backup with BOTH presets present.
+    expect(installer(home, '--configure-builder', '--provider', 'acme', '--model', 'fast-1').status).toBe(0)
+    const stamp = latestStamp(home)
+    const root = join(home, '.dsh', '.agent-presets')
+    rmSync(join(root, 'challenger'), { recursive: true, force: true })
+    expect(installer(home, '--rollback', stamp).status).toBe(0)
+    expect(existsSync(join(root, 'endeavour', 'preset.yml'))).toBe(true)
+    expect(existsSync(join(root, 'challenger', 'preset.yml'))).toBe(true)
+  })
+
+  it('refuses an interrupted backup instead of restoring a mixed pair', () => {
+    const home = tempHome()
+    seedProfile(home)
+    expect(installer(home, '--tarball', tarball()).status).toBe(0)
+    // A later mutation captures a backup where BOTH presets existed.
+    expect(installer(home, '--configure-builder', '--provider', 'acme', '--model', 'fast-1').status).toBe(0)
+    const stamp = latestStamp(home)
+    // Simulate an interrupted backup: the challenger copy never landed.
+    rmSync(join(home, '.dsh', 'backups', 'endeavour', stamp, 'preset-challenger'), { recursive: true, force: true })
+    const rollback = installer(home, '--rollback', stamp)
+    expect(rollback.status).not.toBe(0)
+    expect(rollback.stderr).toContain('preset-challenger')
+    // The profile was not partially restored.
+    expect(manifest(home).dsh.profile.bundles).toContain('dsh-endeavour')
+  })
+
   it('rolls back partial changes when preset installation fails', () => {
     const home = tempHome()
     const profile = seedProfile(home)

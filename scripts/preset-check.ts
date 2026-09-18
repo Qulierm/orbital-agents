@@ -100,6 +100,27 @@ export function checkPreset(): string[] {
   if (standard.some((row) => row.id === 'endeavour-tools')) {
     failures.push('installed standard preset unexpectedly contains our tools row')
   }
+
+  // Challenger: ordinary coding preset with its own persona, no orchestration
+  // tools, and no delegation/messaging mounts.
+  const challengerRows = rowsOf('preset/challenger/agent.cordis.yml')
+  const challengerPrompt = readFileSync('src/prompts/challenger.md', 'utf8')
+  if (personaPrefix(challengerRows) !== challengerPrompt) {
+    failures.push('embedded Challenger persona diverged from src/prompts/challenger.md')
+  }
+  if (challengerRows.some((row) => String(row.id ?? '').startsWith('tool-subagent'))) {
+    failures.push('Challenger preset must not mount subagent/delegation tools')
+  }
+  if (challengerRows.some((row) => row.id === 'endeavour-tools' || row.name === TOOLS_ROW_NAME)) {
+    failures.push('Challenger preset must not mount the Endeavour orchestration tools')
+  }
+  const challengerText = readFileSync('preset/challenger/agent.cordis.yml', 'utf8')
+  if (/send_message|subagent_fork/.test(challengerText)) {
+    failures.push('Challenger preset references forbidden messaging/delegation tools')
+  }
+  const challengerMeta = readFileSync('preset/challenger/preset.yml', 'utf8')
+  if (!/^name: Challenger$/m.test(challengerMeta)) failures.push('Challenger metadata name must be exactly "Challenger"')
+  if (!/^description: [\x20-\x7E]+$/m.test(challengerMeta)) failures.push('Challenger metadata description must be printable ASCII')
   return failures
 }
 

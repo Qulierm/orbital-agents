@@ -20,6 +20,10 @@ const required = [
   'package/preset/endeavour.patch.yml',
   'package/preset/endeavour/agent.cordis.yml',
   'package/preset/endeavour/preset.yml',
+  'package/preset/challenger/agent.cordis.yml',
+  'package/preset/challenger/preset.yml',
+  'package/lib/peer.js',
+  'package/lib/peer-projection.js',
   'package/docs/install.md',
 ]
 const missing = required.filter((path) => !listing.includes(path))

@@ -29,6 +29,15 @@ import { desktopRunning, repairSessionEvents } from './repair-session-events.mjs
 
 const PLUGIN = 'dsh-endeavour'
 const PRESET_ID = 'endeavour'
+/**
+ * Owned preset roster. Endeavour mounts the orchestration tools plugin (so it
+ * needs the package link); Challenger is a plain coding preset with its own
+ * persona and no delegation rows, so it never links the plugin.
+ */
+const OWNED_PRESETS = [
+  { id: 'endeavour', linkPackage: true },
+  { id: 'challenger', linkPackage: false },
+]
 const OWNERSHIP_MARKER = '.dsh-endeavour-owned'
 const args = process.argv.slice(2)
 
@@ -41,7 +50,11 @@ const profileName = flag('--profile') ?? 'desktop'
 const homeBase = process.env.DSH_ENDEAVOUR_HOME ?? homedir()
 const profileDir = join(homeBase, '.dsh', 'profiles', profileName)
 const presetRoot = join(homeBase, '.dsh', '.agent-presets')
-const presetDir = join(presetRoot, PRESET_ID)
+/** Directory of one owned preset (kept for the legacy single-preset helpers). */
+function presetDirOf(entry) {
+  return join(presetRoot, entry.id)
+}
+const presetDir = presetDirOf(OWNED_PRESETS[0])
 const backupRoot = join(homeBase, '.dsh', 'backups', 'endeavour')
 const packageRoot = resolve(import.meta.dirname, '..')
 
@@ -99,37 +112,61 @@ function atomicReplaceDir(source, target) {
   renameSync(staging, target)
 }
 
-function presetOwnedByUs() {
-  return existsSync(join(presetDir, OWNERSHIP_MARKER))
+function presetOwnedByUs(entry = OWNED_PRESETS[0]) {
+  return existsSync(join(presetDirOf(entry), OWNERSHIP_MARKER))
 }
 
-function installPreset({ force }) {
-  const source = join(packageRoot, 'preset', PRESET_ID)
+/**
+ * Abort before ANY mutation when a preset directory exists but is not owned by
+ * this plugin. Preflighting the whole roster keeps a foreign Challenger (or
+ * Endeavour) conflict from leaving a partial install behind.
+ */
+function preflightPresets({ force }) {
+  for (const entry of OWNED_PRESETS) {
+    const source = join(packageRoot, 'preset', entry.id)
+    const dir = presetDirOf(entry)
+    if (!existsSync(source)) throw new Error(`preset asset missing: ${source}`)
+    if (existsSync(dir) && !presetOwnedByUs(entry) && !force) {
+      throw new Error(`refusing to overwrite existing user preset at ${dir}; re-run with --force to replace it (a backup is taken)`)
+    }
+  }
+}
+
+function installPreset(entry, { force }) {
+  const source = join(packageRoot, 'preset', entry.id)
+  const dir = presetDirOf(entry)
   if (!existsSync(source)) throw new Error(`preset asset missing: ${source}`)
-  if (existsSync(presetDir) && !presetOwnedByUs() && !force) {
-    throw new Error(`refusing to overwrite existing user preset at ${presetDir}; re-run with --force to replace it (a backup is taken)`)
+  if (existsSync(dir) && !presetOwnedByUs(entry) && !force) {
+    throw new Error(`refusing to overwrite existing user preset at ${dir}; re-run with --force to replace it (a backup is taken)`)
   }
   mkdirSync(presetRoot, { recursive: true })
-  atomicReplaceDir(source, presetDir)
-  writeFileSync(join(presetDir, OWNERSHIP_MARKER), `${PLUGIN}\n`)
-  const linkPath = join(presetDir, 'node_modules')
-  mkdirSync(linkPath, { recursive: true })
-  const packageLink = join(linkPath, PLUGIN)
-  rmSync(packageLink, { force: true })
-  const installedPackage = join(profileDir, 'node_modules', PLUGIN)
-  if (!existsSync(installedPackage)) throw new Error(`installed package missing: ${installedPackage}`)
-  symlinkSync(installedPackage, packageLink, 'dir')
-  console.log(`install-local: preset installed at ${presetDir}`)
+  atomicReplaceDir(source, dir)
+  writeFileSync(join(dir, OWNERSHIP_MARKER), `${PLUGIN}\n`)
+  if (entry.linkPackage === true) {
+    const linkPath = join(dir, 'node_modules')
+    mkdirSync(linkPath, { recursive: true })
+    const packageLink = join(linkPath, PLUGIN)
+    rmSync(packageLink, { force: true })
+    const installedPackage = join(profileDir, 'node_modules', PLUGIN)
+    if (!existsSync(installedPackage)) throw new Error(`installed package missing: ${installedPackage}`)
+    symlinkSync(installedPackage, packageLink, 'dir')
+  }
+  console.log(`install-local: preset installed at ${dir}`)
 }
 
-function removePreset() {
-  if (!existsSync(presetDir)) return false
-  if (!presetOwnedByUs()) {
-    console.log(`install-local: preset at ${presetDir} is not owned by ${PLUGIN}; leaving it untouched`)
+function installPresets(options) {
+  for (const entry of OWNED_PRESETS) installPreset(entry, options)
+}
+
+function removePreset(entry = OWNED_PRESETS[0]) {
+  const dir = presetDirOf(entry)
+  if (!existsSync(dir)) return false
+  if (!presetOwnedByUs(entry)) {
+    console.log(`install-local: preset at ${dir} is not owned by ${PLUGIN}; leaving it untouched`)
     return false
   }
-  rmSync(presetDir, { recursive: true, force: true })
-  console.log(`install-local: removed owned preset ${presetDir}`)
+  rmSync(dir, { recursive: true, force: true })
+  console.log(`install-local: removed owned preset ${dir}`)
   return true
 }
 
@@ -141,15 +178,22 @@ function backup() {
     const source = join(profileDir, file)
     if (existsSync(source)) cpSync(source, join(target, 'profile', file))
   }
-  const presetExisted = existsSync(presetDir)
-  if (presetExisted) cpSync(presetDir, join(target, 'preset'), { recursive: true, dereference: false })
-  const priorOwnership = presetExisted && presetOwnedByUs()
+  const presets = {}
+  for (const entry of OWNED_PRESETS) {
+    const dir = presetDirOf(entry)
+    const existed = existsSync(dir)
+    const owned = existed && presetOwnedByUs(entry)
+    if (existed) cpSync(dir, join(target, `preset-${entry.id}`), { recursive: true, dereference: false })
+    presets[entry.id] = { dir, existed, owned }
+  }
+  const legacy = presets[PRESET_ID]
   const state = {
     stamp,
     profileDir,
-    presetDir,
-    presetExisted,
-    presetOwnedByUs: priorOwnership,
+    presetDir: legacy.dir,
+    presetExisted: legacy.existed,
+    presetOwnedByUs: legacy.owned,
+    presets,
     installedAt: new Date().toISOString(),
   }
   writeFileSync(join(target, 'state.json'), `${JSON.stringify(state, null, 2)}\n`)
@@ -217,6 +261,8 @@ function resetBuilder() {
 function install(tarball, { force }) {
   if (!existsSync(profileDir)) throw new Error(`profile not found: ${profileDir}`)
   if (!tarball || !existsSync(resolve(tarball))) throw new Error(`tarball not found: ${String(tarball)}`)
+  // Fail before any mutation (including the package install) on foreign presets.
+  preflightPresets({ force })
   const stamp = backup()
   try {
     // A file: dependency at an unchanged version is reused from the store, which
@@ -235,7 +281,7 @@ function install(tarball, { force }) {
       writeManifest(manifest)
       console.log(`install-local: added ${PLUGIN} to dsh.profile.bundles (order preserved)`)
     }
-    installPreset({ force })
+    installPresets({ force })
   } catch (error) {
     console.error(`install-local: install failed (${String(error.message)}); rolling back to ${stamp}`)
     rollback(stamp)
@@ -264,10 +310,17 @@ function uninstall() {
     writeManifest(manifest)
   }
   const state = JSON.parse(readFileSync(join(backupRoot, stamp, 'state.json'), 'utf8'))
-  if (state.presetExisted && state.presetOwnedByUs === false) {
-    console.log('install-local: prior preset was user-authored; leaving it in place')
-  } else if (presetOwnedByUs()) {
-    removePreset()
+  const presets = state.presets ?? {
+    [PRESET_ID]: { dir: presetDir, existed: state.presetExisted, owned: state.presetOwnedByUs },
+  }
+  for (const entry of OWNED_PRESETS) {
+    const prior = presets[entry.id]
+    if (prior === undefined) continue
+    if (prior.existed && prior.owned === false) {
+      console.log(`install-local: prior ${entry.id} preset was user-authored; leaving it in place`)
+    } else if (presetOwnedByUs(entry)) {
+      removePreset(entry)
+    }
   }
   runPnpm(['remove', PLUGIN], profileDir)
   console.log(`install-local: uninstalled ${PLUGIN}; backup at ${join(backupRoot, stamp)}`)
@@ -283,16 +336,34 @@ function rollback(stamp) {
   const statePath = join(source, 'state.json')
   if (!existsSync(statePath)) throw new Error(`backup not found: ${source}`)
   const state = JSON.parse(readFileSync(statePath, 'utf8'))
+  const presets = state.presets ?? {
+    [PRESET_ID]: { dir: presetDir, existed: state.presetExisted, owned: state.presetOwnedByUs },
+  }
+  // Validate EVERY prior preset before mutating anything: an interrupted or
+  // incomplete backup must not produce a mixed restore.
+  const plan = []
+  for (const entry of OWNED_PRESETS) {
+    const prior = presets[entry.id]
+    if (prior === undefined) continue
+    const backupDir = join(source, `preset-${entry.id}`)
+    if (prior.existed && !existsSync(backupDir)) {
+      throw new Error(`backup is missing preset-${entry.id}; refusing a partial restore`)
+    }
+    plan.push({ entry, prior, backupDir })
+  }
   for (const file of readdirSync(join(source, 'profile'))) {
     cpSync(join(source, 'profile', file), join(profileDir, file))
   }
-  if (state.presetExisted) {
-    if (existsSync(presetDir)) rmSync(presetDir, { recursive: true, force: true })
-    cpSync(join(source, 'preset'), presetDir, { recursive: true, dereference: false })
-    console.log(`install-local: preset restored from backup`)
-  } else if (existsSync(presetDir) && presetOwnedByUs()) {
-    rmSync(presetDir, { recursive: true, force: true })
-    console.log('install-local: removed preset that did not exist before the backup')
+  for (const { entry, prior, backupDir } of plan) {
+    const dir = presetDirOf(entry)
+    if (prior.existed) {
+      if (existsSync(dir)) rmSync(dir, { recursive: true, force: true })
+      cpSync(backupDir, dir, { recursive: true, dereference: false })
+      console.log(`install-local: ${entry.id} preset restored from backup`)
+    } else if (existsSync(dir) && presetOwnedByUs(entry)) {
+      rmSync(dir, { recursive: true, force: true })
+      console.log(`install-local: removed ${entry.id} preset that did not exist before the backup`)
+    }
   }
   runPnpm(['install'], profileDir)
   console.log(`install-local: profile restored from ${source}`)
