@@ -87,6 +87,11 @@ export class PeerProvisioner {
             : { workspaceId }),
         })
         await this.repairAttachments(endeavourSessionId, challengerSessionId, meta.cwd)
+        // A challenger that is merely NOT LIVE in this process (cold persisted
+        // session) is not a lost pair: the ROOT's durable checkpoint is
+        // authoritative. Only a root that truly lost its checkpoint is repaired,
+        // so repeated launches can never grow the logs.
+        if (this.deps.hasCheckpoint(endeavourSessionId)) return existing
         const repaired: PeerState = { ...existing, updatedAt: at, sequence: existing.sequence + 1 }
         await this.deps.appendPair(endeavourSessionId, repaired, 'peer-updated', at)
         return repaired

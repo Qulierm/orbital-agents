@@ -295,6 +295,24 @@ describe('peer session lifecycle', () => {
     expect(h.creates).toEqual([])
   })
 
+  it('adopts a cold (not-live) Challenger without growing the checkpoint log', async () => {
+    const pair = pairOf('session-root')
+    const payload = peerEventPayload('peer-created', undefined, pair, 1)
+    // Only the ROOT is live: the Challenger exists on disk but is not attached,
+    // which is the normal state in a fresh process.
+    const root = fakeSession('session-root', { agentPreset: 'endeavour', cwd: '/proj' }, [{ type: 'endeavour/peer', data: payload }])
+    const h = lifecycleHarness([root])
+    h.service.observeSessionLifecycle()
+    await settle()
+    // The pair is adopted (one create call that adopts the existing id)...
+    expect(h.creates).toHaveLength(1)
+    expect(h.creates[0]?.id).toBe(pair.challengerSessionId)
+    // ...and NOTHING is appended: the root checkpoint count is unchanged.
+    expect(root.events.filter((event) => event.type === 'endeavour/peer')).toHaveLength(1)
+    expect(h.attaches).toEqual([pair.challengerSessionId])
+    expect(h.copies).toEqual([{ from: 'session-root', to: pair.challengerSessionId }])
+  })
+
   it('adopts an existing durable pair on restart without creating a duplicate session', async () => {
     const pair = pairOf('session-root')
     const payload = peerEventPayload('peer-created', undefined, pair, 1)
