@@ -46,6 +46,47 @@ export function builderTabTarget(
   return { parentSessionId: sessionId, childSessionId: state.childId }
 }
 
+/** Exact continuable address of the CURRENT session, when it is one. */
+export interface AddressedChild {
+  readonly parentSessionId: string
+  readonly childSessionId: string
+}
+
+/**
+ * Validate the current session's snapshot subagent address: only an exact
+ * addressed continuable child of a non-empty parent qualifies.
+ */
+export function addressedContinuableChild(sessionId: string | undefined, subagent: unknown): AddressedChild | undefined {
+  const address = (subagent as { address?: unknown } | null | undefined)?.address as
+    { parentSessionId?: unknown; childSessionId?: unknown; mode?: unknown } | undefined
+  if (sessionId === undefined || address === undefined) return undefined
+  if (address.mode !== 'continuable') return undefined
+  if (typeof address.parentSessionId !== 'string' || address.parentSessionId.length === 0) return undefined
+  if (typeof address.childSessionId !== 'string' || address.childSessionId !== sessionId) return undefined
+  return { parentSessionId: address.parentSessionId, childSessionId: sessionId }
+}
+
+/**
+ * Reciprocal tab target: the addressed plan child is valid only when its own
+ * continuable address matches AND the parent's durable plan points at exactly
+ * this child. Arbitrary subagents, missing parents, and corrupt projections are
+ * rejected.
+ */
+export function endeavourTabTarget(
+  sessionId: string | undefined,
+  subagent: unknown,
+  parentPreset: unknown,
+  parentPlan: unknown,
+): AddressedChild | undefined {
+  const child = addressedContinuableChild(sessionId, subagent)
+  if (child === undefined) return undefined
+  const planned = builderTabTarget(child.parentSessionId, parentPreset, parentPlan)
+  return planned?.childSessionId === sessionId ? child : undefined
+}
+
+/** Which entry (if any) the current session should expose. */
+export type BuilderTabKind = 'builder' | 'endeavour'
+
 /** Dependencies the reconciliation needs (all official, injected for tests). */
 export interface BuilderTabFaces {
   /** The currently selected session id. */
@@ -54,8 +95,10 @@ export interface BuilderTabFaces {
   readonly subscribeCurrent: (listener: () => void) => () => void
   /** A projection face for one session, when the binding exists. */
   readonly face: (sessionId: string, key: string) => ProjectionFace | undefined
-  /** Register the view entry; the returned callback unregisters it. */
-  readonly register: () => () => void
+  /** The session snapshot's subagent share, when addressed. */
+  readonly subagent: (sessionId: string) => unknown
+  /** Register the entry for one kind; the callback unregisters it. */
+  readonly register: (kind: BuilderTabKind) => () => void
 }
 
 /**
@@ -69,6 +112,20 @@ export function reconcileBuilderTab(faces: BuilderTabFaces): () => void {
   let disposeFaces: (() => void) | undefined
   let subscribed: string | undefined
 
+  let registeredKind: BuilderTabKind | undefined
+
+  const kindFor = (sessionId: string | undefined): BuilderTabKind | undefined => {
+    if (sessionId === undefined) return undefined
+    const preset = faces.face(sessionId, 'agentPreset')?.getSnapshot()
+    const plan = faces.face(sessionId, 'endeavourPlan')?.getSnapshot()
+    if (builderTabTarget(sessionId, preset, plan) !== undefined) return 'builder'
+    const child = addressedContinuableChild(sessionId, faces.subagent(sessionId))
+    if (child === undefined) return undefined
+    const parentPlan = faces.face(child.parentSessionId, 'endeavourPlan')?.getSnapshot()
+    const parentPreset = faces.face(child.parentSessionId, 'agentPreset')?.getSnapshot()
+    return endeavourTabTarget(sessionId, faces.subagent(sessionId), parentPreset, parentPlan) === undefined ? undefined : 'endeavour'
+  }
+
   const refresh = (): void => {
     const sessionId = faces.currentSession()
     if (subscribed !== sessionId) {
@@ -76,19 +133,21 @@ export function reconcileBuilderTab(faces: BuilderTabFaces): () => void {
       disposeFaces = undefined
       subscribed = sessionId
       if (sessionId !== undefined) {
-        const unsubscribers = [faces.face(sessionId, 'agentPreset'), faces.face(sessionId, 'endeavourPlan')]
+        const subscriptions = [faces.face(sessionId, 'agentPreset'), faces.face(sessionId, 'endeavourPlan')]
+        const child = addressedContinuableChild(sessionId, faces.subagent(sessionId))
+        if (child !== undefined) subscriptions.push(faces.face(child.parentSessionId, 'endeavourPlan'))
+        const unsubscribers = subscriptions
           .filter((face): face is ProjectionFace => face !== undefined)
           .map((face) => face.subscribe(refresh))
         disposeFaces = () => { for (const unsubscribe of unsubscribers) unsubscribe() }
       }
     }
-    const preset = sessionId === undefined ? undefined : faces.face(sessionId, 'agentPreset')?.getSnapshot()
-    const plan = sessionId === undefined ? undefined : faces.face(sessionId, 'endeavourPlan')?.getSnapshot()
-    const valid = builderTabTarget(sessionId, preset, plan) !== undefined
-    if (valid && disposeEntry === undefined) disposeEntry = faces.register()
-    if (!valid && disposeEntry !== undefined) {
-      disposeEntry()
+    const kind = kindFor(sessionId)
+    if (kind !== registeredKind) {
+      disposeEntry?.()
       disposeEntry = undefined
+      if (kind !== undefined) disposeEntry = faces.register(kind)
+      registeredKind = kind
     }
   }
 
@@ -151,11 +210,41 @@ export interface BuilderTabSlots {
 /** Options of the registered view entry. */
 export interface BuilderTabEntryOptions {
   readonly name: 'conversation.view'
-  readonly id: 'endeavour-builder'
+  readonly id: 'endeavour-builder' | 'endeavour-return'
   readonly order: 20
   readonly locale: string
   readonly label: () => string
   readonly inject: (sessionId: string) => { readonly builderTab: BuilderTabBridge }
+}
+
+/** Navigation dependencies of the reciprocal Endeavour tab. */
+export interface EndeavourTabNavigation {
+  readonly resetChat: (sessionId: string) => void
+  readonly subagent: unknown
+  readonly readParentPlan: (parentSessionId: string) => unknown
+  readonly readParentPreset: (parentSessionId: string) => unknown
+  readonly openParent: (parentSessionId: string) => void
+  readonly transientActivation: boolean
+}
+
+/**
+ * Reciprocal selection: reset the child to Chat through the official selector,
+ * then (only for a real click) open the exact parent through official session
+ * navigation. Replay/HMR mounts reset Chat and never navigate.
+ */
+export function openEndeavourTab(sessionId: string | undefined, navigation: EndeavourTabNavigation): boolean {
+  if (sessionId === undefined) return false
+  navigation.resetChat(sessionId)
+  if (!navigation.transientActivation) return false
+  const target = endeavourTabTarget(
+    sessionId,
+    navigation.subagent,
+    navigation.readParentPreset(sessionId) ?? 'endeavour',
+    navigation.readParentPlan(sessionId),
+  )
+  if (target === undefined) return false
+  navigation.openParent(target.parentSessionId)
+  return true
 }
 
 /** Bridge handed to the mounted view. */
@@ -169,14 +258,15 @@ export interface BuilderTabBridge {
  */
 export function registerBuilderTabEntry(
   slots: BuilderTabSlots,
+  kind: BuilderTabKind,
   selectFor: (sessionId: string, openView?: BuilderTabOpenView) => boolean,
 ): () => void {
   return slots.register({
     name: 'conversation.view',
-    id: 'endeavour-builder',
+    id: kind === 'builder' ? 'endeavour-builder' : 'endeavour-return',
     order: 20,
     locale: 'endeavour',
-    label: () => en['view.builder'],
+    label: () => (kind === 'builder' ? en['view.builder'] : en['view.endeavour']),
     inject: (sessionId: string) => ({ builderTab: { select: (openView?: BuilderTabOpenView) => selectFor(sessionId, openView) } }),
   }, BuilderTabView)
 }

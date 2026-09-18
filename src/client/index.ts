@@ -21,8 +21,10 @@ import { ensurePlanStyles } from './styles.js'
 import {
   hasTransientUserActivation,
   openBuilderTab,
+  openEndeavourTab,
   reconcileBuilderTab,
   registerBuilderTabEntry,
+  type BuilderTabKind,
   type BuilderTabOpenView,
   type ProjectionFace,
 } from './builder-tab.js'
@@ -114,6 +116,18 @@ export function apply(ctx: ClientContext): void {
       return undefined
     }
   }
+  /** The session snapshot's subagent share, when this session is addressed. */
+  const subagentOf = (sessionId: string): unknown => {
+    try {
+      const sessions = client.sessions as unknown as { snapshotOf?: (id: string) => unknown } | undefined
+      const binding = client.sessions?.binding?.(sessionId) as unknown as
+        { session?: { getSnapshot?: () => unknown } } | undefined
+      const snapshot = binding?.session?.getSnapshot?.() as { subagent?: unknown } | undefined
+      return typeof sessions?.snapshotOf === 'function' ? sessions.snapshotOf(sessionId) : snapshot?.subagent
+    } catch {
+      return undefined
+    }
+  }
   const subscribeCurrent = (listener: () => void): (() => void) => {
     try {
       const subscribe = client.sessions?.list?.subscribe
@@ -133,6 +147,25 @@ export function apply(ctx: ClientContext): void {
    * view receives it as the `openView` prop, so this is the same path a tab
    * click takes — no private store poke.
    */
+  /** Reciprocal tab: reset the child to Chat, then open the exact parent. */
+  const selectEndeavourTab = (sessionId: string, openView?: BuilderTabOpenView): boolean => openEndeavourTab(sessionId, {
+    resetChat: () => {
+      try {
+        openView?.('chat', '')
+      } catch {
+        // A missing selector must never break the navigation attempt.
+      }
+    },
+    subagent: subagentOf(sessionId),
+    readParentPlan: (parentSessionId) => faceOf(parentSessionId, 'endeavourPlan')?.getSnapshot(),
+    readParentPreset: (parentSessionId) => faceOf(parentSessionId, 'agentPreset')?.getSnapshot(),
+    openParent: (parentSessionId) => {
+      const sessions = client.sessions as unknown as { open?: (id: SessionId) => void } | undefined
+      if (typeof sessions?.open === 'function') { sessions.open(parentSessionId as SessionId); return }
+      client.uiWorkspace?.openSession?.(parentSessionId as SessionId)
+    },
+    transientActivation: hasTransientUserActivation(),
+  })
   const selectBuilderTab = (sessionId: string, openView?: BuilderTabOpenView): boolean => openBuilderTab(sessionId, {
     resetChat: () => {
       try {
@@ -228,9 +261,11 @@ export function apply(ctx: ClientContext): void {
       currentSession,
       subscribeCurrent,
       face: faceOf,
-      register: () => registerBuilderTabEntry(
+      subagent: subagentOf,
+      register: (kind) => registerBuilderTabEntry(
         client.slots as unknown as { inject(name: string, callback: () => void): void; register(options: never, component: unknown): () => void },
-        selectBuilderTab,
+        kind,
+        kind === 'builder' ? selectBuilderTab : selectEndeavourTab,
       ),
     }), 'dsh-endeavour: Builder navigation tab')
   })

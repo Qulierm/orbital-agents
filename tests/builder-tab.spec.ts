@@ -10,8 +10,11 @@ import { createRoot, type Root } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
+  addressedContinuableChild,
   BuilderTabView,
   builderTabTarget,
+  endeavourTabTarget,
+  openEndeavourTab,
   openBuilderTab,
   reconcileBuilderTab,
   registerBuilderTabEntry,
@@ -73,6 +76,7 @@ describe('reconcileBuilderTab', () => {
       currentSession: () => current,
       subscribeCurrent: (listener) => { currentListeners.add(listener); return () => { currentListeners.delete(listener) } },
       face: (sessionId, key) => (sessionFaces as Record<string, Record<string, ProjectionFace>>)[sessionId]?.[key],
+      subagent: () => undefined,
       register: () => {
         registrations.push(current ?? 'none')
         return () => { disposed += 1 }
@@ -119,6 +123,7 @@ describe('reconcileBuilderTab', () => {
       currentSession: () => 'root',
       subscribeCurrent: () => () => undefined,
       face: (sessionId, key) => key === 'agentPreset' ? face('endeavour') : plan,
+      subagent: () => undefined,
       register: () => { registrations.push(1); return () => { disposed += 1 } },
     })
     expect(registrations).toHaveLength(0)
@@ -131,6 +136,7 @@ describe('reconcileBuilderTab', () => {
       currentSession: () => 'root',
       subscribeCurrent: () => () => undefined,
       face: (sessionId, key) => key === 'agentPreset' ? face('endeavour') : plan2,
+      subagent: () => undefined,
       register: () => { registrations.push(1); return () => { disposed += 1 } },
     })
     expect(registrations).toHaveLength(1)
@@ -203,7 +209,7 @@ describe('registerBuilderTabEntry', () => {
         return () => { unregistered += 1 }
       },
     }
-    const dispose = registerBuilderTabEntry(slots, (sessionId, openView) => {
+    const dispose = registerBuilderTabEntry(slots, 'builder', (sessionId, openView) => {
       if (sessionId !== 'root') return false
       openView?.('chat', '')
       return true
@@ -224,6 +230,46 @@ describe('registerBuilderTabEntry', () => {
     expect(entries[0]?.component).toBe(BuilderTabView)
     dispose()
     expect(unregistered).toBe(1)
+  })
+})
+
+describe('reciprocal Endeavour tab', () => {
+  const childAddress = { parentSessionId: 'root', childSessionId: 'child', mode: 'continuable' }
+
+  it('accepts only the exact addressed continuable child', () => {
+    expect(addressedContinuableChild('child', { address: childAddress })).toEqual({ parentSessionId: 'root', childSessionId: 'child' })
+    expect(addressedContinuableChild('other', { address: childAddress })).toBeUndefined()
+    expect(addressedContinuableChild('child', { address: { ...childAddress, mode: 'one-shot' } })).toBeUndefined()
+    expect(addressedContinuableChild('child', {})).toBeUndefined()
+    expect(addressedContinuableChild(undefined, { address: childAddress })).toBeUndefined()
+  })
+
+  it('requires the parent durable plan to point at exactly this child', () => {
+    const parentPlan = { rootSessionId: 'root', childId: 'child' }
+    expect(endeavourTabTarget('child', { address: childAddress }, 'endeavour', parentPlan)).toEqual({ parentSessionId: 'root', childSessionId: 'child' })
+    expect(endeavourTabTarget('child', { address: childAddress }, 'endeavour', { rootSessionId: 'root', childId: 'other' })).toBeUndefined()
+    expect(endeavourTabTarget('child', { address: childAddress }, 'standard', parentPlan)).toBeUndefined()
+    expect(endeavourTabTarget('child', { address: childAddress }, 'endeavour', undefined)).toBeUndefined()
+  })
+
+  it('resets Chat before opening the parent, and never opens on replay mounts', () => {
+    const calls: string[] = []
+    const nav = {
+      resetChat: () => { calls.push('chat') },
+      subagent: { address: childAddress },
+      readParentPlan: () => ({ rootSessionId: 'root', childId: 'child' }),
+      readParentPreset: () => 'endeavour',
+      openParent: (id: string) => { calls.push(`open:${id}`) },
+      transientActivation: true,
+    }
+    expect(openEndeavourTab('child', nav)).toBe(true)
+    expect(calls).toEqual(['chat', 'open:root'])
+    calls.length = 0
+    expect(openEndeavourTab('child', { ...nav, transientActivation: false })).toBe(false)
+    expect(calls).toEqual(['chat'])
+    calls.length = 0
+    expect(openEndeavourTab('child', { ...nav, subagent: { address: { ...childAddress, mode: 'one-shot' } } })).toBe(false)
+    expect(calls).toEqual(['chat'])
   })
 })
 

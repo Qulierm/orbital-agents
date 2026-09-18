@@ -12,6 +12,7 @@ export const en = {
   'plan.checking': 'Endeavour is checking the result',
   'plan.openBuilder': 'Open Builder',
   'view.builder': 'Builder',
+  'view.endeavour': 'Endeavour',
   'plan.collapse': 'Collapse plan',
   'plan.expand': 'Expand plan',
   'stage.waiting': 'Waiting to start',

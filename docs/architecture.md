@@ -49,6 +49,11 @@ last task succeeded -> plan terminal completed
   writes settings, or makes a model call, and it is registered only while the
   current session is an Endeavour root with a valid durable child address.
 - Older children remain reachable through the native Subagents surface.
+- The addressed plan child gets the reciprocal `Endeavour` tab (order 20): it
+  validates its own continuable address AND the parent's durable plan, resets
+  its own view to Chat, then opens the exact parent through official session
+  navigation. Arbitrary subagents, Standard chats, missing parents, and corrupt
+  projections hide both tabs.
 
 ## Builder route ownership
 
