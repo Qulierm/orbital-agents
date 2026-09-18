@@ -21,14 +21,12 @@ import { en, NS, type EndeavourKey } from './locales.js'
 import { ensurePlanStyles } from './styles.js'
 import {
   hasTransientUserActivation,
-  openBuilderTab,
-  openEndeavourTab,
-  reconcileBuilderTab,
-  registerBuilderTabEntry,
-  type BuilderTabKind,
-  type BuilderTabOpenView,
-  type ProjectionFace,
-} from './builder-tab.js'
+  openPeerTab,
+  peerTabTarget,
+  reconcilePeerTab,
+  registerPeerTabEntry,
+  type PeerProjectionFace,
+} from './peer-tab.js'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface LocaleNamespaceMap {
@@ -53,7 +51,7 @@ interface ClientServices {
     open?: (id: SessionId) => void
     readonly binding?: (sessionId: string) => {
       readonly session?: {
-        readonly projections?: { readonly faceOf?: (key: string) => ProjectionFace | undefined }
+        readonly projections?: { readonly faceOf?: (key: string) => PeerProjectionFace | undefined }
       }
     } | undefined
     readonly list?: {
@@ -110,7 +108,7 @@ export function apply(ctx: ClientContext): void {
   const injected = (): EndeavourInjected => ({ openBuilder })
 
   /** Official projection face for one session, when its binding exists. */
-  const faceOf = (sessionId: string, key: string): ProjectionFace | undefined => {
+  const faceOf = (sessionId: string, key: string): PeerProjectionFace | undefined => {
     try {
       const binding = sessionsService?.binding?.(sessionId as SessionId)
         ?? client.sessions?.binding?.(sessionId)
@@ -157,8 +155,13 @@ export function apply(ctx: ClientContext): void {
    * view receives it as the `openView` prop, so this is the same path a tab
    * click takes — no private store poke.
    */
-  /** Reciprocal tab: reset the child to Chat, then open the exact parent. */
-  const selectEndeavourTab = (sessionId: string, openView?: BuilderTabOpenView): boolean => openEndeavourTab(sessionId, {
+  /**
+   * Explicit peer-tab selection: reset the local view to Chat (so a return
+   * never re-opens the peer), then open the exact counterpart ordinary session
+   * through the official ISessions.open. No spawn, no settings write, no model
+   * call, and no subagent address anywhere in the path.
+   */
+  const selectPeerTab = (sessionId: string, openView?: (view: string, focus: string) => void): boolean => openPeerTab(sessionId, {
     resetChat: () => {
       try {
         openView?.('chat', '')
@@ -166,33 +169,15 @@ export function apply(ctx: ClientContext): void {
         // A missing selector must never break the navigation attempt.
       }
     },
-    subagent: subagentOf(sessionId),
-    readParentPlan: (parentSessionId) => faceOf(parentSessionId, 'endeavourPlan')?.getSnapshot(),
-    readParentPreset: (parentSessionId) => faceOf(parentSessionId, 'agentPreset')?.getSnapshot(),
-    openParent: (parentSessionId) => {
+    peer: faceOf(sessionId, 'endeavourPeer')?.getSnapshot(),
+    openCounterpart: (counterpartId) => {
       if (sessionsService !== undefined) {
-        sessionsService.open(parentSessionId as SessionId)
+        sessionsService.open(counterpartId as SessionId)
         return
       }
       const sessions = client.sessions as unknown as { open?: (id: SessionId) => void } | undefined
-      if (typeof sessions?.open === 'function') sessions.open(parentSessionId as SessionId)
+      if (typeof sessions?.open === 'function') sessions.open(counterpartId as SessionId)
     },
-    transientActivation: hasTransientUserActivation(),
-  })
-  const selectBuilderTab = (sessionId: string, openView?: BuilderTabOpenView): boolean => openBuilderTab(sessionId, {
-    resetChat: () => {
-      try {
-        openView?.('chat', '')
-      } catch {
-        // A missing selector must never break the navigation attempt.
-      }
-    },
-    readPlan: (id) => faceOf(id, 'endeavourPlan')?.getSnapshot(),
-    open: (target) => openBuilder({
-      parentSessionId: target.parentSessionId as SessionId,
-      childSessionId: target.childSessionId as SessionId,
-      mode: 'continuable',
-    }),
     transientActivation: hasTransientUserActivation(),
   })
 
@@ -267,19 +252,18 @@ export function apply(ctx: ClientContext): void {
     locale: NS,
   }, EndeavourRoleLabel as unknown as (props: unknown) => unknown))
   // Builder navigation tab: registered only while the current session is an
-  // Endeavour root with a valid durable child address; order 20 places it right
-  // after Trajectory (native order 10) and before nothing else in the strip.
+  // Builder/Challenger tab: registered only while the current session belongs
+  // to a valid durable pair; order 20 places it right after Trajectory.
   client.slots.inject('conversation.view', () => {
-    client.effect(() => reconcileBuilderTab({
+    client.effect(() => reconcilePeerTab({
       currentSession,
       subscribeCurrent,
-      face: faceOf,
-      subagent: subagentOf,
-      register: (kind) => registerBuilderTabEntry(
+      peerFace: faceOf,
+      register: (role) => registerPeerTabEntry(
         client.slots as unknown as { inject(name: string, callback: () => void): void; register(options: never, component: unknown): () => void },
-        kind,
-        kind === 'builder' ? selectBuilderTab : selectEndeavourTab,
+        role,
+        selectPeerTab,
       ),
-    }), 'dsh-endeavour: Builder navigation tab')
+    }), 'dsh-endeavour: peer navigation tab')
   })
 }

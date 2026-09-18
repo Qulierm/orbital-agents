@@ -8,7 +8,7 @@
  * references a subagent.
  */
 
-import { createHash, randomUUID } from 'node:crypto'
+import { sha256Hex } from './sha256.js'
 
 /** Durable event type carrying peer-pair checkpoints. */
 export const PEER_EVENT_TYPE = 'endeavour/peer'
@@ -59,7 +59,7 @@ export class PeerError extends Error {
  */
 export function challengerSessionIdFor(endeavourSessionId: string): string {
   if (endeavourSessionId === '') throw new PeerError('peer-invalid', 'endeavour session id must not be empty')
-  const hex = createHash('sha256').update(`dsh-endeavour/challenger:${endeavourSessionId}`).digest('hex')
+  const hex = sha256Hex(`dsh-endeavour/challenger:${endeavourSessionId}`)
   const uuid = [
     hex.slice(0, 8),
     hex.slice(8, 12),
@@ -205,7 +205,12 @@ declare module '@deepseek-ai/dsh-session/types' {
   }
 }
 
-/** Random durable id helper for transport receipts (not a session id). */
+/**
+ * Random durable id helper for transport receipts (not a session id).
+ * Browser-safe: Web Crypto when present, otherwise a time+counter fallback.
+ */
 export function peerReceiptId(): string {
-  return randomUUID()
+  const crypto = (globalThis as { crypto?: { randomUUID?: () => string } }).crypto
+  if (typeof crypto?.randomUUID === 'function') return crypto.randomUUID()
+  return `receipt-${Date.now().toString(36)}-${Math.floor(Math.random() * 0xffffffff).toString(36)}`
 }
