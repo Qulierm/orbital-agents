@@ -13,6 +13,7 @@ import { PlanCard, type EndeavourInjected, type PlanCardProps } from './PlanCard
 import { registerPlanDock } from './PlanDock.js'
 import { EndeavourRoleLabel } from './EndeavourRoleLabel.js'
 import type { ModelCatalog } from '@deepseek-ai/dsh-api-session-controller/types'
+import type { ISessions } from '@deepseek-ai/dsh-api-session-controller/client'
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 import { BuilderRouteControl, type BuilderRouteController } from './BuilderRouteControl.js'
 import { BUILDER_SETTINGS_NAMESPACE, type BuilderRouteSettings } from '../builder-settings-shared.js'
@@ -84,9 +85,18 @@ export const inject = ['uiConversation', 'slots', 'sessions', 'locale', 'uiWorks
  */
 export function apply(ctx: ClientContext): void {
   const client = ctx as unknown as ClientServices
+  /**
+   * Official typed sessions service (upstream reads it through `ctx.get`);
+   * arbitrary proxy fields do not reliably expose every method.
+   */
+  const sessionsService = (ctx as unknown as { get?: (name: string) => unknown }).get?.('sessions') as ISessions | undefined
 
   /** Native addressed-subagent navigation, with a workspace fallback. */
   const openBuilder = (address: SubagentAddress): void => {
+    if (sessionsService !== undefined) {
+      sessionsService.openSubagent(address)
+      return
+    }
     const sessions = client.sessions
     if (typeof sessions?.openSubagent === 'function') {
       sessions.openSubagent(address)
@@ -96,14 +106,15 @@ export function apply(ctx: ClientContext): void {
       client.uiWorkspace.openSession(address.childSessionId)
       return
     }
-    if (typeof sessions?.open === 'function') sessions.open(address.childSessionId)
   }
   const injected = (): EndeavourInjected => ({ openBuilder })
 
   /** Official projection face for one session, when its binding exists. */
   const faceOf = (sessionId: string, key: string): ProjectionFace | undefined => {
     try {
-      const face = client.sessions?.binding?.(sessionId)?.session?.projections?.faceOf?.(key)
+      const binding = sessionsService?.binding?.(sessionId as SessionId)
+        ?? client.sessions?.binding?.(sessionId)
+      const face = binding?.session?.projections?.faceOf?.(key)
       return face !== undefined && typeof face.getSnapshot === 'function' ? face : undefined
     } catch {
       return undefined
@@ -111,7 +122,7 @@ export function apply(ctx: ClientContext): void {
   }
   const currentSession = (): string | undefined => {
     try {
-      return client.sessions?.list?.getSnapshot?.().current
+      return sessionsService?.list?.getSnapshot?.().current ?? client.sessions?.list?.getSnapshot?.().current
     } catch {
       return undefined
     }
@@ -119,18 +130,17 @@ export function apply(ctx: ClientContext): void {
   /** The session snapshot's subagent share, when this session is addressed. */
   const subagentOf = (sessionId: string): unknown => {
     try {
-      const sessions = client.sessions as unknown as { snapshotOf?: (id: string) => unknown } | undefined
-      const binding = client.sessions?.binding?.(sessionId) as unknown as
+      const binding = (sessionsService?.binding?.(sessionId as SessionId) ?? client.sessions?.binding?.(sessionId)) as unknown as
         { session?: { getSnapshot?: () => unknown } } | undefined
       const snapshot = binding?.session?.getSnapshot?.() as { subagent?: unknown } | undefined
-      return typeof sessions?.snapshotOf === 'function' ? sessions.snapshotOf(sessionId) : snapshot?.subagent
+      return snapshot?.subagent
     } catch {
       return undefined
     }
   }
   const subscribeCurrent = (listener: () => void): (() => void) => {
     try {
-      const subscribe = client.sessions?.list?.subscribe
+      const subscribe = sessionsService?.list?.subscribe ?? client.sessions?.list?.subscribe
       return typeof subscribe === 'function' ? subscribe(listener) : () => undefined
     } catch {
       return () => undefined
@@ -160,9 +170,12 @@ export function apply(ctx: ClientContext): void {
     readParentPlan: (parentSessionId) => faceOf(parentSessionId, 'endeavourPlan')?.getSnapshot(),
     readParentPreset: (parentSessionId) => faceOf(parentSessionId, 'agentPreset')?.getSnapshot(),
     openParent: (parentSessionId) => {
+      if (sessionsService !== undefined) {
+        sessionsService.open(parentSessionId as SessionId)
+        return
+      }
       const sessions = client.sessions as unknown as { open?: (id: SessionId) => void } | undefined
-      if (typeof sessions?.open === 'function') { sessions.open(parentSessionId as SessionId); return }
-      client.uiWorkspace?.openSession?.(parentSessionId as SessionId)
+      if (typeof sessions?.open === 'function') sessions.open(parentSessionId as SessionId)
     },
     transientActivation: hasTransientUserActivation(),
   })
