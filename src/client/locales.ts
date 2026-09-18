@@ -29,8 +29,6 @@ export const en = {
   'builder.model': 'Model',
   'builder.effort': 'Effort',
   'builder.default': 'Default',
-  'builder.automatic': 'Automatic',
-  'builder.automaticHint': 'Follows the current Endeavour model and effort.',
   'builder.notAvailable': 'Not available',
   'builder.loading': 'Loading models...',
   'builder.retry': 'Retry',

@@ -9,7 +9,7 @@ import { createElement } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { act } from 'react-dom/test-utils'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   ChallengerModelControl,
   type ChallengerModelController,
@@ -134,6 +134,55 @@ describe('visibility', () => {
     const html = renderToStaticMarkup(createElement(ChallengerModelControl, props({}).props as never))
     expect(html).not.toMatch(/Inherit|Automatic|next child|Planner route/i)
     expect(view.container.textContent).not.toMatch(/Inherit|Automatic/i)
+  })
+})
+
+describe('peer bridge wiring', () => {
+  it('writes through official remote.session.selectModel for the CHALLENGER session only', async () => {
+    vi.resetModules()
+    const calls: unknown[] = []
+    const pairState = pair()
+    const face = (value: unknown) => {
+      const listeners = new Set<() => void>()
+      return { getSnapshot: () => value, subscribe: (l: () => void) => { listeners.add(l); return () => { listeners.delete(l) } } }
+    }
+    const faces = new Map<string, unknown>([
+      ['session-root:endeavourPeer', face(pairState)],
+      [`${pairState.challengerSessionId}:modelSelection`, face({ next: { provider: 'p1', model: 'm1', reasoningEffort: 'low' } })],
+    ])
+    const registrations: { options: Record<string, unknown>; component: unknown }[] = []
+    const fakeClient = {
+      effect: () => undefined,
+      locale: { register: () => undefined },
+      uiConversation: { events: { register: () => undefined } },
+      remote: { session: { selectModel: async (request: unknown) => { calls.push(request) }, modelCatalog: async () => catalog } },
+      sessions: {
+        binding: (id: string) => ({ session: { projections: { faceOf: (key: string) => faces.get(`${id}:${key}`) } } }),
+      },
+      slots: {
+        inject: (_key: string, callback: () => unknown) => { callback() },
+        register: (options: unknown, component: unknown) => {
+          registrations.push({ options: options as Record<string, unknown>, component })
+          return () => undefined
+        },
+      },
+    }
+    const { apply } = await import('../src/client/index.js')
+    apply(fakeClient as never)
+    const entry = registrations.find((item) => item.options.id === 'endeavour-challenger-model')
+    expect(entry).toBeDefined()
+    const injected = (entry?.options.inject as (sessionId: string) => { challengerModel: ChallengerModelController })('session-root')
+    const controller = injected.challengerModel
+    expect(controller.challengerId()).toBe(pairState.challengerSessionId)
+    expect(controller.readSelection()).toEqual({ provider: 'p1', model: 'm1', reasoningEffort: 'low' })
+    await controller.select('p1', 'm2', 'high')
+    await controller.select('p1', 'm2', undefined)
+    expect(calls).toEqual([
+      { sessionId: pairState.challengerSessionId, provider: 'p1', model: 'm2', reasoningEffort: 'high' },
+      { sessionId: pairState.challengerSessionId, provider: 'p1', model: 'm2' },
+    ])
+    // The Endeavour session itself is never the target of a selection write.
+    expect(calls.every((call) => (call as { sessionId: string }).sessionId !== 'session-root')).toBe(true)
   })
 })
 
