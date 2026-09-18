@@ -18,6 +18,12 @@ import { BuilderRouteControl, type BuilderRouteController } from './BuilderRoute
 import { BUILDER_SETTINGS_NAMESPACE, type BuilderRouteSettings } from '../builder-settings-shared.js'
 import { en, NS, type EndeavourKey } from './locales.js'
 import { ensurePlanStyles } from './styles.js'
+import {
+  openBuilderTab,
+  reconcileBuilderTab,
+  registerBuilderTabEntry,
+  type ProjectionFace,
+} from './builder-tab.js'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface LocaleNamespaceMap {
@@ -28,7 +34,11 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
 
 /** Narrow view of the client services this plugin consumes. */
 interface ClientServices {
-  readonly uiConversation: { readonly events: { register(definition: unknown): void } }
+  readonly uiConversation: {
+    readonly events: { register(definition: unknown): void }
+    /** Per-session binding used to reset the active conversation view. */
+    readonly binding?: (sessionId: string) => { readonly activate?: (view: string) => void } | undefined
+  }
   readonly slots: {
     inject(name: string, callback: () => void): void
     register(options: unknown, component: unknown): void
@@ -36,6 +46,15 @@ interface ClientServices {
   readonly sessions?: {
     openSubagent?: (address: SubagentAddress) => void
     open?: (id: SessionId) => void
+    readonly binding?: (sessionId: string) => {
+      readonly session?: {
+        readonly projections?: { readonly faceOf?: (key: string) => ProjectionFace | undefined }
+      }
+    } | undefined
+    readonly list?: {
+      readonly getSnapshot?: () => { readonly current?: string }
+      readonly subscribe?: (listener: () => void) => () => void
+    }
   }
   readonly uiWorkspace?: { openSession?: (id: SessionId) => void }
   readonly settingsScope?: {
@@ -76,6 +95,51 @@ export function apply(ctx: ClientContext): void {
     if (typeof sessions?.open === 'function') sessions.open(address.childSessionId)
   }
   const injected = (): EndeavourInjected => ({ openBuilder })
+
+  /** Official projection face for one session, when its binding exists. */
+  const faceOf = (sessionId: string, key: string): ProjectionFace | undefined => {
+    try {
+      const face = client.sessions?.binding?.(sessionId)?.session?.projections?.faceOf?.(key)
+      return face !== undefined && typeof face.getSnapshot === 'function' ? face : undefined
+    } catch {
+      return undefined
+    }
+  }
+  const currentSession = (): string | undefined => {
+    try {
+      return client.sessions?.list?.getSnapshot?.().current
+    } catch {
+      return undefined
+    }
+  }
+  const subscribeCurrent = (listener: () => void): (() => void) => {
+    try {
+      const subscribe = client.sessions?.list?.subscribe
+      return typeof subscribe === 'function' ? subscribe(listener) : () => undefined
+    } catch {
+      return () => undefined
+    }
+  }
+  /**
+   * Explicit Builder-tab selection: Chat first (so a return to the root stays
+   * Chat), then the SAME addressed bridge the dock's Open Builder uses. No
+   * spawn, no settings write, no model call.
+   */
+  const selectBuilderTab = (sessionId: string): boolean => openBuilderTab(sessionId, {
+    activateChat: (id) => {
+      try {
+        client.uiConversation.binding?.(id)?.activate?.('chat')
+      } catch {
+        // The view store is already unavailable; a missing reset must not throw.
+      }
+    },
+    readPlan: (id) => faceOf(id, 'endeavourPlan')?.getSnapshot(),
+    open: (target) => openBuilder({
+      parentSessionId: target.parentSessionId as SessionId,
+      childSessionId: target.childSessionId as SessionId,
+      mode: 'continuable',
+    }),
+  })
 
   /** Settings bridge for the Builder route control. */
   const scope = client.settingsScope?.bind<BuilderRouteSettings>({ namespace: BUILDER_SETTINGS_NAMESPACE })
@@ -147,4 +211,18 @@ export function apply(ctx: ClientContext): void {
     order: 1001,
     locale: NS,
   }, EndeavourRoleLabel as unknown as (props: unknown) => unknown))
+  // Builder navigation tab: registered only while the current session is an
+  // Endeavour root with a valid durable child address; order 20 places it right
+  // after Trajectory (native order 10) and before nothing else in the strip.
+  client.slots.inject('conversation.view', () => {
+    client.effect(() => reconcileBuilderTab({
+      currentSession,
+      subscribeCurrent,
+      face: faceOf,
+      register: () => registerBuilderTabEntry(
+        client.slots as unknown as { inject(name: string, callback: () => void): void; register(options: never, component: unknown): () => void },
+        selectBuilderTab,
+      ),
+    }), 'dsh-endeavour: Builder navigation tab')
+  })
 }

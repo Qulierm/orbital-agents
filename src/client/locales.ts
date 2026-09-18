@@ -11,6 +11,7 @@ export const en = {
   'plan.current': 'Current task: {title}',
   'plan.checking': 'Endeavour is checking the result',
   'plan.openBuilder': 'Open Builder',
+  'view.builder': 'Builder',
   'plan.collapse': 'Collapse plan',
   'plan.expand': 'Expand plan',
   'stage.waiting': 'Waiting to start',

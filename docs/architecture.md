@@ -34,6 +34,22 @@ last task succeeded -> plan terminal completed
 - Duplicate starts, duplicate reports, out-of-order tasks, foreign sessions,
   arbitrary parent ids, and second plans are rejected with typed errors.
 
+## Builder child lifecycle
+
+- `endeavour_plan` creates exactly ONE continuable Builder child per plan.
+- Every task dispatch reuses that child through `sendMessage`; the Builder
+  prompt does not spawn per task.
+- A LATER plan creates a NEW child with a freshly snapshotted Builder route —
+  one child is never reused across plans (that would freeze routing forever and
+  mix contexts).
+- The composer `Builder` tab opens the CURRENT/latest projected child only, as
+  pure navigation: it resets the root view to Chat first and calls the same
+  addressed `sessions.openSubagent({parentSessionId, childSessionId,
+  mode:'continuable'})` bridge as the dock's Open Builder. It never spawns,
+  writes settings, or makes a model call, and it is registered only while the
+  current session is an Endeavour root with a valid durable child address.
+- Older children remain reachable through the native Subagents surface.
+
 ## Builder route ownership
 
 - Both composer role groups live in `conversation.input.right`: the Builder

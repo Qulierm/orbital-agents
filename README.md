@@ -30,6 +30,10 @@ child, and a replayable plan card inside the Endeavour Chat.
    a live timer per running task, and the frozen duration after verification.
    `Open Builder` opens the child that executes the tasks.
 
+An Endeavour root session with a plan shows a native `Builder` view tab next to
+`Chat` and `Trajectory`; selecting it opens the plan's existing Builder child
+(see [docs/architecture.md](docs/architecture.md#builder-child-lifecycle)).
+
 The Builder route is **inherited** by default. Pick a different one in the
 composer chip (`Builder · Inherit`) before sending: choose `Inherit Planner` or
 a provider/model with its thinking option. The choice applies to the next
