@@ -200,6 +200,32 @@ describe('session metadata resolution', () => {
   it('falls back to the header when no selection event exists', () => {
     expect(seamMeta([], 'endeavour')?.agentPreset).toBe('endeavour')
   })
+
+  /** Durable selection read: the same events the official projection folds. */
+  function seamSelection(events: { type: string; data: unknown }[]) {
+    const session = { id: 'session-x', header: { agentPreset: 'endeavour', cwd: '/proj' }, seq: events.length, eventAt: (at: number) => events[at] }
+    const ctx = {
+      get: (name: string) => {
+        if (name === 'sessions') return { get: (id: string) => (id === 'session-x' ? session : undefined), list: () => [session] }
+        if (name === 'sessionController') return { create: async () => ({}), resolveAgent: async () => ({}) }
+        return undefined
+      },
+    }
+    return createCordisPeerSeam(ctx).selectionOf?.('session-x')
+  }
+
+  it('reads the latest selection event, then the request header', () => {
+    const header = { type: 'request/header', data: { header: { config: { provider: 'p1', model: 'm1', reasoningEffort: 'high' } } } }
+    const selection = { type: 'model/selection', data: { provider: 'p2', model: 'm2', reasoningEffort: 'low' } }
+    expect(seamSelection([header])).toEqual({ provider: 'p1', model: 'm1', reasoningEffort: 'high' })
+    expect(seamSelection([header, selection])).toEqual({ provider: 'p2', model: 'm2', reasoningEffort: 'low' })
+  })
+
+  it('drops an adapter-defaulted effort and reports nothing when unselected', () => {
+    const defaulted = { type: 'request/header', data: { header: { config: { provider: 'p1', model: 'm1', reasoningEffort: 'high' }, adapterDefaults: { reasoningEffort: true } } } }
+    expect(seamSelection([defaulted])).toEqual({ provider: 'p1', model: 'm1' })
+    expect(seamSelection([])).toBeUndefined()
+  })
 })
 
 describe('peer session lifecycle', () => {

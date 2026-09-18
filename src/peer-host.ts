@@ -169,11 +169,7 @@ interface RawWorkspaceRegistry {
   get?(id: string): RawWorkspace | undefined
 }
 
-interface RawProjections {
-  stateOf?(session: unknown, key: string): { readonly lastUsed?: unknown; readonly pending?: unknown } | undefined
-}
-
-/** Read-and-validate one projected selection record. */
+/** Read-and-validate one selection record (durable event payload). */
 function projectedSelection(value: unknown): PeerModelSelection | undefined {
   if (value === null || typeof value !== 'object') return undefined
   const record = value as { readonly provider?: unknown; readonly model?: unknown; readonly reasoningEffort?: unknown }
@@ -186,6 +182,35 @@ function projectedSelection(value: unknown): PeerModelSelection | undefined {
       ? { reasoningEffort: record.reasoningEffort }
       : {}),
   }
+}
+
+/**
+ * The session's own durable selection, read from the SAME events the official
+ * `modelSelection` projection folds: the latest `model/selection` wins, and a
+ * request header is the fallback (a header effort the adapter defaulted is not
+ * a conversation choice and is dropped, exactly like the projection does).
+ */
+function durableSelection(session: RawSession): PeerModelSelection | undefined {
+  const seq = session.seq
+  if (typeof seq !== 'number' || typeof session.eventAt !== 'function') return undefined
+  for (let at = seq - 1; at >= 0; at -= 1) {
+    const event = session.eventAt(at)
+    if (event === undefined) continue
+    if (event.type === 'model/selection') {
+      const selected = projectedSelection(event.data)
+      if (selected !== undefined) return selected
+      continue
+    }
+    if (event.type !== 'request/header') continue
+    const header = (event.data as { readonly header?: { readonly config?: unknown; readonly adapterDefaults?: { readonly reasoningEffort?: unknown } } } | undefined)?.header
+    const config = projectedSelection(header?.config)
+    if (config === undefined) continue
+    if (header?.adapterDefaults?.reasoningEffort === true && config.reasoningEffort !== undefined) {
+      return { provider: config.provider, model: config.model }
+    }
+    return config
+  }
+  return undefined
 }
 
 function rawMeta(session: RawSession | undefined): PeerSessionMeta | undefined {
@@ -216,7 +241,6 @@ export function createCordisPeerSeam(ctx: unknown): PeerHostSeam {
   }
 
   const workspaces = get?.('workspaceRegistry') as RawWorkspaceRegistry | undefined
-  const projections = get?.('sessionProjections') as RawProjections | undefined
 
   /**
    * Owning workspace for a session: live membership first (authoritative), then
@@ -230,13 +254,11 @@ export function createCordisPeerSeam(ctx: unknown): PeerHostSeam {
     return all.find((workspace) => workspace.path !== undefined && workspace.path === cwd)
   }
 
-  /** Read one session's durable selection through the official projection. */
+  /** Read one session's durable selection from its own committed events. */
   const selectionOf = (sessionId: string): PeerModelSelection | undefined => {
     const session = sessions?.get?.(sessionId) as RawSession | undefined
-    if (session === undefined || projections?.stateOf === undefined) return undefined
-    const state = projections.stateOf(session, 'modelSelection')
-    if (state === undefined) return undefined
-    return projectedSelection(state.pending) ?? projectedSelection(state.lastUsed)
+    if (session === undefined) return undefined
+    return durableSelection(session)
   }
 
   return {
