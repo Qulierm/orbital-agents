@@ -205,6 +205,34 @@ describe('EndeavourService', () => {
     expect(filter).toEqual(custom)
   })
 
+  it('accepts an injected peer runtime without changing public behavior', async () => {
+    const { service } = makeService()
+    const { PeerDeliveryLedger, PeerDeliveryQueue } = await import('../src/peer-transport.js')
+    const { PeerProvisioner } = await import('../src/peer-service.js')
+    const seam = {
+      listSessionIds: () => [],
+      sessionMeta: () => undefined,
+      createOrdinarySession: async (input: { id: string }) => ({ sessionId: input.id, adopted: false }),
+      resolveAgent: async () => undefined,
+    }
+    const provisioner = new PeerProvisioner({
+      seam,
+      readPair: () => undefined,
+      hasCheckpoint: () => false,
+      appendPair: async () => undefined,
+      now: () => 1,
+    })
+    const runtime = { seam, provisioner, queue: new PeerDeliveryQueue(), ledger: new PeerDeliveryLedger() }
+    service.setPeerRuntime(runtime)
+    expect(service.peerDependencies()).toBe(runtime)
+    // Additive hook only: no plan is created and nothing is delivered.
+    expect(() => { service.observeCurrentSession() }).not.toThrow()
+    expect(service.getActivePlan('root')).toBeUndefined()
+    // Legacy behavior is untouched by the injected runtime.
+    const created = await service.createPlan(rootAgent as never, planInput())
+    expect(created.taskCount).toBe(2)
+  })
+
   it('recovers durable plans from replayed root events', () => {
     const root = fakeSession('root')
     const { ctx } = fakeContext([root])

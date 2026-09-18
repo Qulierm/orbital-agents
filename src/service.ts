@@ -30,7 +30,10 @@ import {
   type PeerEventPayload,
   type PeerState,
 } from './peer.js'
-import { createCordisPeerSeam } from './peer-host.js'
+import { createCordisPeerSeam, type PeerHostSeam } from './peer-host.js'
+import { aggregateReviewRequest, BUILDER_DEFAULT_DENY, wholePlanBrief } from './peer-briefs.js'
+export { aggregateReviewRequest, wholePlanBrief, BUILDER_DEFAULT_DENY } from './peer-briefs.js'
+import { PeerDeliveryLedger, PeerDeliveryQueue } from './peer-transport.js'
 import { projectPeerState } from './peer-projection.js'
 import { PeerLifecycle, PeerProvisioner } from './peer-service.js'
 import {
@@ -149,8 +152,14 @@ export class EndeavourService extends Service {
   private readonly plans = new Map<string, PlanState>()
   /** Durable peer pairs indexed from both ordinary sides. */
   private readonly peers = new PeerRegistry()
+  /** Shared FIFO delivery queue + retry ledger for the peer transport. */
+  private readonly peerQueue = new PeerDeliveryQueue()
+  private readonly peerLedger = new PeerDeliveryLedger()
+  private runtimeSeam: PeerHostSeam | undefined
   private provisioner: PeerProvisioner | undefined
   private lifecycle: PeerLifecycle | undefined
+  /** Injectable peer runtime (tests) or the lazily built official one. */
+  private peerRuntimeDeps: PeerRuntimeDeps | undefined
   private readonly queues = new Map<string, Promise<unknown>>()
   private readonly serviceConfig: EndeavourConfig
   private builderSettings: () => BuilderRouteSettings
@@ -304,10 +313,35 @@ export class EndeavourService extends Service {
     return this.peers.pairs()
   }
 
+  /**
+   * Install an explicit peer runtime. Tests inject fakes here; production
+   * leaves it unset so the official seam/transport is built lazily. This is
+   * additive-only for the C2A pass and changes no public plan behavior.
+   */
+  setPeerRuntime(deps: PeerRuntimeDeps): void {
+    this.peerRuntimeDeps = deps
+    this.provisioner = deps.provisioner
+    this.lifecycle = undefined
+  }
+
+  /** Full peer runtime: seam, provisioner, FIFO queue and delivery ledger. */
+  private peerRuntime(): PeerRuntimeDeps {
+    if (this.peerRuntimeDeps !== undefined) return this.peerRuntimeDeps
+    const built = this.buildPeerRuntime()
+    this.peerRuntimeDeps = built
+    return built
+  }
+
+  /** Runtime seam/provisioner/queue/ledger accessors for the cutover pass. */
+  peerDependencies(): PeerRuntimeDeps {
+    return this.peerRuntime()
+  }
+
   /** Lazily built provisioner over the official host seam (additive). */
   private peerProvisioner(): PeerProvisioner {
     if (this.provisioner === undefined) {
       const seam = createCordisPeerSeam(this.ctx)
+      this.runtimeSeam = seam
       this.provisioner = new PeerProvisioner({
         seam,
         readPair: (sessionId) => this.peers.get(sessionId),
@@ -347,6 +381,22 @@ export class EndeavourService extends Service {
    */
   async ensurePeer(sessionId: string): Promise<PeerState> {
     return this.peerProvisioner().ensure(sessionId)
+  }
+
+  /** Build the official runtime seam/provisioner/queue/ledger once. */
+  private buildPeerRuntime(): PeerRuntimeDeps {
+    if (this.provisioner === undefined) this.peerProvisioner()
+    const seam = this.runtimeSeam
+    if (seam === undefined || this.provisioner === undefined) {
+      throw new EndeavourError('role-forbidden', 'peer runtime is unavailable in this deployment')
+    }
+    const runtime: PeerRuntimeDeps = {
+      seam,
+      provisioner: this.provisioner,
+      queue: this.peerQueue,
+      ledger: this.peerLedger,
+    }
+    return runtime
   }
 
   /**
@@ -527,67 +577,6 @@ export class EndeavourService extends Service {
 }
 
 /**
- * Compose the whole-plan Builder prompt: objective, plan constraints, every
- * task in order with its instructions/validation/task constraints, and the
- * exact sequential protocol. Never rendered on the card.
- */
-export function wholePlanBrief(
-  title: string,
-  brief: string,
-  constraints: string | undefined,
-  tasks: readonly TaskSpec[],
-): string {
-  const lines: string[] = [
-    `Plan: ${title}`,
-    'Objective:',
-    brief,
-  ]
-  if (constraints !== undefined && constraints !== '') lines.push(`Plan constraints: ${constraints}`)
-  lines.push('', `Ordered tasks (${String(tasks.length)}):`)
-  tasks.forEach((task, index) => {
-    lines.push(
-      `Task ${String(index + 1)} [${task.id}]: ${task.display.title}`,
-      'Instructions:',
-      task.execution.instructions,
-      'Validation criteria:',
-      task.execution.validation,
-    )
-    if (task.execution.constraints !== undefined && task.execution.constraints !== '') {
-      lines.push(`Task constraints: ${task.execution.constraints}`)
-    }
-    lines.push('')
-  })
-  lines.push(
-    'Protocol:',
-    'Execute every task sequentially in this order on your own.',
-    'Before each task call builder_start_task with its task_id; after finishing it call builder_report with your summary, files, and validation evidence.',
-    'After a report continue DIRECTLY with the next task; do not wait for a reply and never send an ordinary message to the parent.',
-    'Stop only after the final task has been reported, or immediately when a task has a blocker or failure (later tasks stay waiting).',
-    'The parent receives one aggregate review request when all tasks are reported (or immediately on a blocker/failure) and will verify each task in order.',
-  )
-  return lines.join('\n')
-}
-
-/**
- * Tools a Builder must never call: ordinary parent messaging, agent
- * list/interrupt, delegation, background job control, and workflow tools.
- * Coding, filesystem, search, validation, and the scoped builder protocol
- * tools stay available (scoped registrations ignore restrictions).
- */
-export const BUILDER_DEFAULT_DENY: readonly string[] = [
-  'send_message',
-  'list_agents',
-  'interrupt_agent',
-  'subagent',
-  'subagent_fork',
-  'job_output',
-  'job_list',
-  'job_kill',
-  'workflow',
-  'ralph',
-]
-
-/**
  * Compose the detailed single-task brief. Used only for compatibility with a
  * legacy already-active child that knows just its first task: the text is
  * returned in the builder_report tool result after a non-final report.
@@ -613,35 +602,12 @@ export interface BuilderReportOutcome {
   readonly nextTask?: TaskSpec
 }
 
-/** One aggregate review request covering every reported task in order. */
-export function aggregateReviewRequest(plan: PlanState, blocked: boolean): string {
-  const lines = [
-    blocked
-      ? 'Builder reported a blocker/failure and stopped. Review the affected task and record its verdict with endeavour_verify.'
-      : `Builder submitted reports for all ${String(plan.tasks.length)} tasks. Review every task in order and call endeavour_verify for each one.`,
-    '',
-    'Ordered report evidence:',
-  ]
-  plan.tasks.forEach((task, index) => {
-    const report = task.report
-    if (report === undefined) {
-      lines.push(`${String(index + 1)}. [${task.spec.id}] ${task.spec.display.title} — no report (waiting)`)
-      return
-    }
-    lines.push(
-      `${String(index + 1)}. [${task.spec.id}] ${task.spec.display.title}`,
-      `   Summary: ${report.summary}`,
-      `   Files: ${report.files.join(', ') || 'none'}`,
-      `   Validation: ${report.validation}`,
-    )
-    if (report.blocker !== undefined) lines.push(`   Blocker: ${report.blocker}`)
-    if (report.failure !== undefined) lines.push(`   Failure: ${report.failure}`)
-  })
-  lines.push(
-    '',
-    'Inspect each report, the workspace, and the evidence, then record one verdict per task in plan order with endeavour_verify. Do not dispatch anything to the Builder.',
-  )
-  return lines.join('\n')
+/** Peer runtime dependencies the C2B cutover consumes (injectable for tests). */
+export interface PeerRuntimeDeps {
+  readonly seam: PeerHostSeam
+  readonly provisioner: PeerProvisioner
+  readonly queue: PeerDeliveryQueue
+  readonly ledger: PeerDeliveryLedger
 }
 
 /** Typed report accepted from the model (kept separate from the service input). */
