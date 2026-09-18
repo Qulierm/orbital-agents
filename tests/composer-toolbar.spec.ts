@@ -140,6 +140,8 @@ describe('injected stylesheet', () => {
     expect(trigger).toContain('border-radius: 0 8px 8px 0')
     const effort = STYLE_TEXT.match(/\.dsh-endeavour-builder-effort \{[^}]*\}/)?.[0] ?? ''
     expect(effort).toContain('color: var(--dsw-alias-label-caption)')
+    expect(STYLE_TEXT).toContain('@media (max-width: 1500px)')
+    expect(STYLE_TEXT).toContain('.dsh-endeavour-builder-effort { display: none; }')
     expect(STYLE_TEXT).toContain('@media (max-width: 1440px)')
     expect(STYLE_TEXT).toContain('span:nth-of-type(2) { display: none; }')
     expect(STYLE_TEXT).toContain('@media (max-width: 1360px)')

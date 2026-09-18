@@ -248,7 +248,12 @@ export const STYLE_TEXT = `
 /* Tighter gaps only when both role groups are present. */
 [data-composer-card]:has([data-endeavour-role]) :has(> [data-slot="conversation.input.left"]) { gap: 8px; min-width: 0; }
 [data-composer-card]:has([data-endeavour-role]) :has(> [data-slot="conversation.input.right"]) { gap: 8px; min-width: 0; }
-/* Shrink priority 1: effort captions collapse below the normal card width. */
+/* Shrink priority 1: effort captions collapse below the normal card width;
+   the compact Builder trigger sheds its caption a little earlier so it never
+   degrades to a single letter while the native trigger keeps its own. */
+@media (max-width: 1500px) {
+  .dsh-endeavour-builder-effort { display: none; }
+}
 @media (max-width: 1440px) {
   [data-composer-card]:has([data-endeavour-role="endeavour"]) [data-slot="conversation.input.model"] button span:nth-of-type(2) { display: none; }
 }
