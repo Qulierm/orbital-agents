@@ -62,7 +62,7 @@ idempotent; a changed tarball at the same name/version still refreshes the insta
 
 ## Model selection
 
-The composer carries one unified control: a single icon-only button (id `endeuvre-models`) that opens
+The composer carries one unified control: a single icon-only button (id `endeavour-models`) that opens
 a menu with an **Endeavour** section and a **Challenger** section, each with its own **Model** and
 **Thinking** rows. Both roles are configured from that one menu and stay independent:
 
