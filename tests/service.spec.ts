@@ -178,6 +178,33 @@ describe('EndeavourService', () => {
     expect(sent).toHaveLength(1)
   })
 
+  it('denies ordinary parent messaging and delegation by default, keeping protocol tools free', async () => {
+    const { service, starts } = makeService()
+    await service.createPlan(rootAgent as never, planInput())
+    const filter = (starts[0] as unknown as { request: { toolFilter?: { deny?: readonly string[]; allow?: readonly string[] } } }).request.toolFilter
+    expect(filter).toBeDefined()
+    const deny = filter?.deny ?? []
+    // Ordinary parent messaging, delegation, and agent/job management are gone.
+    for (const tool of ['send_message', 'subagent', 'subagent_fork', 'list_agents', 'interrupt_agent', 'job_output', 'workflow']) {
+      expect(deny).toContain(tool)
+    }
+    // The durable protocol tools are NOT denied (they are scoped registrations
+    // and restrictions do not affect them; the filter must not pretend to).
+    expect(deny).not.toContain('builder_start_task')
+    expect(deny).not.toContain('builder_report')
+    // Coding/validation surface is not restricted by the default.
+    expect(filter?.allow).toBeUndefined()
+    for (const tool of ['bash', 'read', 'write', 'edit', 'glob', 'grep']) expect(deny).not.toContain(tool)
+  })
+
+  it('lets explicit configuration override the default tool filter verbatim', async () => {
+    const custom = { allow: ['bash', 'read'] }
+    const { service, starts } = makeService({ builderToolFilter: custom })
+    await service.createPlan(rootAgent as never, planInput())
+    const filter = (starts[0] as unknown as { request: { toolFilter?: unknown } }).request.toolFilter
+    expect(filter).toEqual(custom)
+  })
+
   it('recovers durable plans from replayed root events', () => {
     const root = fakeSession('root')
     const { ctx } = fakeContext([root])

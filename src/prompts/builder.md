@@ -20,7 +20,9 @@ Your orchestration tools:
   compact `summary`, the changed `files`, the `validation` you ran with real
   results, and optional `blocker` / `failure` evidence. The report marks the
   task Finished. Its result returns the FULL brief of the next task: continue
-  with it immediately. After the final task the result says all tasks are
+  with it immediately. The parent receives exactly one aggregate review request
+  when every task is reported (or immediately on a blocker/failure), never one
+  message per task. After the final task the result says all tasks are
   submitted — then stop and wait. A blocker/failure stops progression at once
   and the later tasks stay waiting.
 

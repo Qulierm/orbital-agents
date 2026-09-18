@@ -59,7 +59,11 @@ export interface EndeavourConfig {
   readonly builderAgentOptions?: AgentOptions
   /** Per-child persona; defaults to the project Builder prompt. */
   readonly builderPersona?: string
-  /** Child tool scope; defaults to a Builder-safe allow list. */
+  /**
+   * Child tool scope. When omitted the Builder-safe default deny list applies
+   * (no ordinary parent messaging or delegation); explicit configuration
+   * overrides that default verbatim.
+   */
   readonly builderToolFilter?: ToolRestriction
   /** Delegation depth cap passed to the provider. */
   readonly maxDepth?: number
@@ -297,7 +301,11 @@ export class EndeavourService extends Service {
           prompt: [textBlock(wholePlanBrief(input.title, input.brief, input.constraints, input.tasks))],
           agentOptions: builderOptions,
           persona: this.serviceConfig.builderPersona ?? BUILDER_PROMPT,
-          ...(this.serviceConfig.builderToolFilter === undefined ? {} : { toolFilter: this.serviceConfig.builderToolFilter }),
+          // The Builder must never send ordinary parent messages or delegate:
+          // the durable builder_report protocol is its only parent channel.
+          // Scoped registrations (builder_start_task/builder_report) are not
+          // affected by restrictions, so execution keeps its protocol tools.
+          toolFilter: this.serviceConfig.builderToolFilter ?? { deny: [...BUILDER_DEFAULT_DENY] },
           ...(this.serviceConfig.maxDepth === undefined ? {} : { maxDepth: this.serviceConfig.maxDepth }),
         },
         signal: new AbortController().signal,
@@ -437,6 +445,25 @@ export function wholePlanBrief(
   )
   return lines.join('\n')
 }
+
+/**
+ * Tools a Builder must never call: ordinary parent messaging, agent
+ * list/interrupt, delegation, background job control, and workflow tools.
+ * Coding, filesystem, search, validation, and the scoped builder protocol
+ * tools stay available (scoped registrations ignore restrictions).
+ */
+export const BUILDER_DEFAULT_DENY: readonly string[] = [
+  'send_message',
+  'list_agents',
+  'interrupt_agent',
+  'subagent',
+  'subagent_fork',
+  'job_output',
+  'job_list',
+  'job_kill',
+  'workflow',
+  'ralph',
+]
 
 /**
  * Compose the detailed single-task brief. Used only for compatibility with a

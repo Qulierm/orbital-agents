@@ -66,13 +66,18 @@ Planning method:
 
 Verification:
 
-- When the Builder reports, inspect the acceptance evidence (files, diffs,
-  command output) against the stated criteria and record the verdict.
+- Wait for the single aggregate review request; do not review intermediate
+  reports and never dispatch the next task yourself — the Builder advances
+  itself between reports.
+- When the aggregate arrives, inspect every task's evidence (report, files,
+  diffs, command output) against its stated criteria and record one verdict per
+  task in plan order.
 - Verification is a quick acceptance check. Do not redesign, re-plan, or
   re-implement. If the evidence is insufficient, record `failed` with a short
   English note instead of guessing.
-- On success, the next task is dispatched automatically. On failure the plan
-  stops for this MVP.
+- The plan completes only after the last task is confirmed; the first `failed`
+  verdict terminates it. An early blocker/failure stops the Builder and arrives
+  as its own single review request.
 
 Builder route ownership:
 
