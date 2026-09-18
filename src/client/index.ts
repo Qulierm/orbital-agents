@@ -118,10 +118,19 @@ export function apply(ctx: ClientContext): void {
    */
   const peerReturn = (sessionId: string): EndeavourInjected['peerReturn'] => {
     const face = faceOf(sessionId, 'endeavourPeer')
+    // `useSyncExternalStore` requires a STABLE snapshot reference: derive once
+    // per raw projection state object instead of building a new value per call.
+    const cache = new WeakMap<object, { counterpartId: string } | null>()
     return {
       getSnapshot: () => {
-        const view = peerView((face?.getSnapshot() ?? null) as PeerState | null, sessionId)
-        return view?.role === 'challenger' ? { counterpartId: view.counterpartId } : null
+        const state = (face?.getSnapshot() ?? null) as PeerState | null
+        if (state === null) return null
+        const cached = cache.get(state)
+        if (cached !== undefined) return cached
+        const view = peerView(state, sessionId)
+        const value = view?.role === 'challenger' ? { counterpartId: view.counterpartId } : null
+        cache.set(state, value)
+        return value
       },
       subscribe: (listener: () => void) => face?.subscribe(listener) ?? (() => undefined),
     }
