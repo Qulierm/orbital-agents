@@ -128,19 +128,23 @@ export function apply(ctx: ClientContext): void {
     inject: injected,
   }, PlanCard as unknown as (props: PlanCardProps) => unknown))
   registerPlanDock(client.slots, injected)
-  client.slots.inject('conversation.input.left', () => client.slots.register({
-    name: 'conversation.input.left',
+  // The composer toolbar keeps both role groups together on the trailing side:
+  // Speed (openai-codex-fast-mode, order 10) and limits (openai-codex-quota,
+  // order 20) stay ahead, then the Builder group (1000) and the Endeavour role
+  // label (1001); the native conversation.input.model seat renders after the
+  // whole right list, so the visual order is
+  // ... Speed -> limits -> [Builder | route] -> [Endeavour | native model] -> Send.
+  client.slots.inject('conversation.input.right', () => client.slots.register({
+    name: 'conversation.input.right',
     id: 'endeavour-builder',
-    order: 20,
+    order: 1000,
     locale: NS,
     inject: () => ({ builderRoute }),
   }, BuilderRouteControl as unknown as (props: unknown) => unknown))
-  // Last right-side entry (after the cost meter at order 5) so the label sits
-  // immediately before the native conversation.input.model seat and can join it.
   client.slots.inject('conversation.input.right', () => client.slots.register({
     name: 'conversation.input.right',
     id: 'endeavour-role',
-    order: 1000,
+    order: 1001,
     locale: NS,
   }, EndeavourRoleLabel as unknown as (props: unknown) => unknown))
 }

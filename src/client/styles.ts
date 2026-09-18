@@ -235,10 +235,15 @@ export const STYLE_TEXT = `
   flex-shrink: 1;
   min-width: 0;
 }
+/* Left-side controls (workspace, access select, plan) keep their own space;
+   only their text may ellipsize, never reorder. */
 [data-composer-card] :has(> [data-slot="conversation.input.left"]) > div {
   min-width: 0;
   overflow: hidden;
 }
+/* Speed (order 10) and limits (order 20) are native right-slot entries ahead
+   of the two role groups; CSS never reorders them and they keep their size. */
+[data-composer-card] [data-slot="conversation.input.right"] > * { order: 0; }
 [data-composer-card] [data-slot="conversation.input.model"] > div {
   min-width: 0;
   flex-shrink: 1;

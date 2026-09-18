@@ -36,6 +36,11 @@ last task succeeded -> plan terminal completed
 
 ## Builder route ownership
 
+- Both composer role groups live in `conversation.input.right`: the Builder
+  group at order 1000 and the Endeavour role label at 1001, after the native
+  Speed (10) and limits (20) entries, so the toolbar reads
+  `Speed -> limits -> [Builder | route] -> [Endeavour | native model] -> Send`
+  while the native ModelSelect keeps rendering after the right list.
 - The route preference is an official Host Settings section
   (`endeavour-builder`) owned by this plugin; the root composer control writes
   it and the service snapshots it once at `createPlan`.

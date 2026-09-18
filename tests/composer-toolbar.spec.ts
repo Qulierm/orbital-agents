@@ -85,7 +85,7 @@ describe('Builder group', () => {
 })
 
 describe('slot registration', () => {
-  it('registers the left Builder group at order 20 and the right label last at order 1000', async () => {
+  it('keeps both role groups adjacent at the end of the right slot, before the native model seat', async () => {
     vi.resetModules()
     const registrations: { name: string; id?: string; order?: number; locale?: string }[] = []
     const registeredComponents: unknown[] = []
@@ -104,14 +104,22 @@ describe('slot registration', () => {
     }
     const { apply } = await import('../src/client/index.js')
     apply(fakeClient as never)
-    const left = registrations.find((entry) => entry.name === 'conversation.input.left')
-    const right = registrations.find((entry) => entry.name === 'conversation.input.right')
-    expect(left).toMatchObject({ id: 'endeavour-builder', order: 20, locale: NS })
-    expect(right).toMatchObject({ id: 'endeavour-role', order: 1000, locale: NS })
-    // The native model seat renders after the whole right list, so the LAST
-    // right-side entry (highest order, after the cost meter at order 5) is the
-    // one that lands immediately before it.
-    expect(right?.order).toBeGreaterThan(5)
+    const builder = registrations.find((entry) => entry.id === 'endeavour-builder')
+    const role = registrations.find((entry) => entry.id === 'endeavour-role')
+    expect(registrations.some((entry) => entry.name === 'conversation.input.left')).toBe(false)
+    expect(builder).toMatchObject({ name: 'conversation.input.right', order: 1000, locale: NS })
+    expect(role).toMatchObject({ name: 'conversation.input.right', order: 1001, locale: NS })
+    // Sequence contract: native Speed (10) and limits (20) stay ahead, then the
+    // adjacent Builder (1000) and Endeavour (1001) groups; the native
+    // conversation.input.model seat renders after the whole right list.
+    const ordered = [
+      { id: 'openai-codex-fast-mode', order: 10 },
+      { id: 'openai-codex-quota', order: 20 },
+      { id: 'endeavour-builder', order: builder?.order ?? 0 },
+      { id: 'endeavour-role', order: role?.order ?? 0 },
+    ].sort((a, b) => a.order - b.order).map((entry) => entry.id)
+    expect(ordered).toEqual(['openai-codex-fast-mode', 'openai-codex-quota', 'endeavour-builder', 'endeavour-role'])
+    expect((role?.order ?? 0) - (builder?.order ?? 0)).toBe(1)
   })
 })
 

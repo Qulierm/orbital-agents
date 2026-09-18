@@ -1,5 +1,11 @@
 /**
- * Builder route control for the root Endeavour composer.
+ * Builder route control for the root Endeavour composer toolbar.
+ *
+ * Registered in `conversation.input.right` at order 1000, after the native
+ * Speed (order 10) and limits (order 20) entries, so it renders immediately
+ * before the Endeavour role label (order 1001) and the native
+ * `conversation.input.model` seat: ... Speed -> limits -> [Builder | route] ->
+ * [Endeavour | native model] -> Send.
  *
  * Presentation and menu follow the native ModelSelect exactly: a 28px trigger
  * (13/20/500 secondary label + caption effort) and a portaled card
@@ -46,7 +52,7 @@ export interface BuilderRouteController {
 
 /** Slot props: session standard seats plus the locale and settings bridge. */
 export type BuilderRouteControlProps =
-  PropsRuntime<'conversation.input.left'>
+  PropsRuntime<'conversation.input.right'>
   & PropsLocale<'endeavour'>
   & { readonly builderRoute: BuilderRouteController }
 
