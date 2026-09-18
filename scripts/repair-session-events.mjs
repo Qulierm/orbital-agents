@@ -82,7 +82,7 @@ export function parseZstdFrames(buffer) {
   return frames
 }
 
-function decompressZstd(buffer) {
+export function decompressZstd(buffer) {
   return execFileSync('zstd', ['-dc'], { input: buffer, maxBuffer: 256 * 1024 * 1024 }).toString('utf8')
 }
 
@@ -116,7 +116,7 @@ export function markLine(line) {
   return updated
 }
 
-function sessionFiles(sessionsRoot) {
+export function sessionFiles(sessionsRoot) {
   const found = []
   const walk = (dir, depth) => {
     if (depth > 4 || !existsSync(dir)) return

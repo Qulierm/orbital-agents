@@ -228,6 +228,33 @@ describe('installer lifecycle', () => {
     expect(state.presets.challenger.existed).toBe(false)
   })
 
+  it('refuses to migrate while a nonterminal legacy plan exists, with zero mutation', () => {
+    const home = tempHome()
+    seedProfile(home)
+    const dir = join(home, '.dsh', 'sessions', '--workspace--')
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(join(dir, 'session.v3.jsonl'), `${JSON.stringify({
+      seq: 1, type: 'endeavour/plan', ignorable: true,
+      data: { kind: 'plan-created', at: 1, plan: { planId: 'p-active', rootSessionId: 'root-x', childId: 'child-x', title: 'Legacy running', sequence: 2 } },
+    })}\n`)
+    const refused = installer(home, '--tarball', tarball())
+    expect(refused.status).not.toBe(0)
+    expect(refused.stderr).toContain('refusing to migrate')
+    expect(refused.stderr).toContain('p-active')
+    // NOTHING moved: no backup, no bundle row, no presets.
+    expect(existsSync(join(home, '.dsh', 'backups', 'endeavour'))).toBe(false)
+    expect(manifest(home).dsh.profile.bundles).toEqual(['@deepseek-ai/dsh-base', 'dsh-context'])
+    expect(existsSync(join(home, '.dsh', '.agent-presets'))).toBe(false)
+    // A terminal legacy plan does not block the install.
+    writeFileSync(join(dir, 'session.v3.jsonl'), `${JSON.stringify({
+      seq: 1, type: 'endeavour/plan', ignorable: true,
+      data: { kind: 'plan-created', at: 1, plan: { planId: 'p-done', rootSessionId: 'root-x', childId: 'child-x', title: 'Legacy done', sequence: 3, terminal: { outcome: 'completed', at: 9 } } },
+    })}\n`)
+    const allowed = installer(home, '--tarball', tarball())
+    expect(allowed.status).toBe(0)
+    expect(allowed.stdout).toContain('terminal legacy plan')
+  })
+
   it('removes only the retired endeavour-builder settings block and backs it up', () => {
     const home = tempHome()
     seedProfile(home)

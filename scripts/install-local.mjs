@@ -26,6 +26,7 @@ import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { load, dump } from 'js-yaml'
 import { desktopRunning, repairSessionEvents } from './repair-session-events.mjs'
+import { legacyRemediation, scanLegacyPlans } from './legacy-plan-scan.mjs'
 
 const PLUGIN = 'dsh-endeavour'
 const PRESET_ID = 'endeavour'
@@ -118,6 +119,30 @@ function atomicReplaceDir(source, target) {
  * selection now). The document is backed up first and ONLY that top-level
  * block is removed, so unrelated settings survive untouched.
  */
+/**
+ * Refuse to migrate while a NONTERMINAL legacy (childId-only) plan exists. The
+ * scan is strictly read-only and runs BEFORE any backup, tarball, preset or
+ * settings mutation, so an abort leaves the profile untouched. Terminal legacy
+ * plans are allowed (they stay readable as history), and unreadable logs are
+ * reported without blocking.
+ */
+function preflightLegacyPlans() {
+  const sessionsRoot = join(homeBase, '.dsh', 'sessions')
+  if (!existsSync(sessionsRoot)) return
+  const report = scanLegacyPlans({ sessionsRoot })
+  if (report.terminal.length > 0) {
+    console.log(`install-local: ${String(report.terminal.length)} terminal legacy plan(s) remain readable as history`)
+  }
+  if (report.corruptFiles.length > 0) {
+    console.log(`install-local: ${String(report.corruptFiles.length)} unreadable session log(s) were skipped by the legacy scan`)
+  }
+  if (report.nonterminal.length > 0) {
+    throw new Error(
+      `refusing to migrate ${String(report.nonterminal.length)} nonterminal legacy plan(s):\n${legacyRemediation(report).join('\n')}`,
+    )
+  }
+}
+
 function migrateOwnedSettings() {
   const settingsPath = join(homeBase, '.dsh', 'settings.yaml')
   if (!existsSync(settingsPath)) return
@@ -282,6 +307,8 @@ function resetBuilder() {
 }
 
 function install(tarball, { force }) {
+  // Strictly read-only gate, FIRST: no mutation happens before it passes.
+  preflightLegacyPlans()
   if (!existsSync(profileDir)) throw new Error(`profile not found: ${profileDir}`)
   if (!tarball || !existsSync(resolve(tarball))) throw new Error(`tarball not found: ${String(tarball)}`)
   // Fail before any mutation (including the package install) on foreign presets.
