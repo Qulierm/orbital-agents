@@ -17,7 +17,6 @@ import type { BuilderRouteSettings } from '../builder-settings.js'
 
 import { copyFrom } from './PlanCard.js'
 import {
-  builderChipLabel,
   builderControlDisabled,
   builderControlVisible,
   findCatalogModel,
@@ -283,24 +282,27 @@ export function BuilderRouteControl(props: BuilderRouteControlProps): React.Reac
   }
 
   if (!visible) return null
-  const chipLabel = settings.mode === 'custom'
-    ? builderChipLabel(settings, selectedModel?.name)
-    : `Builder · ${copy('builder.chipInherit')}`
+  const routeValue = settings.mode === 'custom'
+    ? `${selectedModel?.name ?? settings.model ?? ''}${settings.reasoningEffort === undefined ? '' : ` · ${settings.reasoningEffort}`}`
+    : copy('builder.chipInherit')
+  const fullTitle = `${copy('role.builder')}: ${routeValue}`
   return (
-    <div ref={rootRef} className={CLASS.builderControl} onKeyDown={onKeyDown}>
+    <div ref={rootRef} className={CLASS.builderControl} data-endeavour-role="builder" onKeyDown={onKeyDown}>
+      <span className={CLASS.roleLabel} aria-hidden="true">{copy('role.builder')}</span>
       <button
         ref={chipRef}
         type="button"
         data-endeavour-builder=""
-        className={CLASS.ghost}
+        className={CLASS.builderTrigger}
         aria-haspopup="menu"
         aria-expanded={open}
+        aria-label={fullTitle}
         disabled={disabledReason !== undefined}
-        title={disabledReason ?? copy('builder.title')}
+        title={disabledReason ?? fullTitle}
         onClick={() => { setOpen((value) => !value); setPane('root') }}
       >
-        {chipLabel}
-        {saving ? ` · ${copy('builder.saving')}` : ''}
+        <span className={CLASS.builderValue}>{routeValue}</span>
+        {saving ? <span className={CLASS.builderSaving}>{copy('builder.saving')}</span> : null}
         <svg width={12} height={12} viewBox="0 0 12 12" fill="none" aria-hidden="true">
           <path d="M2.5 4.5 6 8l3.5-3.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
         </svg>

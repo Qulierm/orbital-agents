@@ -11,6 +11,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-workspace/client'
 import { endeavourPlanDefinition } from './definition.js'
 import { PlanCard, type EndeavourInjected, type PlanCardProps } from './PlanCard.js'
 import { registerPlanDock } from './PlanDock.js'
+import { EndeavourRoleLabel } from './EndeavourRoleLabel.js'
 import type { ModelCatalog } from '@deepseek-ai/dsh-api-session-controller/types'
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 import { BuilderRouteControl, type BuilderRouteController } from './BuilderRouteControl.js'
@@ -134,4 +135,12 @@ export function apply(ctx: ClientContext): void {
     locale: NS,
     inject: () => ({ builderRoute }),
   }, BuilderRouteControl as unknown as (props: unknown) => unknown))
+  // Last right-side entry (after the cost meter at order 5) so the label sits
+  // immediately before the native conversation.input.model seat and can join it.
+  client.slots.inject('conversation.input.right', () => client.slots.register({
+    name: 'conversation.input.right',
+    id: 'endeavour-role',
+    order: 1000,
+    locale: NS,
+  }, EndeavourRoleLabel as unknown as (props: unknown) => unknown))
 }

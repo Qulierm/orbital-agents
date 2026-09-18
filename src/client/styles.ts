@@ -20,6 +20,11 @@ export const CLASS = {
   title: 'dsh-endeavour-title',
   progress: 'dsh-endeavour-progress',
   routeHint: 'dsh-endeavour-route',
+  roleLabel: 'dsh-endeavour-role-label',
+  builderTrigger: 'dsh-endeavour-builder-trigger',
+  builderValue: 'dsh-endeavour-builder-value',
+  builderSaving: 'dsh-endeavour-builder-saving',
+  endeavourRole: 'dsh-endeavour-endeavour-role',
   menu: 'dsh-endeavour-menu',
   menuRow: 'dsh-endeavour-menu-row',
   menuRowActive: 'dsh-endeavour-menu-row dsh-endeavour-menu-row--active',
@@ -118,6 +123,89 @@ export const STYLE_TEXT = `
   font-weight: 500;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.dsh-endeavour-builder-control {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  height: 28px;
+  min-width: 0;
+  max-width: 100%;
+  flex: 0 1 auto;
+}
+.dsh-endeavour-role-label {
+  display: inline-flex;
+  align-items: center;
+  height: 28px;
+  padding: 0 8px;
+  border-radius: 8px 0 0 8px;
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
+  font-weight: 500;
+  flex: none;
+}
+.dsh-endeavour-builder-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 28px;
+  min-width: 0;
+  max-width: 200px;
+  padding: 0 6px 0 8px;
+  border: none;
+  border-radius: 0 8px 8px 0;
+  background: color-mix(in srgb, var(--dsw-alias-interactive-bg-hover) 60%, transparent);
+  color: var(--dsw-alias-label-primary);
+  font-size: 12px;
+  cursor: pointer;
+  flex: 0 1 auto;
+}
+.dsh-endeavour-builder-trigger:hover:not(:disabled) { background: var(--dsw-alias-interactive-bg-hover); }
+.dsh-endeavour-builder-trigger:disabled { opacity: .55; cursor: default; }
+.dsh-endeavour-builder-trigger:focus-visible { outline: 2px solid var(--dsw-alias-border-focus, #4c8dff); outline-offset: 1px; }
+.dsh-endeavour-builder-value { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dsh-endeavour-builder-saving { flex: none; color: var(--dsw-alias-label-tertiary); font-size: 11px; }
+/* Endeavour role: last right-side entry, joined to the native model trigger. */
+.dsh-endeavour-endeavour-role {
+  display: inline-flex;
+  align-items: center;
+  height: 28px;
+  padding: 0 8px;
+  border-radius: 8px 0 0 8px;
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+  flex: none;
+}
+[data-composer-card]:has([data-endeavour-role="endeavour"]) [data-slot="conversation.input.model"] button {
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+  padding-left: 6px;
+  min-width: 0;
+  max-width: 220px;
+  overflow: hidden;
+}
+[data-composer-card]:has([data-endeavour-role="endeavour"]) [data-slot="conversation.input.model"] button span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Tighter gaps only when both role groups are present. */
+[data-composer-card]:has([data-endeavour-role]) :has(> [data-slot="conversation.input.left"]) { gap: 8px; min-width: 0; }
+[data-composer-card]:has([data-endeavour-role]) :has(> [data-slot="conversation.input.right"]) { gap: 8px; min-width: 0; }
+/* Shrink priority 1: effort captions collapse below the normal card width. */
+@media (max-width: 1280px) {
+  [data-composer-card]:has([data-endeavour-role="endeavour"]) [data-slot="conversation.input.model"] button span:nth-of-type(2) { display: none; }
+}
+/* Shrink priority 2 + 3: model names ellipsize, then role labels shorten to B/E. */
+@media (max-width: 1024px) {
+  .dsh-endeavour-role-label, .dsh-endeavour-endeavour-role { font-size: 0; padding: 0 6px; }
+  .dsh-endeavour-role-label::after { content: 'B'; font-size: 12px; }
+  .dsh-endeavour-endeavour-role::after { content: 'E'; font-size: 12px; }
 }
 .dsh-endeavour-menu {
   position: absolute;

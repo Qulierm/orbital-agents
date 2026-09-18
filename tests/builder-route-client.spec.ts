@@ -94,7 +94,8 @@ describe('control rendering', () => {
 
   it('renders the inherit chip in an Endeavour root session and nothing in Standard/child', () => {
     const html = renderToStaticMarkup(createElement(BuilderRouteControl, props({ preset: 'endeavour', plan: null })))
-    expect(html).toContain('Builder · Inherit')
+    expect(html).toContain('Inherit Endeavour')
+    expect(html).toContain('>Builder</span>')
     expect(html).toContain('aria-haspopup="menu"')
     expect(renderToStaticMarkup(createElement(BuilderRouteControl, props({ preset: 'standard', plan: null })))).toBe('')
     expect(renderToStaticMarkup(createElement(BuilderRouteControl, props({ preset: 'endeavour', subagent: { mode: 'continuable' } })))).toBe('')
