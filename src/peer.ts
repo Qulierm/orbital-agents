@@ -156,10 +156,17 @@ export function foldPeerEvents(events: readonly PeerEventPayload[]): PeerState |
 export class PeerRegistry {
   private readonly bySession = new Map<string, PeerState>()
 
-  /** Index (or adopt) one pair, rejecting invalid states. */
+  /**
+   * Index (or adopt) one pair, rejecting invalid states AND stale reciprocal
+   * snapshots: a member's checkpoint may never move the pair backwards.
+   */
   set(state: PeerState): PeerState {
     const problems = validatePeerState(state)
     if (problems.length > 0) throw new PeerError('peer-invalid', problems.join('; '))
+    const existing = this.bySession.get(state.endeavourSessionId)
+    if (existing !== undefined && existing.sequence > state.sequence) {
+      throw new PeerError('peer-stale', `pair ${state.pairId} already advanced to sequence ${String(existing.sequence)}`)
+    }
     this.bySession.set(state.endeavourSessionId, state)
     this.bySession.set(state.challengerSessionId, state)
     return state

@@ -1,14 +1,22 @@
 /**
  * Narrow injectable seam over the official Host services needed for ordinary
- * peer provisioning and delivery: session create/adopt metadata, recipient
- * Agent resolution, and workspace association.
+ * peer provisioning and delivery: `ctx.sessionController.create` for ordinary
+ * create/adopt (full preset composition and idempotent conflict semantics) and
+ * `ctx.sessionController.resolveAgent` for cold-resumed recipient Agents.
  *
- * Only official APIs are used (`ctx.sessions` SessionStore.create and
- * `ctx.agents` AgentRegistry.get); no subagent imports appear here, and tests
- * drive the interface with fakes instead of real sessions.
+ * The project identity is the exact cwd; rc.2 exposes no public workspace
+ * grouping API for sessions, so a peer simply appears as an ordinary ungrouped
+ * sidebar row (documented fallback) rather than being faked into a group.
  */
 
 import type { PeerRole } from './peer.js'
+
+/** Ordinary session creation result. */
+export interface PeerCreateResult {
+  readonly sessionId: string
+  /** True when the controller adopted an already existing session id. */
+  readonly adopted: boolean
+}
 
 /** Session metadata the seam exposes (ordinary sessions only). */
 export interface PeerSessionMeta {
@@ -40,14 +48,16 @@ export interface PeerHostSeam {
   /** Metadata for one session, when it exists. */
   sessionMeta(id: string): PeerSessionMeta | undefined
   /**
-   * Create a BLANK ordinary session. Implementations must never prompt or start
-   * a model request; an existing id is adopted instead of recreated.
+   * Create or adopt a BLANK ordinary session through the official controller.
+   * Never prompts and never starts a model request; an existing id is adopted
+   * (the controller owns conflict semantics).
    */
-  createOrdinarySession(input: PeerCreateInput): void
-  /** Resolve the live Agent for one session, when it is attached. */
-  resolveAgent(id: string): PeerAgentFace | undefined
-  /** Public workspace grouping for one session, when the registry exposes it. */
-  workspaceOf(sessionId: string): string | undefined
+  createOrdinarySession(input: PeerCreateInput): Promise<PeerCreateResult>
+  /**
+   * Resolve the live Agent for one session, resuming a cold persisted session.
+   * Returns undefined only for a real resolution failure.
+   */
+  resolveAgent(id: string): Promise<PeerAgentFace | undefined>
   /** Copy the model selection from one ordinary session to another, when the
    * deployment exposes a request-free path; undefined means unsupported. */
   copyModelSelection?(fromSessionId: string, toSessionId: string): boolean
@@ -57,6 +67,9 @@ export interface PeerHostSeam {
 interface CordisLike {
   get?(name: string): unknown
 }
+
+/** ApiSessionAgentResult-shaped resolve outcome. */
+type ResolveResult = { readonly agent?: unknown } | { readonly error?: unknown }
 
 interface RawSession {
   readonly id: string
@@ -71,8 +84,20 @@ interface RawSessionsService {
   flush?(id?: unknown): unknown
 }
 
-interface RawAgentsService {
-  get?(id: string): unknown
+interface RawAgentResult {
+  readonly agent?: unknown
+  readonly error?: unknown
+}
+
+/** Official controller surface used by the adapter (official types upstream). */
+interface RawController {
+  create?(request: { sessionId?: string; cwd?: string; agentPreset?: string }): Promise<{ sessionId?: string; agentPreset?: string }>
+  resolveAgent?(sessionId: string): Promise<ResolveResult>
+}
+
+/** Shape of an ApiSessionAgentResult failure, for honest error reporting. */
+export interface PeerResolveFailure {
+  readonly reason: string
 }
 
 function rawMeta(session: RawSession | undefined): PeerSessionMeta | undefined {
@@ -93,24 +118,44 @@ function rawMeta(session: RawSession | undefined): PeerSessionMeta | undefined {
 export function createCordisPeerSeam(ctx: unknown): PeerHostSeam {
   const get = (ctx as CordisLike).get?.bind(ctx as CordisLike)
   const sessions = get?.('sessions') as RawSessionsService | undefined
-  const agents = get?.('agents') as RawAgentsService | undefined
-  const workspaces = get?.('uiWorkspace') as { workspaceOf?(id: string): string | undefined } | undefined
+  const controller = get?.('sessionController') as RawController | undefined
+
+  if (controller === undefined || typeof controller.create !== 'function' || typeof controller.resolveAgent !== 'function') {
+    // Fail loudly at wire-up: silently degrading to a store-less fake would
+    // produce peers without composition and delivery without resume.
+    throw new Error('dsh-endeavour: sessionController is unavailable; peer provisioning is disabled')
+  }
 
   return {
     listSessionIds: () => (sessions?.list?.() ?? []).map((session) => session.id),
     sessionMeta: (id) => rawMeta(sessions?.get?.(id) as RawSession | undefined),
-    createOrdinarySession: (input) => {
-      // Blank ordinary session: metadata only, never a prompt or model request.
-      sessions?.create?.(input.id, {
-        meta: {
-          ...(input.cwd === undefined ? {} : { cwd: input.cwd }),
-          agentPreset: input.agentPreset,
-        },
+    createOrdinarySession: async (input) => {
+      // Blank ordinary session through the official controller: metadata only,
+      // never a prompt and never a model request. An existing id is adopted.
+      const value = await controller.create?.({
+        sessionId: input.id,
+        ...(input.cwd === undefined ? {} : { cwd: input.cwd }),
+        agentPreset: input.agentPreset,
       })
+      const sessionId = value?.sessionId ?? input.id
+      return { sessionId, adopted: sessionId !== undefined && sessionId !== input.id ? true : sessionId === input.id }
     },
-    resolveAgent: (id) => agents?.get?.(id) as PeerAgentFace | undefined,
-    workspaceOf: (id) => workspaces?.workspaceOf?.(id),
+    resolveAgent: async (id) => {
+      const result = await controller.resolveAgent?.(id)
+      const agent = (result as RawAgentResult | undefined)?.agent
+      if (agent === undefined || agent === null) return undefined
+      return agent as PeerAgentFace
+    },
   }
+}
+
+/** Stable code for a real resolveAgent failure (never used for "not loaded"). */
+export function peerResolveFailureReason(result: ResolveResult | undefined): string {
+  const error = (result as { error?: unknown } | undefined)?.error
+  if (error === undefined) return 'unknown'
+  if (typeof error === 'string') return error
+  const code = (error as { code?: unknown }).code
+  return typeof code === 'string' ? code : 'resolve-failed'
 }
 
 /** Role-aware helper: the peer id one side must target. */

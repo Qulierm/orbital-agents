@@ -26,10 +26,12 @@ import {
   PeerRegistry,
   foldPeerEvents,
   peerEventPayload,
+  peerRoleOf,
   type PeerEventPayload,
   type PeerState,
 } from './peer.js'
 import { createCordisPeerSeam } from './peer-host.js'
+import { projectPeerState } from './peer-projection.js'
 import { PeerLifecycle, PeerProvisioner } from './peer-service.js'
 import {
   assertChildRole,
@@ -309,8 +311,13 @@ export class EndeavourService extends Service {
       this.provisioner = new PeerProvisioner({
         seam,
         readPair: (sessionId) => this.peers.get(sessionId),
+        hasCheckpoint: (sessionId) => this.sessionHasPeerCheckpoint(sessionId),
         appendPair: async (rootSessionId, state, kind, at) => {
-          await this.appendEvent(rootSessionId, PEER_EVENT_TYPE, peerEventPayload(kind, undefined, state, at))
+          // The SAME validated checkpoint lands on BOTH ordinary logs; the role
+          // of each member is derived from its own session id at read time.
+          const payload = peerEventPayload(kind, undefined, state, at)
+          await this.appendEvent(rootSessionId, PEER_EVENT_TYPE, payload)
+          await this.appendEvent(state.challengerSessionId, PEER_EVENT_TYPE, payload)
           this.peers.set(state)
         },
         now: () => Date.now(),
@@ -318,6 +325,20 @@ export class EndeavourService extends Service {
       this.lifecycle = new PeerLifecycle(this.provisioner, { readPair: (sessionId) => this.peers.get(sessionId) })
     }
     return this.provisioner
+  }
+
+  /** True when THAT session log carries a validated peer checkpoint. */
+  private sessionHasPeerCheckpoint(sessionId: string): boolean {
+    const session = this.sessionHost()?.get(sessionId)
+    if (session === undefined) return false
+    const count = session.seq as unknown as number
+    for (let seq = 0; seq < count; seq += 1) {
+      const event = session.eventAt(seq as never) as SessionEvent | undefined
+      if (event === undefined || event.type !== PEER_EVENT_TYPE) continue
+      const state = projectPeerState((event.data as PeerEventPayload | undefined)?.plan)
+      if (state !== null && peerRoleOf(state, sessionId) !== undefined) return true
+    }
+    return false
   }
 
   /**

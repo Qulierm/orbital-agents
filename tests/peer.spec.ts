@@ -61,6 +61,11 @@ describe('pair state', () => {
     expect(registry.peerOf(first.challengerSessionId)).toBe('session-a')
     expect(registry.pairs()).toHaveLength(2)
     expect(() => registry.set({ ...first, pairId: 'forged' })).toThrow(PeerError)
+    // Reciprocal snapshots must be monotonic: a stale checkpoint is rejected.
+    const advanced = { ...first, sequence: 3, updatedAt: 30 }
+    registry.set(advanced)
+    expect(registry.get('session-a')?.sequence).toBe(3)
+    expect(() => registry.set(first)).toThrow(PeerError)
 
     const update = { ...first, sequence: 2, updatedAt: 9 }
     const folded = foldPeerEvents([peerEventPayload('peer-created', undefined, first, 1), peerEventPayload('peer-updated', first, update, 9)])

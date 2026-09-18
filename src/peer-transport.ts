@@ -117,16 +117,34 @@ export interface PeerDeliveryDeps {
   readonly now?: () => number
 }
 
-/** In-memory retry ledger: one accepted relay per protocol step per process. */
+/**
+ * In-memory retry ledger. A key is RESERVED before delivery and COMMITTED only
+ * on success, so a failed create/resolve/followup+send releases the reservation
+ * and a retry can deliver; concurrent identical relays still collapse to one
+ * delivery. A process restart clears the ledger (durable plan checkpoints stay
+ * authoritative).
+ */
 export class PeerDeliveryLedger {
-  private readonly delivered = new Set<string>()
-  accept(key: string): boolean {
-    if (this.delivered.has(key)) return false
-    this.delivered.add(key)
+  private readonly reservations = new Set<string>()
+
+  reserve(key: string): boolean {
+    if (this.reservations.has(key)) return false
+    this.reservations.add(key)
     return true
   }
+
+  /** Successful delivery: the reservation stays as the delivered marker. */
+  commit(key: string): void {
+    this.reservations.add(key)
+  }
+
+  /** Failed delivery: free the slot so a retry may attempt again. */
+  release(key: string): void {
+    this.reservations.delete(key)
+  }
+
   has(key: string): boolean {
-    return this.delivered.has(key)
+    return this.reservations.has(key)
   }
 }
 
@@ -152,16 +170,25 @@ export async function deliverPeerRelay(
   if (problems.length > 0) throw new PeerError('peer-unauthorized', problems.join('; '))
   const key = peerDedupeKey(relay)
   return queue.enqueue(relay.pairId, async () => {
-    if (!ledger.accept(key)) return { delivered: false, dedupeKey: key }
-    const agent: PeerAgentFace | undefined = deps.seam.resolveAgent(relay.targetSessionId)
-    if (agent === undefined) throw new PeerError('peer-target-offline', `no live agent for ${relay.targetSessionId}`)
-    const message = peerRelayMessage(relay)
+    // Reserve before the async create/resolve work so a concurrent identical
+    // relay cannot double-deliver; release below when anything fails.
+    if (!ledger.reserve(key)) return { delivered: false, dedupeKey: key }
     try {
-      agent.followup(message)
-    } catch {
-      // Busy or cold target: queue as a next-turn message instead.
-      agent.send(message, 'next-turn', true)
+      // Official resolution resumes a cold persisted peer instead of failing.
+      const agent: PeerAgentFace | undefined = await deps.seam.resolveAgent(relay.targetSessionId)
+      if (agent === undefined) throw new PeerError('peer-target-unreachable', `could not resolve agent for ${relay.targetSessionId}`)
+      const message = peerRelayMessage(relay)
+      try {
+        agent.followup(message)
+      } catch {
+        // Busy target: queue as a next-turn message instead.
+        agent.send(message, 'next-turn', true)
+      }
+      ledger.commit(key)
+      return { delivered: true, dedupeKey: key }
+    } catch (error) {
+      ledger.release(key)
+      throw error
     }
-    return { delivered: true, dedupeKey: key }
   })
 }

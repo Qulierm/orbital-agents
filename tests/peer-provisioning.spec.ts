@@ -22,35 +22,58 @@ import {
 
 interface FakeSession extends PeerSessionMeta { cwd?: string }
 
+interface ProvisionState {
+  pair?: PeerState
+  appends: { kind: string; state: PeerState }[]
+  /** Per-session log presence, mirroring the two ordinary session logs. */
+  logs: Map<string, PeerState[]>
+}
+
+function newState(): ProvisionState {
+  return { appends: [], logs: new Map() }
+}
+
 function fakeSeam(seed: FakeSession[]): {
   seam: PeerHostSeam
   sessions: Map<string, FakeSession>
-  creates: { id: string; agentPreset: string; cwd?: string }[]
+  creates: { sessionId: string; agentPreset: string; cwd?: string }[]
   agents: Map<string, PeerAgentFace & { inbox: unknown[]; wakeups: number }>
+  /** Cold-resume behaviour: sessions start unresolved until activated. */
+  resolutionFailures: Set<string>
 } {
   const sessions = new Map(seed.map((session) => [session.id, session]))
-  const creates: { id: string; agentPreset: string; cwd?: string }[] = []
+  const creates: { sessionId: string; agentPreset: string; cwd?: string }[] = []
   const agents = new Map<string, PeerAgentFace & { inbox: unknown[]; wakeups: number }>()
+  const resolutionFailures = new Set<string>()
   const seam: PeerHostSeam = {
     listSessionIds: () => [...sessions.keys()],
     sessionMeta: (id) => sessions.get(id),
-    createOrdinarySession: (input) => {
-      creates.push({ id: input.id, agentPreset: input.agentPreset, ...(input.cwd === undefined ? {} : { cwd: input.cwd }) })
-      sessions.set(input.id, { id: input.id, agentPreset: input.agentPreset, ...(input.cwd === undefined ? {} : { cwd: input.cwd }) })
+    createOrdinarySession: async (input) => {
+      // The official controller composes the preset; an existing id is adopted.
+      creates.push({ sessionId: input.id, agentPreset: input.agentPreset, ...(input.cwd === undefined ? {} : { cwd: input.cwd }) })
+      const adopted = sessions.has(input.id)
+      if (!adopted) sessions.set(input.id, { id: input.id, agentPreset: input.agentPreset, ...(input.cwd === undefined ? {} : { cwd: input.cwd }) })
+      return { sessionId: input.id, adopted }
     },
-    resolveAgent: (id) => agents.get(id),
-    workspaceOf: () => undefined,
+    resolveAgent: async (id) => (resolutionFailures.has(id) ? undefined : agents.get(id)),
   }
-  return { seam, sessions, creates, agents }
+  return { seam, sessions, creates, agents, resolutionFailures }
 }
 
-function provisioner(seam: PeerHostSeam, state: { pair?: PeerState; appends: { kind: string; state: PeerState }[] }): PeerProvisioner {
+function provisioner(seam: PeerHostSeam, state: ProvisionState): PeerProvisioner {
   return new PeerProvisioner({
     seam,
     readPair: () => state.pair,
-    appendPair: async (_root, next, kind) => {
+    hasCheckpoint: (sessionId) => (state.logs.get(sessionId)?.length ?? 0) > 0,
+    appendPair: async (root, next, kind) => {
       state.pair = next
       state.appends.push({ kind, state: next })
+      // Both ordinary logs receive the identical validated checkpoint.
+      for (const member of [root, next.challengerSessionId]) {
+        const log = state.logs.get(member) ?? []
+        log.push(next)
+        state.logs.set(member, log)
+      }
     },
     now: () => 1_000,
   })
@@ -62,8 +85,8 @@ describe('provisioning', () => {
       { id: 'session-a', agentPreset: 'endeavour', cwd: '/work' },
       { id: 'session-b', agentPreset: 'endeavour', cwd: '/work' },
     ])
-    const stateA: { pair?: PeerState; appends: { kind: string; state: PeerState }[] } = { appends: [] }
-    const stateB: { pair?: PeerState; appends: { kind: string; state: PeerState }[] } = { appends: [] }
+    const stateA = newState()
+    const stateB = newState()
     const a = provisioner(seam, stateA)
     const b = provisioner(seam, stateB)
     const first = await a.ensure('session-a')
@@ -73,8 +96,8 @@ describe('provisioning', () => {
     expect(again.challengerSessionId).toBe(first.challengerSessionId)
     expect(other.challengerSessionId).not.toBe(first.challengerSessionId)
     expect(creates).toEqual([
-      { id: first.challengerSessionId, agentPreset: 'challenger', cwd: '/work' },
-      { id: other.challengerSessionId, agentPreset: 'challenger', cwd: '/work' },
+      { sessionId: first.challengerSessionId, agentPreset: 'challenger', cwd: '/work' },
+      { sessionId: other.challengerSessionId, agentPreset: 'challenger', cwd: '/work' },
     ])
     // Idempotent retry appended nothing new.
     expect(stateA.appends).toHaveLength(1)
@@ -83,7 +106,7 @@ describe('provisioning', () => {
 
   it('serializes concurrent ensures to exactly one create and one checkpoint', async () => {
     const { seam, creates } = fakeSeam([{ id: 'session-a', agentPreset: 'endeavour' }])
-    const state: { pair?: PeerState; appends: { kind: string; state: PeerState }[] } = { appends: [] }
+    const state = newState()
     const service = provisioner(seam, state)
     const results = await Promise.all([service.ensure('session-a'), service.ensure('session-a'), service.ensure('session-a')])
     expect(new Set(results.map((pair) => pair.challengerSessionId)).size).toBe(1)
@@ -104,15 +127,58 @@ describe('provisioning', () => {
     }
     // The pair id must be the deterministic one for validation to pass.
     const { peerPairIdFor } = await import('../src/peer.js')
-    const state: { pair?: PeerState; appends: { kind: string; state: PeerState }[] } = {
-      pair: { ...existing, pairId: peerPairIdFor('session-a') },
-      appends: [],
-    }
+    const state = newState()
+    state.pair = { ...existing, pairId: peerPairIdFor('session-a') }
     const service = provisioner(seam, state)
     const repaired = await service.ensure('session-a')
     expect(creates).toHaveLength(1)
     expect(state.appends.at(-1)?.kind).toBe('peer-updated')
     expect(repaired.sequence).toBe(2)
+  })
+
+  it('writes the identical reciprocal checkpoint to both ordinary logs and repairs one-sided crashes', async () => {
+    const { seam } = fakeSeam([{ id: 'session-a', agentPreset: 'endeavour' }])
+    const state = newState()
+    const service = provisioner(seam, state)
+    const pair = await service.ensure('session-a')
+    const rootLog = state.logs.get('session-a') ?? []
+    const peerLog = state.logs.get(pair.challengerSessionId) ?? []
+    expect(rootLog).toHaveLength(1)
+    expect(peerLog).toHaveLength(1)
+    expect(JSON.stringify(rootLog[0])).toBe(JSON.stringify(peerLog[0]))
+    expect(rootLog[0]).toEqual(pair)
+
+    // Root-only crash: the challenger log lost its checkpoint.
+    state.logs.set(pair.challengerSessionId, [])
+    const repaired = await service.ensure('session-a')
+    expect(state.logs.get(pair.challengerSessionId)).toHaveLength(1)
+    expect(repaired.sequence).toBe(pair.sequence + 1)
+
+    // Challenger-only crash: the root log lost its checkpoint.
+    state.logs.set('session-a', [])
+    await service.ensure('session-a')
+    expect(state.logs.get('session-a')).toHaveLength(1)
+
+    // Session created with no events on either side (pair registry empty).
+    const orphan = fakeSeam([
+      { id: 'session-b', agentPreset: 'endeavour' },
+      { id: challengerSessionIdFor('session-b'), agentPreset: 'challenger' },
+    ])
+    const orphanState = newState()
+    const orphanPair = await provisioner(orphan.seam, orphanState).ensure('session-b')
+    expect(orphanState.logs.get('session-b')).toHaveLength(1)
+    expect(orphanState.logs.get(orphanPair.challengerSessionId)).toHaveLength(1)
+    // An existing challenger session is ADOPTED, never recreated.
+    expect(orphan.creates).toEqual([{ sessionId: orphanPair.challengerSessionId, agentPreset: 'challenger' }])
+  })
+
+  it('calls the controller create once with the deterministic id, challenger preset and cwd', async () => {
+    const { seam, creates } = fakeSeam([{ id: 'session-a', agentPreset: 'endeavour', cwd: '/proj' }])
+    const state = newState()
+    const service = provisioner(seam, state)
+    const first = await service.ensure('session-a')
+    await service.ensure('session-a')
+    expect(creates).toEqual([{ sessionId: first.challengerSessionId, agentPreset: 'challenger', cwd: '/proj' }])
   })
 
   it('fails closed for Standard, Challenger, subagent and conflicting sessions', async () => {
@@ -121,7 +187,7 @@ describe('provisioning', () => {
       { id: 'session-chal', agentPreset: 'challenger' },
       { id: 'session-sub', agentPreset: 'endeavour', origin: 'subagent' },
     ])
-    const service = provisioner(seam, { appends: [] })
+    const service = provisioner(seam, newState())
     await expect(service.ensure('session-missing')).rejects.toMatchObject({ code: 'peer-unknown-session' })
     await expect(service.ensure('session-std')).rejects.toMatchObject({ code: 'peer-not-endeavour' })
     await expect(service.ensure('session-chal')).rejects.toMatchObject({ code: 'peer-not-endeavour' })
@@ -131,7 +197,7 @@ describe('provisioning', () => {
       { id: 'session-a', agentPreset: 'endeavour' },
       { id: challengerSessionIdFor('session-a'), agentPreset: 'standard' },
     ])
-    await expect(provisioner(conflict.seam, { appends: [] }).ensure('session-a'))
+    await expect(provisioner(conflict.seam, newState()).ensure('session-a'))
       .rejects.toMatchObject({ code: 'peer-conflict' })
     expect(conflict.creates).toHaveLength(0)
   })
@@ -148,7 +214,7 @@ describe('provisioning', () => {
 
   it('observes only unpaired sessions and never recurses on the created challenger', async () => {
     const { seam, creates } = fakeSeam([{ id: 'session-a', agentPreset: 'endeavour' }])
-    const state: { pair?: PeerState; appends: { kind: string; state: PeerState }[] } = { appends: [] }
+    const state = newState()
     const service = provisioner(seam, state)
     const observed: string[] = []
     const lifecycle = new PeerLifecycle(service, {
@@ -248,15 +314,64 @@ describe('transport', () => {
     expect(sends[1]).toContain('p2')
   })
 
-  it('rejects unauthorized relays before any wakeup and reports offline targets', async () => {
+  it('rejects unauthorized relays before any wakeup and reports unresolvable targets', async () => {
     const { seam, agents } = fakeSeam([{ id: 'session-a', agentPreset: 'endeavour' }, { id: challenger, agentPreset: 'challenger' }])
     const deps = { seam, readPair: () => pair }
     const queue = new PeerDeliveryQueue()
     const ledger = new PeerDeliveryLedger()
     await expect(deliverPeerRelay(deps, queue, ledger, relay({ pairId: 'other' }))).rejects.toBeInstanceOf(PeerError)
-    await expect(deliverPeerRelay(deps, queue, ledger, relay())).rejects.toMatchObject({ code: 'peer-target-offline' })
+    await expect(deliverPeerRelay(deps, queue, ledger, relay())).rejects.toMatchObject({ code: 'peer-target-unreachable' })
     agents.set(challenger, { inbox: [], wakeups: 0, followup: () => undefined, send: () => undefined })
     await expect(deliverPeerRelay(deps, queue, ledger, relay({ senderSessionId: challenger, senderRole: 'challenger', targetSessionId: 'session-a' })))
       .rejects.toMatchObject({ code: 'peer-unauthorized' })
+  })
+
+  it('cold-resumes the peer agent through resolveAgent before delivering', async () => {
+    const { seam, agents } = fakeSeam([{ id: 'session-a', agentPreset: 'endeavour' }, { id: challenger, agentPreset: 'challenger' }])
+    const deps = { seam, readPair: () => pair }
+    const queue = new PeerDeliveryQueue()
+    const ledger = new PeerDeliveryLedger()
+    // No live Agent yet: the controller resolves (and would resume) it.
+    const inbox: unknown[] = []
+    agents.set(challenger, { inbox, wakeups: 0, followup: (message) => { inbox.push(message) }, send: () => undefined })
+    const result = await deliverPeerRelay(deps, queue, ledger, relay())
+    expect(result.delivered).toBe(true)
+    expect(inbox).toHaveLength(1)
+  })
+
+  it('releases the dedupe reservation on failure so a retry can deliver', async () => {
+    const { seam, agents, resolutionFailures } = fakeSeam([{ id: 'session-a', agentPreset: 'endeavour' }, { id: challenger, agentPreset: 'challenger' }])
+    const deps = { seam, readPair: () => pair }
+    const queue = new PeerDeliveryQueue()
+    const ledger = new PeerDeliveryLedger()
+    resolutionFailures.add(challenger)
+    await expect(deliverPeerRelay(deps, queue, ledger, relay())).rejects.toMatchObject({ code: 'peer-target-unreachable' })
+    expect(ledger.has(peerDedupeKey(relay()))).toBe(false)
+    // The peer comes back (cold resume succeeded) — the SAME relay still lands.
+    resolutionFailures.delete(challenger)
+    const inbox: unknown[] = []
+    agents.set(challenger, { inbox, wakeups: 0, followup: (message) => { inbox.push(message) }, send: () => undefined })
+    const retry = await deliverPeerRelay(deps, queue, ledger, relay())
+    expect(retry.delivered).toBe(true)
+    expect(inbox).toHaveLength(1)
+  })
+
+  it('collapses concurrent identical relays to one delivery', async () => {
+    const { seam, agents } = fakeSeam([{ id: 'session-a', agentPreset: 'endeavour' }, { id: challenger, agentPreset: 'challenger' }])
+    const inbox: unknown[] = []
+    agents.set(challenger, { inbox, wakeups: 0, followup: (message) => { inbox.push(message) }, send: () => undefined })
+    const deps = { seam, readPair: () => pair }
+    const queue = new PeerDeliveryQueue()
+    const ledger = new PeerDeliveryLedger()
+    const results = await Promise.all([
+      deliverPeerRelay(deps, queue, ledger, relay()),
+      deliverPeerRelay(deps, queue, ledger, relay()),
+      deliverPeerRelay(deps, queue, ledger, relay()),
+    ])
+    expect(results.filter((result) => result.delivered)).toHaveLength(1)
+    expect(inbox).toHaveLength(1)
+    // Honest limitation: the ledger is in-memory, so a process restart starts
+    // with an empty ledger and may re-deliver; plan checkpoints stay authoritative.
+    expect(new PeerDeliveryLedger().has(peerDedupeKey(relay()))).toBe(false)
   })
 })

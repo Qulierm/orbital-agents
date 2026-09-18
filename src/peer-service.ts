@@ -22,7 +22,13 @@ export interface PeerProvisionDeps {
   readonly seam: PeerHostSeam
   /** Durable pair already indexed for either side, if any. */
   readonly readPair: (sessionId: string) => PeerState | undefined
-  /** Append + flush one peer checkpoint to its owning Endeavour session. */
+  /**
+   * Whether THAT session log already carries a validated peer checkpoint.
+   * Presence is tracked per session, not merely by registry indexing, so a
+   * one-sided crash is detectable.
+   */
+  readonly hasCheckpoint: (sessionId: string) => boolean
+  /** Append + flush the SAME validated checkpoint to BOTH ordinary logs. */
   readonly appendPair: (rootSessionId: string, state: PeerState, kind: PeerEventKind, at: number) => Promise<void>
   /** Clock (injected for tests). */
   readonly now: () => number
@@ -70,7 +76,7 @@ export class PeerProvisioner {
       const peerMeta = this.deps.seam.sessionMeta(challengerSessionId)
       if (peerMeta === undefined) {
         // Crash recovery: the mapping survived but the session did not.
-        this.deps.seam.createOrdinarySession({
+        await this.deps.seam.createOrdinarySession({
           id: challengerSessionId,
           agentPreset: 'challenger',
           ...(meta.cwd === undefined ? {} : { cwd: meta.cwd }),
@@ -80,17 +86,24 @@ export class PeerProvisioner {
         return repaired
       }
       this.assertChallenger(peerMeta)
+      // Reciprocal repair: a crash that committed only one side is healed by
+      // re-appending the same validated checkpoint to both logs.
+      if (!this.deps.hasCheckpoint(endeavourSessionId) || !this.deps.hasCheckpoint(challengerSessionId)) {
+        const repaired: PeerState = { ...existing, updatedAt: at, sequence: existing.sequence + 1 }
+        await this.deps.appendPair(endeavourSessionId, repaired, 'peer-updated', at)
+        return repaired
+      }
       return existing
     }
     const peerMeta = this.deps.seam.sessionMeta(challengerSessionId)
     if (peerMeta !== undefined) this.assertChallenger(peerMeta)
-    else {
-      this.deps.seam.createOrdinarySession({
-        id: challengerSessionId,
-        agentPreset: 'challenger',
-        ...(meta.cwd === undefined ? {} : { cwd: meta.cwd }),
-      })
-    }
+    // Official create/adopt: the controller owns composition and conflict
+    // semantics, so an existing challenger is adopted rather than recreated.
+    await this.deps.seam.createOrdinarySession({
+      id: challengerSessionId,
+      agentPreset: 'challenger',
+      ...(meta.cwd === undefined ? {} : { cwd: meta.cwd }),
+    })
     const state = createPeerState({ endeavourSessionId, at })
     await this.deps.appendPair(endeavourSessionId, state, 'peer-created', at)
     // One-time route copy only where the deployment exposes a request-free path;
