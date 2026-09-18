@@ -292,23 +292,24 @@ export function BuilderRouteControl(props: BuilderRouteControlProps): React.Reac
   }, [open])
 
   // Native placement: measure the rendered card, align right edges, clamp to
-  // the viewport, sit above the trigger, and follow scroll/resize.
+  // the viewport, sit above the trigger, and follow scroll/resize/content size.
+  const place = useCallback((): void => {
+    const menu = menuRef.current
+    const trigger = chipRef.current
+    if (menu === null || trigger === null) return
+    const rect = trigger.getBoundingClientRect()
+    const width = menu.offsetWidth
+    const height = menu.offsetHeight
+    const x = Math.max(8, Math.min(rect.right - width, window.innerWidth - width - 8))
+    const above = rect.top - 8 - height
+    const y = above >= 8 ? above : Math.min(rect.bottom + 8, window.innerHeight - height - 8)
+    setMenuPos((current) => (
+      current !== null && current.left === x && current.top === y ? current : { position: 'fixed', left: x, top: y }
+    ))
+  }, [])
+
   useLayoutEffect(() => {
     if (!open) return undefined
-    const place = (): void => {
-      const menu = menuRef.current
-      const trigger = chipRef.current
-      if (menu === null || trigger === null) return
-      const rect = trigger.getBoundingClientRect()
-      const width = menu.offsetWidth
-      const height = menu.offsetHeight
-      const x = Math.max(8, Math.min(rect.right - width, window.innerWidth - width - 8))
-      const above = rect.top - 8 - height
-      const y = above >= 8 ? above : Math.min(rect.bottom + 8, window.innerHeight - height - 8)
-      setMenuPos((current) => (
-        current !== null && current.left === x && current.top === y ? current : { position: 'fixed', left: x, top: y }
-      ))
-    }
     place()
     window.addEventListener('scroll', place, true)
     window.addEventListener('resize', place)
@@ -316,7 +317,17 @@ export function BuilderRouteControl(props: BuilderRouteControlProps): React.Reac
       window.removeEventListener('scroll', place, true)
       window.removeEventListener('resize', place)
     }
-  }, [open, pane, catalog.kind, settings])
+  }, [open, pane, catalog.kind, settings, place])
+
+  // The card grows when a pane/catalog arrives; keep it anchored to the trigger.
+  useEffect(() => {
+    if (!open || typeof ResizeObserver !== 'function') return undefined
+    const menu = menuRef.current
+    if (menu === null) return undefined
+    const observer = new ResizeObserver(() => { place() })
+    observer.observe(menu)
+    return () => { observer.disconnect() }
+  }, [open, pane, catalog.kind, settings, place])
 
   const close = useCallback((): void => {
     setOpen(false)
