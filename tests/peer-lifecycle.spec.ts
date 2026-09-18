@@ -70,11 +70,21 @@ function lifecycleHarness(initial: FakeSession[]) {
     sessionMeta: (id: string) => {
       const session = sessions.get(id)
       if (session === undefined) return undefined
+      // Mirror production: the SELECTED preset event wins over the creation
+      // header (the header records the base preset of a user preset).
+      let preset = session.header.agentPreset
+      for (let index = session.events.length - 1; index >= 0; index -= 1) {
+        const event = session.events[index]
+        if (event?.type !== 'agent-preset/selected') continue
+        const value = (event.data as { readonly agentPreset?: unknown }).agentPreset
+        preset = typeof value === 'string' && value !== '' ? value : preset
+        break
+      }
       return {
         id,
         ...(session.header.cwd === undefined ? {} : { cwd: session.header.cwd }),
         ...(session.header.origin === undefined ? {} : { origin: session.header.origin as 'subagent' }),
-        ...(session.header.agentPreset === undefined ? {} : { agentPreset: session.header.agentPreset }),
+        ...(preset === undefined ? {} : { agentPreset: preset }),
       }
     },
     createOrdinarySession: async (input: { id: string; agentPreset?: string }) => {
@@ -91,11 +101,32 @@ function lifecycleHarness(initial: FakeSession[]) {
       followup: (message: unknown) => { messages.push(message) },
       send: (message: unknown) => { messages.push(message) },
     }),
+    workspaceIdFor: () => 'ws-1',
+    attachToWorkspace: async (id: string) => { attaches.push(id) },
+    selectionOf: () => undefined,
+    selectModel: async () => undefined,
+    copyModelSelection: async (from: string, to: string) => {
+      // Double-step mirror of production: never overwrite an existing selection.
+      copies.push({ from, to })
+    },
   }
+  const attaches: string[] = []
+  const copies: { from: string; to: string }[] = []
   const pairs = new Map<string, PeerState>()
+  /** Durable read emulation: the latest checkpoint recorded in the log itself. */
+  const durablePair = (sessionId: string): PeerState | undefined => {
+    const events = sessions.get(sessionId)?.events ?? []
+    for (let index = events.length - 1; index >= 0; index -= 1) {
+      const event = events[index]
+      if (event?.type !== 'endeavour/peer') continue
+      const state = (event.data as { readonly plan?: PeerState }).plan
+      if (state !== undefined) return state
+    }
+    return undefined
+  }
   const provisioner = new PeerProvisioner({
     seam,
-    readPair: (sessionId) => pairs.get(sessionId),
+    readPair: (sessionId) => pairs.get(sessionId) ?? durablePair(sessionId),
     hasCheckpoint: (sessionId) => (sessions.get(sessionId)?.events ?? []).some((event) => event.type === 'endeavour/peer'),
     appendPair: async (rootSessionId, state) => {
       const payload = peerEventPayload('peer-created', undefined, state, 1)
@@ -128,7 +159,7 @@ function lifecycleHarness(initial: FakeSession[]) {
   const emit = (name: string, payload: unknown): void => {
     for (const listener of listeners.get(name) ?? []) listener(payload)
   }
-  return { service, sessions, creates, messages, announce, emit, disposers }
+  return { service, sessions, creates, messages, attaches, copies, announce, emit, disposers }
 }
 
 async function settle(): Promise<void> {
@@ -209,6 +240,33 @@ describe('peer session lifecycle', () => {
     await settle()
     expect(h.creates).toHaveLength(1)
     expect(h.creates.some((call) => call.id === 'session-standard' || call.id === 'session-child')).toBe(false)
+  })
+
+  it('repairs an existing pair exactly once after an upgrade, with no new session', async () => {
+    const pair = pairOf('session-root')
+    const payload = peerEventPayload('peer-created', undefined, pair, 1)
+    const root = fakeSession('session-root', { agentPreset: 'standard', cwd: '/proj' }, [
+      { type: 'agent-preset/selected', data: { agentPreset: 'endeavour' } },
+      { type: 'endeavour/peer', data: payload },
+    ])
+    const peer = fakeSession(pair.challengerSessionId, { agentPreset: 'challenger', cwd: '/proj' }, [
+      { type: 'endeavour/peer', data: payload },
+    ])
+    const h = lifecycleHarness([root, peer])
+    h.service.observeSessionLifecycle()
+    await settle()
+    // Workspace membership and the one-time route initialization ran once...
+    expect(h.attaches).toEqual([pair.challengerSessionId])
+    expect(h.copies).toEqual([{ from: 'session-root', to: pair.challengerSessionId }])
+    // ...no session was created and the checkpoint was not duplicated.
+    expect(h.creates).toEqual([])
+    expect(root.events.filter((event) => event.type === 'endeavour/peer')).toHaveLength(1)
+    expect(peer.events.filter((event) => event.type === 'endeavour/peer')).toHaveLength(1)
+    // A second announcement is deduplicated by the observation ledger.
+    h.announce('session-root')
+    await settle()
+    expect(h.copies).toHaveLength(1)
+    expect(h.creates).toEqual([])
   })
 
   it('adopts an existing durable pair on restart without creating a duplicate session', async () => {

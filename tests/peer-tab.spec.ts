@@ -97,12 +97,14 @@ describe('registration', () => {
       ['session-root-b', face(b)],
     ])
     const registrations: string[] = []
+    const activated: string[] = []
     let disposed = 0
     const dispose = reconcilePeerTab({
       currentSession: () => current,
       subscribeCurrent: (listener) => { currentListeners.add(listener); return () => { currentListeners.delete(listener) } },
       peerFace: (sessionId, key) => (key === 'endeavourPeer' ? faces.get(sessionId) : undefined),
       register: (role) => { registrations.push(role); return () => { disposed += 1 } },
+      activateConversation: (sessionId) => { activated.push(sessionId) },
     })
     expect(registrations).toEqual(['endeavour'])
     // The same session switching to the challenger role switches the entry.
@@ -111,6 +113,10 @@ describe('registration', () => {
     for (const listener of [...currentListeners]) listener()
     expect(registrations).toEqual(['endeavour', 'challenger'])
     expect(disposed).toBe(1)
+    // The blank Challenger side gets its Chat target activated exactly once.
+    expect(activated).toEqual([a.challengerSessionId])
+    for (const listener of [...currentListeners]) listener()
+    expect(activated).toEqual([a.challengerSessionId])
     // A session without a valid pair unregisters the tab.
     current = 'session-other'
     for (const listener of [...currentListeners]) listener()
@@ -121,8 +127,13 @@ describe('registration', () => {
     expect(registrations.at(-1)).toBe('endeavour')
     faces.get('session-root')!.set({ ...a, challengerSessionId: 'forged' })
     expect(disposed).toBe(3)
+    // Switching the role back never activates an Endeavour chat target.
+    faces.get('session-root')!.set(a)
+    for (const listener of [...currentListeners]) listener()
+    expect(activated).toEqual([a.challengerSessionId])
     dispose()
-    expect(disposed).toBe(3)
+    // The re-registered entry is disposed as well (3 previous + this one).
+    expect(disposed).toBe(4)
   })
 
   it('registers the official entry options per role', () => {

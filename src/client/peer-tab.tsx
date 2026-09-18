@@ -54,6 +54,14 @@ export interface PeerTabTargets {
   readonly peerFace: (sessionId: string, key: string) => PeerProjectionFace | undefined
   /** Register the entry for one role; the callback unregisters it. */
   readonly register: (role: PeerRole) => () => void
+  /**
+   * Ensure the session's native Conversation target is active. A blank peer
+   * session otherwise renders the empty hero (no header and no View ring), so
+   * the reciprocal tab would be unreachable; activating the registered target
+   * via the official uiConversation binding makes `conversationPhase` active
+   * without appending any durable event or starting a model request.
+   */
+  readonly activateConversation?: (sessionId: string) => void
 }
 
 /**
@@ -66,6 +74,7 @@ export function reconcilePeerTab(targets: PeerTabTargets): () => void {
   let disposeFace: (() => void) | undefined
   let subscribed: string | undefined
   let registered: PeerRole | undefined
+  let activated: string | undefined
 
   const refresh = (): void => {
     const sessionId = targets.currentSession()
@@ -81,6 +90,12 @@ export function reconcilePeerTab(targets: PeerTabTargets): () => void {
     const peer = sessionId === undefined ? undefined : targets.peerFace(sessionId, 'endeavourPeer')?.getSnapshot()
     const target = peerTabTarget(sessionId, peer)
     const role = target?.role
+    // Blank-peer chrome: the CHALLENGER side needs its Chat target activated to
+    // leave the hero state; the Endeavour side already has its own content.
+    if (role === 'challenger' && sessionId !== undefined && activated !== sessionId) {
+      activated = sessionId
+      targets.activateConversation?.(sessionId)
+    }
     if (role !== registered) {
       disposeEntry?.()
       disposeEntry = undefined

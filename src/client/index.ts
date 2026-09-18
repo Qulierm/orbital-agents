@@ -275,6 +275,13 @@ export function apply(ctx: ClientContext): void {
         role,
         selectPeerTab,
       ),
+      // Official, event-free activation: the blank Challenger session shows its
+      // native header and View ring (Chat/Trajectory/Endeavour) instead of the
+      // empty hero, so the reciprocal tab is reachable immediately.
+      activateConversation: (sessionId) => {
+        const binding = client.uiConversation.binding?.(sessionId)
+        binding?.activate?.('chat')
+      },
     }), 'dsh-endeavour: peer navigation tab')
   })
 }

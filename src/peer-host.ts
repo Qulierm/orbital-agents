@@ -39,6 +39,15 @@ export interface PeerCreateInput {
   readonly id: string
   readonly agentPreset: string
   readonly cwd?: string
+  /** Owning workspace, when the Host can resolve one for the Endeavour session. */
+  readonly workspaceId?: string
+}
+
+/** One ordinary-session model selection as the Host projects it. */
+export interface PeerModelSelection {
+  readonly provider: string
+  readonly model: string
+  readonly reasoningEffort?: string
 }
 
 /** Everything provisioning and transport need from the Host. */
@@ -58,9 +67,33 @@ export interface PeerHostSeam {
    * Returns undefined only for a real resolution failure.
    */
   resolveAgent(id: string): Promise<PeerAgentFace | undefined>
-  /** Copy the model selection from one ordinary session to another, when the
-   * deployment exposes a request-free path; undefined means unsupported. */
-  copyModelSelection?(fromSessionId: string, toSessionId: string): boolean
+  /**
+   * Owning workspace id for a session: membership first, then the canonical
+   * workspace path matching the session cwd. Undefined when unknown.
+   */
+  workspaceIdFor?(sessionId: string, cwd?: string): string | undefined
+  /**
+   * Attach a session to its owning workspace (idempotent: an existing member is
+   * left untouched). Undefined means the deployment exposes no registry.
+   */
+  attachToWorkspace?(sessionId: string, cwd?: string): Promise<void>
+  /**
+   * The session's own durable model selection, read from the official
+   * projection. Undefined when the session never selected anything.
+   */
+  selectionOf?(sessionId: string): PeerModelSelection | undefined
+  /**
+   * Write one validated selection with the official controller. Writes only the
+   * selection for the next request; never starts a model request.
+   */
+  selectModel?(sessionId: string, selection: PeerModelSelection): Promise<void>
+  /**
+   * One-time route initialization: when the TARGET session has no durable
+   * selection, copy the SOURCE session's current selection through the official
+   * controller. Never overwrites an existing selection. Undefined means
+   * unsupported.
+   */
+  copyModelSelection?(fromSessionId: string, toSessionId: string): Promise<void>
 }
 
 /** Minimal cordis-shaped surface the adapter reads. */
@@ -94,7 +127,8 @@ interface RawAgentResult {
 
 /** Official controller surface used by the adapter (official types upstream). */
 interface RawController {
-  create?(request: { sessionId?: string; cwd?: string; agentPreset?: string }): Promise<{ sessionId?: string; agentPreset?: string }>
+  create?(request: { sessionId?: string; cwd?: string; agentPreset?: string; workspaceId?: string }): Promise<{ sessionId?: string; agentPreset?: string }>
+  selectModel?(request: { sessionId: string; provider: string; model: string; reasoningEffort?: string }): Promise<unknown>
   resolveAgent?(sessionId: string): Promise<ResolveResult>
 }
 
@@ -121,6 +155,37 @@ function selectedPreset(session: RawSession): string | undefined {
     return typeof value === 'string' && value !== '' ? value : undefined
   }
   return undefined
+}
+
+/** Minimal workspace shape read from the official registry. */
+interface RawWorkspace {
+  readonly id: string
+  readonly path?: string
+  readonly sessionIds?: readonly string[]
+}
+
+interface RawWorkspaceRegistry {
+  list?(): readonly RawWorkspace[]
+  get?(id: string): RawWorkspace | undefined
+}
+
+interface RawProjections {
+  stateOf?(session: unknown, key: string): { readonly lastUsed?: unknown; readonly pending?: unknown } | undefined
+}
+
+/** Read-and-validate one projected selection record. */
+function projectedSelection(value: unknown): PeerModelSelection | undefined {
+  if (value === null || typeof value !== 'object') return undefined
+  const record = value as { readonly provider?: unknown; readonly model?: unknown; readonly reasoningEffort?: unknown }
+  if (typeof record.provider !== 'string' || record.provider === '') return undefined
+  if (typeof record.model !== 'string' || record.model === '') return undefined
+  return {
+    provider: record.provider,
+    model: record.model,
+    ...(typeof record.reasoningEffort === 'string' && record.reasoningEffort !== ''
+      ? { reasoningEffort: record.reasoningEffort }
+      : {}),
+  }
 }
 
 function rawMeta(session: RawSession | undefined): PeerSessionMeta | undefined {
@@ -150,19 +215,78 @@ export function createCordisPeerSeam(ctx: unknown): PeerHostSeam {
     throw new Error('dsh-endeavour: sessionController is unavailable; peer provisioning is disabled')
   }
 
+  const workspaces = get?.('workspaceRegistry') as RawWorkspaceRegistry | undefined
+  const projections = get?.('sessionProjections') as RawProjections | undefined
+
+  /**
+   * Owning workspace for a session: live membership first (authoritative), then
+   * the canonical registry path matching the session's cwd.
+   */
+  const workspaceOf = (sessionId: string, cwd?: string): RawWorkspace | undefined => {
+    const all = workspaces?.list?.() ?? []
+    const member = all.find((workspace) => workspace.sessionIds?.includes(sessionId) === true)
+    if (member !== undefined) return member
+    if (cwd === undefined || cwd === '') return undefined
+    return all.find((workspace) => workspace.path !== undefined && workspace.path === cwd)
+  }
+
+  /** Read one session's durable selection through the official projection. */
+  const selectionOf = (sessionId: string): PeerModelSelection | undefined => {
+    const session = sessions?.get?.(sessionId) as RawSession | undefined
+    if (session === undefined || projections?.stateOf === undefined) return undefined
+    const state = projections.stateOf(session, 'modelSelection')
+    if (state === undefined) return undefined
+    return projectedSelection(state.pending) ?? projectedSelection(state.lastUsed)
+  }
+
   return {
     listSessionIds: () => (sessions?.list?.() ?? []).map((session) => session.id),
     sessionMeta: (id) => rawMeta(sessions?.get?.(id) as RawSession | undefined),
     createOrdinarySession: async (input) => {
       // Blank ordinary session through the official controller: metadata only,
       // never a prompt and never a model request. An existing id is adopted.
+      // A known workspace is passed so the controller performs the official
+      // attach itself (the same path the UI uses).
       const value = await controller.create?.({
         sessionId: input.id,
         ...(input.cwd === undefined ? {} : { cwd: input.cwd }),
+        ...(input.workspaceId === undefined ? {} : { workspaceId: input.workspaceId }),
         agentPreset: input.agentPreset,
       })
       const sessionId = value?.sessionId ?? input.id
       return { sessionId, adopted: sessionId !== undefined && sessionId !== input.id ? true : sessionId === input.id }
+    },
+    workspaceIdFor: (sessionId, cwd) => workspaceOf(sessionId, cwd)?.id,
+    attachToWorkspace: async (sessionId, cwd) => {
+      const workspace = workspaceOf(sessionId, cwd)
+      if (workspace === undefined) return
+      // Idempotent: an existing member is never re-attached.
+      if (workspace.sessionIds?.includes(sessionId) === true) return
+      const entity = workspaces?.get?.(workspace.id) as (RawWorkspace & { attachSession?(id: string): Promise<void> }) | undefined
+      if (typeof entity?.attachSession !== 'function') return
+      await entity.attachSession(sessionId)
+    },
+    selectionOf,
+    selectModel: async (sessionId, selection) => {
+      if (typeof controller.selectModel !== 'function') return
+      await controller.selectModel({
+        sessionId,
+        provider: selection.provider,
+        model: selection.model,
+        ...(selection.reasoningEffort === undefined ? {} : { reasoningEffort: selection.reasoningEffort }),
+      })
+    },
+    copyModelSelection: async (fromSessionId, toSessionId) => {
+      // NEVER overwrite what the Challenger already chose.
+      if (selectionOf(toSessionId) !== undefined) return
+      const source = selectionOf(fromSessionId)
+      if (source === undefined) return
+      await controller.selectModel?.({
+        sessionId: toSessionId,
+        provider: source.provider,
+        model: source.model,
+        ...(source.reasoningEffort === undefined ? {} : { reasoningEffort: source.reasoningEffort }),
+      })
     },
     resolveAgent: async (id) => {
       const result = await controller.resolveAgent?.(id)

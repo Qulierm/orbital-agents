@@ -66,6 +66,9 @@ export class PeerProvisioner {
     }
     const at = this.deps.now()
     const challengerSessionId = challengerSessionIdFor(endeavourSessionId)
+    // Resolve the owning workspace BEFORE creation so the official controller
+    // performs the attach itself (the same path the UI uses).
+    const workspaceId = this.deps.seam.workspaceIdFor?.(endeavourSessionId, meta.cwd)
     const existing = this.deps.readPair(endeavourSessionId)
     if (existing !== undefined) {
       const problems = validatePeerState(existing)
@@ -80,12 +83,19 @@ export class PeerProvisioner {
           id: challengerSessionId,
           agentPreset: 'challenger',
           ...(meta.cwd === undefined ? {} : { cwd: meta.cwd }),
+          ...(workspaceId === undefined ? {} : { workspaceId }),
         })
+        await this.repairAttachments(endeavourSessionId, challengerSessionId, meta.cwd)
         const repaired: PeerState = { ...existing, updatedAt: at, sequence: existing.sequence + 1 }
         await this.deps.appendPair(endeavourSessionId, repaired, 'peer-updated', at)
         return repaired
       }
       this.assertChallenger(peerMeta)
+      // Upgrade repair for pairs created by earlier versions: the ordinary
+      // Challenger joins its Endeavour workspace and inherits the Endeavour
+      // route ONCE when it has no durable selection of its own. Both steps are
+      // idempotent, request-free and never touch an existing selection.
+      await this.repairAttachments(endeavourSessionId, challengerSessionId, meta.cwd)
       // Reciprocal repair: a crash that committed only one side is healed by
       // re-appending the same validated checkpoint to both logs.
       if (!this.deps.hasCheckpoint(endeavourSessionId) || !this.deps.hasCheckpoint(challengerSessionId)) {
@@ -103,19 +113,32 @@ export class PeerProvisioner {
       id: challengerSessionId,
       agentPreset: 'challenger',
       ...(meta.cwd === undefined ? {} : { cwd: meta.cwd }),
+      ...(workspaceId === undefined ? {} : { workspaceId }),
     })
     const state = createPeerState({ endeavourSessionId, at })
     await this.deps.appendPair(endeavourSessionId, state, 'peer-created', at)
-    // One-time route copy only where the deployment exposes a request-free path;
-    // afterwards the two ordinary sessions keep independent routes.
-    if (this.deps.seam.copyModelSelection !== undefined) {
-      try {
-        this.deps.seam.copyModelSelection(endeavourSessionId, challengerSessionId)
-      } catch {
-        // Independent routes remain the safe default.
-      }
-    }
+    await this.repairAttachments(endeavourSessionId, challengerSessionId, meta.cwd)
     return state
+  }
+
+  /**
+   * Idempotent upgrade repair shared by the create and existing-pair paths:
+   * the Challenger must be a member of the Endeavour workspace, and it inherits
+   * the Endeavour route ONCE (only while it has no durable selection). Both
+   * calls write metadata/selection only — never a prompt or a model request —
+   * and every failure keeps the pair alive.
+   */
+  private async repairAttachments(endeavourSessionId: string, challengerSessionId: string, cwd: string | undefined): Promise<void> {
+    try {
+      await this.deps.seam.attachToWorkspace?.(challengerSessionId, cwd)
+    } catch {
+      // An unattached peer is a cosmetic problem; the pair still works.
+    }
+    try {
+      await this.deps.seam.copyModelSelection?.(endeavourSessionId, challengerSessionId)
+    } catch {
+      // Independent routes remain the safe default.
+    }
   }
 }
 
@@ -150,7 +173,11 @@ export class PeerLifecycle {
       if (meta === undefined || meta.origin === 'subagent' || meta.agentPreset !== 'endeavour') return
     }
     this.seen.add(sessionId)
-    if (this.deps.readPair(sessionId) !== undefined) return
+    // Ensured ONCE per observation cycle even when a pair already exists: the
+    // provisioner is idempotent and performs the upgrade repairs (workspace
+    // membership, one-time route initialization, checkpoint repair) that older
+    // pairs need. It never creates a second Challenger or a duplicate
+    // checkpoint and never prompts.
     void this.provisioner.ensure(sessionId).catch((error: unknown) => { this.deps.onError?.(error) })
   }
 

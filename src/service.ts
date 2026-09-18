@@ -294,7 +294,7 @@ export class EndeavourService extends Service {
       this.runtimeSeam = seam
       this.provisioner = new PeerProvisioner({
         seam,
-        readPair: (sessionId) => this.peers.get(sessionId),
+        readPair: (sessionId) => this.peers.get(sessionId) ?? this.latestDurablePair(sessionId),
         hasCheckpoint: (sessionId) => this.sessionHasPeerCheckpoint(sessionId),
         appendPair: async (rootSessionId, state, kind, at) => {
           // The SAME validated checkpoint lands on BOTH ordinary logs; the role
@@ -314,7 +314,7 @@ export class EndeavourService extends Service {
         now: () => Date.now(),
       })
       this.lifecycle = new PeerLifecycle(this.provisioner, {
-        readPair: (sessionId) => this.peers.get(sessionId),
+        readPair: (sessionId) => this.peers.get(sessionId) ?? this.latestDurablePair(sessionId),
         readMeta: (sessionId) => seam.sessionMeta(sessionId),
       })
     }
@@ -327,19 +327,29 @@ export class EndeavourService extends Service {
    * the checkpoint is already durably present.
    */
   private sessionHasPeerCheckpoint(sessionId: string, state?: PeerState): boolean {
+    const checkpoint = this.latestDurablePair(sessionId)
+    if (checkpoint === undefined) return false
+    if (state === undefined) return true
+    // Same pair AND same sequence: this exact checkpoint is already durable.
+    return checkpoint.pairId === state.pairId && checkpoint.sequence === state.sequence
+  }
+
+  /**
+   * The LATEST validated peer checkpoint recorded in THAT session's own log
+   * (member-checked), so a restart can repair an existing pair without any
+   * registry state.
+   */
+  private latestDurablePair(sessionId: string): PeerState | undefined {
     const session = this.sessionHost()?.get(sessionId)
-    if (session === undefined) return false
+    if (session === undefined) return undefined
     const count = session.seq as unknown as number
-    for (let seq = 0; seq < count; seq += 1) {
+    for (let seq = count - 1; seq >= 0; seq -= 1) {
       const event = session.eventAt(seq as never) as SessionEvent | undefined
       if (event === undefined || event.type !== PEER_EVENT_TYPE) continue
       const checkpoint = projectPeerState((event.data as PeerEventPayload | undefined)?.plan)
-      if (checkpoint === null || peerRoleOf(checkpoint, sessionId) === undefined) continue
-      if (state === undefined) return true
-      // Same pair AND same sequence: this exact checkpoint is already durable.
-      if (checkpoint.pairId === state.pairId && checkpoint.sequence === state.sequence) return true
+      if (checkpoint !== null && peerRoleOf(checkpoint, sessionId) !== undefined) return checkpoint
     }
-    return false
+    return undefined
   }
 
   /**
@@ -389,7 +399,7 @@ export class EndeavourService extends Service {
       return () => {}
     }
     const lifecycle = this.lifecycle ?? new PeerLifecycle(runtime.provisioner, {
-      readPair: (sessionId) => this.peers.get(sessionId),
+      readPair: (sessionId) => this.peers.get(sessionId) ?? this.latestDurablePair(sessionId),
       readMeta: (sessionId) => {
         try {
           return runtime.seam.sessionMeta(sessionId)
