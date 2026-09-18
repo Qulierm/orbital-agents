@@ -20,7 +20,21 @@ export const name = 'endeavour-tools'
  */
 export const inject = ['tools', 'endeavour']
 
-/** Register the four role-guarded orchestration tools in this scope. */
-export function apply(ctx: Context): void {
-  registerTools(ctx, ctx.endeavour)
+/** Row config: which role's catalog this mount exposes. */
+export interface Config {
+  /** `endeavour` (default) or `challenger`. */
+  readonly role?: 'endeavour' | 'challenger'
+}
+
+/**
+ * Register exactly the configured role's orchestration catalog in this scope.
+ * The default is the Endeavour catalog; the Challenger preset opts in
+ * explicitly with `role: challenger` in the deployment pass.
+ */
+export function apply(ctx: Context, config: Config = {}): void {
+  const role = config.role ?? 'endeavour'
+  if (role !== 'endeavour' && role !== 'challenger') {
+    throw new Error(`dsh-endeavour/tools: unknown role ${String(config.role)}`)
+  }
+  registerTools(ctx, ctx.endeavour, role)
 }

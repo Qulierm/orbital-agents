@@ -118,7 +118,7 @@ describe('service route resolution', () => {
 })
 
 describe('durable route projection', () => {
-  it('exposes the route on the card and registers stateVersion 3 with the route in the wire schema', () => {
+  it('exposes the route on the card and registers stateVersion 4 with the route in the wire schema', () => {
     const plan = createPlanState({
       planId: PlanId('p1'), rootSessionId: 'root', childId: 'child', title: 'Plan',
       tasks: [spec('t1')], at: 0,
@@ -129,7 +129,7 @@ describe('durable route projection', () => {
 
     let definition: { stateVersion: number; wire?: { viewSchema?: { parse(value: unknown): unknown } } } | undefined
     registerEndeavourProjection({ sessionProjections: { register: (value: never) => { definition = value as never; return () => {} } } } as never)
-    expect(definition?.stateVersion).toBe(3)
+    expect(definition?.stateVersion).toBe(4)
     expect(() => definition?.wire?.viewSchema?.parse(card)).not.toThrow()
     // Old replay without the route stays valid.
     expect(() => definition?.wire?.viewSchema?.parse({ ...card, builderRoute: undefined })).not.toThrow()

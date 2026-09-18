@@ -53,12 +53,23 @@ describe('scope separation', () => {
     expect(source).not.toContain("from './tools.js'")
   })
 
-  it('scoped tools plugin requires the provided service and registers exactly four tools', () => {
+  it('scoped tools plugin registers exactly the configured role catalog', () => {
     expect(toolsInject).toEqual(['tools', 'endeavour'])
-    const { ctx, registered } = toolContext()
-    applyTools({ ...ctx, endeavour: {} } as never)
-    const names = registered.map((tool) => tool.name).sort()
-    expect(names).toEqual(['builder_report', 'builder_start_task', 'endeavour_plan', 'endeavour_verify'])
+    const planner = toolContext()
+    applyTools({ ...planner.ctx, endeavour: {} } as never)
+    expect(planner.registered.map((tool) => tool.name).sort()).toEqual(['endeavour_plan', 'endeavour_verify'])
+
+    const challenger = toolContext()
+    applyTools({ ...challenger.ctx, endeavour: {} } as never, { role: 'challenger' })
+    expect(challenger.registered.map((tool) => tool.name).sort()).toEqual(['challenger_report', 'challenger_start_task'])
+
+    // No legacy builder_* schemas are exposed to any new catalog.
+    for (const tool of [...planner.registered, ...challenger.registered]) {
+      expect(String(tool.name)).not.toMatch(/^builder_/)
+    }
+    // An unknown role fails closed instead of mounting something unspecified.
+    expect(() => applyTools({ ...toolContext().ctx, endeavour: {} } as never, { role: 'standard' } as never))
+      .toThrow(/unknown role/)
   })
 
   it('a standard scope cannot satisfy the tools plugin dependencies', () => {

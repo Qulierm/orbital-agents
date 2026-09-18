@@ -9,5 +9,8 @@ function load(name: string): string {
 /** Endeavour (planner) system role text. */
 export const ENDEAVOUR_PROMPT: string = load('endeavour.md')
 
-/** Builder child persona text. */
-export const BUILDER_PROMPT: string = load('builder.md')
+/**
+ * Executor persona text: the persistent Challenger peer. The export name is
+ * kept for the legacy service until the C2 cutover renames it.
+ */
+export const BUILDER_PROMPT: string = load('challenger.md')

@@ -251,14 +251,15 @@ describe('English copy and planning prompts', () => {
     expect(prompt).toMatch(/always written in English/i)
   })
 
-  it('requires English Builder prose, whole-plan sequential execution, and compact evidence', () => {
-    const prompt = readFileSync('src/prompts/builder.md', 'utf8')
-    expect(prompt).toMatch(/all of your prose in English/i)
-    expect(prompt).toMatch(/verbatim command output are exempt/i)
-    expect(prompt).toMatch(/receive the WHOLE plan/i)
-    expect(prompt).toMatch(/Execute the tasks in order/i)
-    expect(prompt).toMatch(/continue directly with the next task/i)
-    expect(prompt).toMatch(/never send an\s+ordinary message to the parent/i)
+  it('requires the Challenger executor contract in English', () => {
+    const prompt = readFileSync('src/prompts/challenger.md', 'utf8')
+    expect(prompt).toMatch(/written in English/i)
+    expect(prompt).toMatch(/verbatim command output/i)
+    expect(prompt).toMatch(/whole-plan brief from Endeavour/i)
+    expect(prompt).toMatch(/Execute the tasks of the current plan in order/i)
+    expect(prompt).toMatch(/continue\s+directly with the next task/i)
+    expect(prompt).toMatch(/never act as\s+a subagent/i)
+    expect(prompt).toMatch(/Never send ordinary messages to Endeavour/i)
     expect(prompt).toMatch(/compact/i)
   })
 

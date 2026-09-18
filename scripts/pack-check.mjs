@@ -15,7 +15,7 @@ const required = [
   'package/lib/index.js',
   'package/lib/client.js',
   'package/lib/prompts/endeavour.md',
-  'package/lib/prompts/builder.md',
+  'package/lib/prompts/challenger.md',
   'package/cordis.patch.yml',
   'package/preset/endeavour.patch.yml',
   'package/preset/endeavour/agent.cordis.yml',

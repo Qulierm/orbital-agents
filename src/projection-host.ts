@@ -59,6 +59,8 @@ const cardSchema: ZodType<EndeavourCardData | null> = zod.union([
       note: zod.string().optional(),
     }).optional(),
     childId: zod.string(),
+    challengerSessionId: zod.string().optional(),
+    pairId: zod.string().optional(),
     builderRoute: zod.object({
       provider: zod.string(),
       model: zod.string(),
@@ -104,8 +106,10 @@ export function registerEndeavourPeerProjection(ctx: Context): void {
 
 /**
  * Register the `endeavourPlan` projection on the global plugin's context.
- * stateVersion 3 adds `builderRoute` (the exact durable route), on top of
- * stateVersion 2's `rootSessionId` and derived `stage`/`reportedAt` fields.
+ * stateVersion 4 adds the canonical peer ownership (`challengerSessionId`,
+ * `pairId`) while `childId` stays as the legacy fallback; it builds on
+ * stateVersion 3's `builderRoute`, stateVersion 2's `rootSessionId`, and the
+ * derived `stage`/`reportedAt` fields. Older cards parse unchanged.
  */
 export function registerEndeavourProjection(ctx: Context): void {
   ctx.sessionProjections.register<'endeavourPlan', EndeavourCardData | null>({
@@ -118,6 +122,6 @@ export function registerEndeavourProjection(ctx: Context): void {
       return state
     },
     wire: { viewSchema: cardSchema, view: (state) => state },
-    stateVersion: 3,
+    stateVersion: 4,
   })
 }

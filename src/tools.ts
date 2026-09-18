@@ -73,8 +73,36 @@ function parseReport(raw: string): BuilderReportInput {
   }
 }
 
-/** Register the four scoped orchestration tools. */
-export function registerTools(ctx: Context, service: EndeavourService): void {
+/** Which role's catalog a mounted tools row exposes. */
+export type ToolRole = 'endeavour' | 'challenger'
+
+/**
+ * Compatibility surface the role catalogs call. `EndeavourService` satisfies it
+ * directly today; the C2 cutover may re-point it at peer methods without
+ * changing the model-facing catalogs.
+ */
+export interface RoleToolService {
+  createPlan(agent: Agent, input: {
+    readonly title: string
+    readonly brief: string
+    readonly constraints?: string
+    readonly tasks: readonly TaskSpec[]
+  }): Promise<{ readonly planId: string; readonly taskCount: number }>
+  verifyTask(agent: Agent, taskId: string, outcome: 'succeeded' | 'failed', note?: string): Promise<import('./domain.js').PlanState>
+  startTask(agent: Agent, taskId: string): Promise<import('./domain.js').PlanState>
+  reportTask(agent: Agent, taskId: string, report: BuilderReportInput): Promise<import('./service.js').BuilderReportOutcome>
+}
+
+/**
+ * Register exactly the role's model-facing catalog:
+ * - `endeavour`: `endeavour_plan`, `endeavour_verify`
+ * - `challenger`: `challenger_start_task`, `challenger_report`
+ * A preset that does not mount this row (Standard) sees none of them.
+ */
+export function registerTools(ctx: Context, service: EndeavourService | RoleToolService, role: ToolRole = 'endeavour'): void {
+  const compat = service as RoleToolService & EndeavourService
+  const isEndeavour = role === 'endeavour'
+  if (isEndeavour) {
   ctx.tools.register(defineTool({
     name: 'endeavour_plan',
     description: 'Endeavour-only. Create the single durable plan and start the Builder child with the WHOLE plan (every ordered task plus the sequential protocol). Tasks are provided as a JSON array of { title, instructions, validation, constraints?, id? }.',
@@ -89,32 +117,34 @@ export function registerTools(ctx: Context, service: EndeavourService): void {
       const parsed = JSON.parse(args.tasks_json) as unknown
       void parsed
       const tasks = parseTasks(args.tasks_json)
-      const result = await service.createPlan(callingAgent(exec as ToolCallContext), {
+      const result = await compat.createPlan(callingAgent(exec as ToolCallContext), {
         title: args.title,
         brief: args.brief,
         tasks,
         ...(args.constraints === undefined || args.constraints === '' ? {} : { constraints: args.constraints }),
       })
-      return `plan ${result.planId} created with ${String(result.taskCount)} tasks; Builder child ${result.childId} started`
+      return `plan ${result.planId} created with ${String(result.taskCount)} tasks; the persistent Challenger received the whole-plan briefing`
     },
   }))
 
+  }
+  if (!isEndeavour) {
   ctx.tools.register(defineTool({
-    name: 'builder_start_task',
+    name: 'challenger_start_task',
     description: 'Builder-only. Record the explicit durable start of the current execution item (the first task without a report) before executing it.',
     parameters: {
       task_id: { type: 'string', required: true, description: 'Id of the current task from the brief.' },
     },
     output: { schema: { type: 'string' }, render: (_args, value) => text(value) },
     async execute(args, exec) {
-      const plan = await service.builderStartTask(callingAgent(exec as ToolCallContext), args.task_id)
+      const plan = await compat.startTask(callingAgent(exec as ToolCallContext), args.task_id)
       const task = plan.tasks.find((candidate) => candidate.spec.id === args.task_id)
       return `task ${args.task_id} started (${task?.status ?? 'running'})`
     },
   }))
 
   ctx.tools.register(defineTool({
-    name: 'builder_report',
+    name: 'challenger_report',
     description: 'Builder-only. Submit the structured report for the current task: it marks the task Finished and either returns the full brief of the next task (continue immediately), or states that all tasks are submitted (stop and wait for the aggregate review). A blocker/failure stops progression.',
     parameters: {
       task_id: { type: 'string', required: true, description: 'Id of the task being reported.' },
@@ -122,7 +152,7 @@ export function registerTools(ctx: Context, service: EndeavourService): void {
     },
     output: { schema: { type: 'string' }, render: (_args, value) => text(value) },
     async execute(args, exec) {
-      const outcome = await service.builderReport(
+      const outcome = await compat.reportTask(
         callingAgent(exec as ToolCallContext),
         args.task_id,
         parseReport(args.report_json),
@@ -140,6 +170,8 @@ export function registerTools(ctx: Context, service: EndeavourService): void {
     },
   }))
 
+  }
+  if (isEndeavour) {
   ctx.tools.register(defineTool({
     name: 'endeavour_verify',
     description: 'Endeavour-only. Record the verdict for ONE reported task, in plan order. Review starts only after every task has a report (or immediately after an early blocker/failure). It never dispatches work; success confirms the item, failure terminates the plan.',
@@ -153,7 +185,7 @@ export function registerTools(ctx: Context, service: EndeavourService): void {
       if (args.outcome !== 'succeeded' && args.outcome !== 'failed') {
         throw new Error('dsh-endeavour: outcome must be "succeeded" or "failed"')
       }
-      const plan = await service.verifyTask(
+      const plan = await compat.verifyTask(
         callingAgent(exec as ToolCallContext),
         args.task_id,
         args.outcome,
@@ -165,4 +197,5 @@ export function registerTools(ctx: Context, service: EndeavourService): void {
       return `task ${args.task_id} ${args.outcome === 'succeeded' ? 'confirmed' : 'failed'}; ${String(remaining)} task report(s) still awaiting review`
     },
   }))
+  }
 }

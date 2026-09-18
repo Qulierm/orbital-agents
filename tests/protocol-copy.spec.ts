@@ -19,7 +19,7 @@ const stalePatterns = [
 
 describe('two-phase copy', () => {
   const files = [
-    'src/prompts/builder.md',
+    'src/prompts/challenger.md',
     'src/prompts/endeavour.md',
     'preset/endeavour/agent.cordis.yml',
     'preset/endeavour/preset.yml',
@@ -39,13 +39,14 @@ describe('two-phase copy', () => {
     }
   })
 
-  it('keeps the canonical Builder contract', () => {
-    const builder = read('src/prompts/builder.md')
-    expect(builder).toMatch(/receive the WHOLE plan/i)
-    expect(builder).toMatch(/continue directly with the next task/i)
-    expect(builder).toMatch(/one aggregate review request/i)
-    // The Builder persona must never tell the model to use ordinary messaging.
-    expect(builder).not.toMatch(/send_message/)
+  it('keeps the canonical Challenger executor contract', () => {
+    const challenger = read('src/prompts/challenger.md')
+    expect(challenger).toMatch(/whole-plan brief from Endeavour/i)
+    expect(challenger).toMatch(/continue\s+directly with the next task/i)
+    expect(challenger).toMatch(/exactly ONE aggregate review notification/i)
+    expect(challenger).toMatch(/never act as\s+a subagent/i)
+    // The executor persona must never tell the model to use ordinary messaging.
+    expect(challenger).not.toMatch(/send_message/)
   })
 
   it('keeps the canonical Endeavour contract', () => {

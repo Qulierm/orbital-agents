@@ -10,7 +10,7 @@ mkdirSync('lib/prompts', { recursive: true })
 execFileSync('node', ['node_modules/typescript/bin/tsc', '-p', 'tsconfig.host.json'], { stdio: 'inherit' })
 
 cpSync('src/prompts/endeavour.md', 'lib/prompts/endeavour.md')
-cpSync('src/prompts/builder.md', 'lib/prompts/builder.md')
+cpSync('src/prompts/challenger.md', 'lib/prompts/challenger.md')
 
 const clientCode = await buildClientCode()
 writeFileSync('lib/client.js', clientCode)

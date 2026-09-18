@@ -96,13 +96,39 @@ export interface TaskState {
   readonly note?: string
 }
 
+/** Durable delivery/outbox fact for one peer protocol relay. */
+export interface PlanDelivery {
+  /** Which protocol relay this fact tracks. */
+  readonly kind: 'plan-ready' | 'review-ready'
+  /** Retry key: pairId:planId:kind. */
+  readonly key: string
+  /** pending = checkpointed but not delivered; delivered = receipt recorded. */
+  readonly status: 'pending' | 'delivered'
+  /** When the fact was last written (ms). */
+  readonly at: number
+  /** Transport receipt for a delivered relay (opaque, transport-owned). */
+  readonly receipt?: string
+  /** Planned recipient (the persistent Challenger or the Endeavour root). */
+  readonly targetSessionId: string
+}
+
 /** Durable lifecycle of one plan. */
 export interface PlanState {
   readonly planId: PlanId
   /** Root/Endeavour session that owns the plan events. */
   readonly rootSessionId: string
-  /** The single continuable Builder child. */
-  readonly childId: string
+  /**
+   * LEGACY read-only fallback: the historical continuable Builder child. New
+   * peer plans leave it unset and carry `challengerSessionId` instead; the
+   * `planChallengerId` accessor reads both.
+   */
+  readonly childId?: string
+  /** The persistent ordinary Challenger session (new peer plans). */
+  readonly challengerSessionId?: string
+  /** The durable pair both ordinary sessions belong to (new peer plans). */
+  readonly pairId?: string
+  /** Delivery/outbox facts for plan-ready and review-ready relays. */
+  readonly deliveries?: readonly PlanDelivery[]
   /** Short plan title shown on the card. */
   readonly title: string
   readonly createdAt: number
@@ -126,6 +152,8 @@ export type PlanEventKind =
   | 'task-reported'
   | 'task-verified'
   | 'plan-finalized'
+  | 'delivery-pending'
+  | 'delivery-settled'
 
 /** The durable payload appended to the root session for every mutation. */
 export interface PlanEventPayload {
@@ -158,12 +186,20 @@ export class EndeavourError extends Error {
 export function createPlanState(input: {
   readonly planId: PlanId
   readonly rootSessionId: string
-  readonly childId: string
+  /** Legacy child id; peer plans pass `challengerSessionId` instead. */
+  readonly childId?: string
+  /** Canonical peer ownership for new plans. */
+  readonly challengerSessionId?: string
+  readonly pairId?: string
   readonly title: string
   readonly tasks: readonly TaskSpec[]
   readonly at: number
   readonly builderRoute?: PlanBuilderRoute
+  readonly deliveries?: readonly PlanDelivery[]
 }): PlanState {
+  if (input.childId === undefined && input.challengerSessionId === undefined) {
+    throw new EndeavourError('transition-invalid', 'a plan needs a Builder child or a Challenger session')
+  }
   if (input.tasks.length === 0) {
     throw new EndeavourError('transition-invalid', 'a plan needs at least one task')
   }
@@ -186,13 +222,78 @@ export function createPlanState(input: {
   return {
     planId: input.planId,
     rootSessionId: input.rootSessionId,
-    childId: input.childId,
+    ...(input.childId === undefined ? {} : { childId: input.childId }),
+    ...(input.challengerSessionId === undefined ? {} : { challengerSessionId: input.challengerSessionId }),
+    ...(input.pairId === undefined ? {} : { pairId: input.pairId }),
     title: input.title,
     createdAt: input.at,
     updatedAt: input.at,
     sequence: 0,
     tasks: input.tasks.map((spec) => ({ spec, status: 'waiting' as const })),
     ...(input.builderRoute === undefined ? {} : { builderRoute: input.builderRoute }),
+    ...(input.deliveries === undefined ? {} : { deliveries: input.deliveries }),
+  }
+}
+
+/**
+ * Canonical owner id of one plan's executor: the persistent Challenger for new
+ * peer plans, the legacy continuable child for historical snapshots.
+ */
+export function planChallengerId(plan: PlanState): string {
+  const id = plan.challengerSessionId ?? plan.childId
+  if (id === undefined) throw new EndeavourError('transition-invalid', `plan ${plan.planId} has no executor session`)
+  return id
+}
+
+/** True when the plan carries the legacy child lineage (historical snapshot). */
+export function isLegacyChildPlan(plan: PlanState): boolean {
+  return plan.challengerSessionId === undefined && plan.childId !== undefined
+}
+
+/** Current delivery fact for one protocol relay key, if any. */
+export function deliveryFact(plan: PlanState, key: string): PlanDelivery | undefined {
+  return plan.deliveries?.find((fact) => fact.key === key)
+}
+
+/** Every pending (checkpointed but undelivered) relay, in order. */
+export function pendingDeliveries(plan: PlanState): readonly PlanDelivery[] {
+  return (plan.deliveries ?? []).filter((fact) => fact.status === 'pending')
+}
+
+function replaceDelivery(plan: PlanState, fact: PlanDelivery): PlanState {
+  const existing = plan.deliveries ?? []
+  const index = existing.findIndex((candidate) => candidate.key === fact.key)
+  const deliveries = index < 0
+    ? [...existing, fact]
+    : existing.map((candidate, at) => (at === index ? fact : candidate))
+  return { ...plan, deliveries }
+}
+
+/**
+ * Checkpoint a relay as pending BEFORE any transport attempt, so a crash
+ * between the plan mutation and the delivery can be reconciled on recovery.
+ */
+export function markDeliveryPending(plan: PlanState, fact: Omit<PlanDelivery, 'status'>, at: number): PlanState {
+  const existing = deliveryFact(plan, fact.key)
+  if (existing?.status === 'delivered') return plan
+  return { ...replaceDelivery(plan, { ...fact, status: 'pending', at }), updatedAt: at }
+}
+
+/** Record a successful delivery receipt; idempotent for the same key. */
+export function markDeliveryDelivered(plan: PlanState, key: string, receipt: string | undefined, at: number): PlanState {
+  const existing = deliveryFact(plan, key)
+  if (existing === undefined) {
+    throw new EndeavourError('transition-invalid', `no pending delivery ${key} to settle`)
+  }
+  if (existing.status === 'delivered') return plan
+  return {
+    ...replaceDelivery(plan, {
+      ...existing,
+      status: 'delivered',
+      at,
+      ...(receipt === undefined ? {} : { receipt }),
+    }),
+    updatedAt: at,
   }
 }
 
@@ -401,6 +502,12 @@ export function assertRootRole(plan: PlanState, sessionId: string): void {
     throw new EndeavourError('role-forbidden', `session ${sessionId} is not the plan root`)
   }
 }
+
+/**
+ * @deprecated Legacy continuable-child lineage check; new peer paths use
+ * `assertPairedChallenger` in peer-auth.ts. Kept for the historical service
+ * until the C2 cutover.
+ */
 
 /** Accept only the exact continuable child under its exact direct parent. */
 export function assertChildRole(plan: PlanState, sessionId: string, parentSessionId: string | undefined): void {

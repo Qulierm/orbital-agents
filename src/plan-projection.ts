@@ -6,6 +6,7 @@
 
 import {
   allTasksReported,
+  planChallengerId,
   executionCursor,
   firstBlockedReport,
   foldPlanEvents,
@@ -84,8 +85,12 @@ export interface EndeavourCardData {
     readonly at: number
     readonly note?: string
   }
-  /** The Builder child session for the Open Builder action. */
+  /** Canonical executor id: the persistent Challenger, or the legacy child. */
   readonly childId: string
+  /** The persistent ordinary Challenger session (new peer plans). */
+  readonly challengerSessionId?: string
+  /** Durable pair id both ordinary members share (new peer plans). */
+  readonly pairId?: string
   /** Exact route the plan's Builder was spawned with, when recorded. */
   readonly builderRoute?: EndeavourCardRoute
 }
@@ -143,7 +148,9 @@ export function projectPlanCard(plan: PlanState): EndeavourCardData {
             ...(plan.terminal.note === undefined ? {} : { note: plan.terminal.note }),
           },
         }),
-    childId: plan.childId,
+    childId: planChallengerId(plan),
+    ...(plan.challengerSessionId === undefined ? {} : { challengerSessionId: plan.challengerSessionId }),
+    ...(plan.pairId === undefined ? {} : { pairId: plan.pairId }),
   }
 }
 
