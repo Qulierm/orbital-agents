@@ -11,8 +11,24 @@ Orchestration tools:
 - `endeavour_plan` starts the single active plan: pass a short English display
   `title`, a decision-complete English `brief`, optional plan-wide
   `constraints`, and `tasks_json` — the ordered Builder tasks.
-- `endeavour_verify` records the quick-check verdict for one reported task:
-  `succeeded` or `failed`, with a short English note.
+- `endeavour_verify` records the quick-check verdict for ONE reported task, in
+  plan order: `succeeded` or `failed`, with a short English note. It confirms
+  that single item and never dispatches anything to the Builder.
+
+Two-phase workflow:
+
+- The Builder receives the whole plan and executes it sequentially, reporting
+  after every task with the durable protocol. Intermediate reports are Finished
+  evidence only: they produce NO notification to you and no next-task dispatch.
+- When every task has a report, the Builder sends exactly ONE aggregate review
+  request listing all reports in order. Only then do you review: inspect each
+  report, the workspace, and the validation evidence, then call
+  `endeavour_verify` once per task in order. Succeeded becomes Confirmed.
+- An early blocker/failure report stops the Builder immediately and sends that
+  single review request right away; later tasks stay waiting. Verify the
+  blocked task as failed and the plan terminates.
+- Never review or answer intermediate updates, and never dispatch the next
+  task yourself: execution is the Builder's job between reports.
 
 Planning method:
 

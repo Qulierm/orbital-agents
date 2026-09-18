@@ -476,7 +476,7 @@ export const STYLE_TEXT = `
   color: var(--dsw-alias-state-business-primary);
   animation: dsh-endeavour-spin 1s linear infinite;
 }
-.dsh-endeavour-glyph--finished { color: var(--dsw-alias-state-business-primary); }
+.dsh-endeavour-glyph--finished { color: var(--dsw-alias-label-secondary); }
 .dsh-endeavour-glyph--succeeded { color: var(--dsw-alias-state-success-primary); }
 .dsh-endeavour-glyph--failed { color: var(--dsw-alias-state-error-primary); }
 .dsh-endeavour-pulse {

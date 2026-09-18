@@ -4,7 +4,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { TaskId, type TaskSpec } from './domain.js'
-import { EndeavourService, type BuilderReportInput } from './service.js'
+import { builderBrief, EndeavourService, type BuilderReportInput } from './service.js'
 
 interface ToolCallContext {
   readonly agent?: Agent
@@ -77,7 +77,7 @@ function parseReport(raw: string): BuilderReportInput {
 export function registerTools(ctx: Context, service: EndeavourService): void {
   ctx.tools.register(defineTool({
     name: 'endeavour_plan',
-    description: 'Endeavour-only. Create the single durable plan and start the Builder child with the first detailed task. Tasks are provided as a JSON array of { title, instructions, validation, constraints?, id? }.',
+    description: 'Endeavour-only. Create the single durable plan and start the Builder child with the WHOLE plan (every ordered task plus the sequential protocol). Tasks are provided as a JSON array of { title, instructions, validation, constraints?, id? }.',
     parameters: {
       title: { type: 'string', required: true, description: 'Short user-visible plan title.' },
       brief: { type: 'string', required: true, description: 'Detailed Builder brief shared by all tasks.' },
@@ -101,7 +101,7 @@ export function registerTools(ctx: Context, service: EndeavourService): void {
 
   ctx.tools.register(defineTool({
     name: 'builder_start_task',
-    description: 'Builder-only. Record the explicit durable start of the current task before executing it.',
+    description: 'Builder-only. Record the explicit durable start of the current execution item (the first task without a report) before executing it.',
     parameters: {
       task_id: { type: 'string', required: true, description: 'Id of the current task from the brief.' },
     },
@@ -115,26 +115,34 @@ export function registerTools(ctx: Context, service: EndeavourService): void {
 
   ctx.tools.register(defineTool({
     name: 'builder_report',
-    description: 'Builder-only. Submit the structured report (summary, files, validation, optional blocker/failure) for the current task, then stop and wait for Endeavour verification.',
+    description: 'Builder-only. Submit the structured report for the current task: it marks the task Finished and either returns the full brief of the next task (continue immediately), or states that all tasks are submitted (stop and wait for the aggregate review). A blocker/failure stops progression.',
     parameters: {
       task_id: { type: 'string', required: true, description: 'Id of the task being reported.' },
       report_json: { type: 'string', required: true, description: 'JSON object: { summary, files: string[], validation, blocker?, failure? }.' },
     },
     output: { schema: { type: 'string' }, render: (_args, value) => text(value) },
     async execute(args, exec) {
-      const plan = await service.builderReport(
+      const outcome = await service.builderReport(
         callingAgent(exec as ToolCallContext),
         args.task_id,
         parseReport(args.report_json),
       )
-      const task = plan.tasks.find((candidate) => candidate.spec.id === args.task_id)
-      return `report submitted for ${args.task_id}; awaiting Endeavour verification`
+      if (outcome.phase === 'blocked') {
+        return `report submitted for ${args.task_id} (Finished) with a blocker/failure; progression stopped — later tasks stay waiting until Endeavour reviews this task.`
+      }
+      if (outcome.phase === 'review' || outcome.nextTask === undefined) {
+        return `report submitted for ${args.task_id} (Finished); all ${String(outcome.plan.tasks.length)} tasks are submitted — stop and wait for Endeavour's aggregate review.`
+      }
+      return [
+        `report submitted for ${args.task_id} (Finished). Continue with the next task now:`,
+        builderBrief(undefined, undefined, outcome.nextTask),
+      ].join('\n')
     },
   }))
 
   ctx.tools.register(defineTool({
     name: 'endeavour_verify',
-    description: 'Endeavour-only. Record the quick-check verdict for a reported task. Success freezes the duration and dispatches the next task; failure stops the plan for this MVP.',
+    description: 'Endeavour-only. Record the verdict for ONE reported task, in plan order. Review starts only after every task has a report (or immediately after an early blocker/failure). It never dispatches work; success confirms the item, failure terminates the plan.',
     parameters: {
       task_id: { type: 'string', required: true, description: 'Id of the reported task.' },
       outcome: { type: 'string', required: true, description: 'Either "succeeded" or "failed".' },
@@ -151,9 +159,10 @@ export function registerTools(ctx: Context, service: EndeavourService): void {
         args.outcome,
         args.note === undefined || args.note === '' ? undefined : args.note,
       )
-      return plan.terminal === undefined
-        ? `task ${args.task_id} ${args.outcome}; next task dispatched`
-        : `plan ${plan.terminal.outcome}`
+      if (plan.terminal !== undefined) return `plan ${plan.terminal.outcome}`
+      const remaining = plan.tasks.filter((task) =>
+        task.report !== undefined && task.status !== 'succeeded' && task.status !== 'failed').length
+      return `task ${args.task_id} ${args.outcome === 'succeeded' ? 'confirmed' : 'failed'}; ${String(remaining)} task report(s) still awaiting review`
     },
   }))
 }

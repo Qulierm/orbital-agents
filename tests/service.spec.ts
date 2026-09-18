@@ -86,43 +86,96 @@ describe('EndeavourService', () => {
     expect(created.childId).toBe('child')
   })
 
-  it('wakes the exact direct parent with a compact verification request', async () => {
+  it('sends ZERO messages for intermediate reports and ONE aggregate on the final report', async () => {
     const { service, sent } = makeService()
     await service.createPlan(rootAgent as never, planInput())
     await service.builderStartTask(childAgent as never, 't1')
-    await service.builderReport(childAgent as never, 't1', { summary: 'готово', files: ['a.ts'], validation: 'ok' })
+    const first = await service.builderReport(childAgent as never, 't1', { summary: 'готово', files: ['a.ts'], validation: 'ok' })
+    expect(first.phase).toBe('executing')
+    expect(first.nextTask?.id).toBe('t2')
+    expect(sent).toHaveLength(0)
+    await service.builderStartTask(childAgent as never, 't2')
+    const second = await service.builderReport(childAgent as never, 't2', { summary: 'второй', files: [], validation: 'ok' })
+    expect(second.phase).toBe('review')
     expect(sent).toHaveLength(1)
     expect(sent[0]?.target).toBe('root')
-    expect(sent[0]?.text).toContain('Первый')
     expect(sent[0]?.text).toContain('endeavour_verify')
+    expect(sent[0]?.text).toContain('Первый')
+    expect(sent[0]?.text).toContain('Второй')
   })
 
-  it('dispatches the next detailed task only after a succeeded verdict', async () => {
+  it('never dispatches to the child; review is ordered and terminal only after every verdict', async () => {
     const { service, sent, starts } = makeService()
     await service.createPlan(rootAgent as never, planInput())
     await service.builderStartTask(childAgent as never, 't1')
     await service.builderReport(childAgent as never, 't1', { summary: 's', files: [], validation: 'v' })
-    await service.verifyTask(rootAgent as never, 't1', 'succeeded')
-    expect(sent).toHaveLength(2)
-    expect(sent[1]?.target).toBe('child')
-    expect(sent[1]?.text).toContain('do t2')
+    // Review cannot start before every task has a report.
+    await expect(service.verifyTask(rootAgent as never, 't1', 'succeeded'))
+      .rejects.toBeInstanceOf(EndeavourError)
+    await service.builderStartTask(childAgent as never, 't2')
+    await service.builderReport(childAgent as never, 't2', { summary: 's2', files: [], validation: 'v2' })
+    await expect(service.verifyTask(rootAgent as never, 't2', 'succeeded'))
+      .rejects.toBeInstanceOf(EndeavourError)
+    const afterFirst = await service.verifyTask(rootAgent as never, 't1', 'succeeded')
+    expect(afterFirst.terminal).toBeUndefined()
+    const done = await service.verifyTask(rootAgent as never, 't2', 'succeeded')
+    expect(done.terminal?.outcome).toBe('completed')
+    // Only the single aggregate parent message; nothing was ever sent to the child.
+    expect(sent).toHaveLength(1)
+    expect(sent.every((message) => message.target === 'root')).toBe(true)
     expect(starts).toHaveLength(1)
   })
 
-  it('rejects out-of-order and duplicate reports, and stops on failure', async () => {
+  it('rejects out-of-order and duplicate reports, and stops progression on a blocker', async () => {
     const { service, sent, root } = makeService()
     await service.createPlan(rootAgent as never, planInput())
-    await expect(service.builderReport(childAgent as never, 't1', { summary: 's', files: [], validation: 'v' }))
+    await expect(service.builderReport(childAgent as never, 't2', { summary: 's', files: [], validation: 'v' }))
       .rejects.toBeInstanceOf(EndeavourError)
     await service.builderStartTask(childAgent as never, 't1')
     await service.builderReport(childAgent as never, 't1', { summary: 's', files: [], validation: 'v' })
     await expect(service.builderReport(childAgent as never, 't1', { summary: 'x', files: [], validation: 'v' }))
       .rejects.toBeInstanceOf(EndeavourError)
-    await service.verifyTask(rootAgent as never, 't1', 'failed', 'Не прошло')
-    const plan = service.getActivePlan('root')
-    expect(plan).toBeUndefined()
+    // The next task is already startable after a successful report...
+    await service.builderStartTask(childAgent as never, 't2')
+    // ...but a blocker report stops all later progression immediately.
+    const blocked = await service.builderReport(childAgent as never, 't2', { summary: 's', files: [], validation: 'v', blocker: 'нет доступа' })
+    expect(blocked.phase).toBe('blocked')
     expect(sent).toHaveLength(1)
-    expect(root.events).toHaveLength(4)
+    await expect(service.builderStartTask(childAgent as never, 't1'))
+      .rejects.toBeInstanceOf(EndeavourError)
+    await service.verifyTask(rootAgent as never, 't1', 'succeeded')
+    const failed = await service.verifyTask(rootAgent as never, 't2', 'failed', 'Не прошло')
+    expect(failed.terminal?.outcome).toBe('failed')
+    expect(service.getActivePlan('root')).toBeUndefined()
+    expect(sent).toHaveLength(1)
+    void root
+  })
+
+  it('runs a 3-task plan with send counts 0, 0, 1 and one ordered aggregate', async () => {
+    const { service, sent } = makeService()
+    const input = planInput()
+    await service.createPlan(rootAgent as never, {
+      ...input,
+      tasks: [
+        ...input.tasks,
+        { id: 't3' as never, display: { title: 'Третий' }, execution: { instructions: 'do t3', validation: 'check t3' } },
+      ],
+    })
+    const phases: string[] = []
+    for (const id of ['t1', 't2', 't3']) {
+      await service.builderStartTask(childAgent as never, id)
+      const outcome = await service.builderReport(childAgent as never, id, { summary: id, files: [], validation: 'ok' })
+      phases.push(outcome.phase)
+      if (outcome.phase === 'executing') expect(outcome.nextTask?.id).toBe(id === 't1' ? 't2' : 't3')
+    }
+    expect(phases).toEqual(['executing', 'executing', 'review'])
+    expect(sent).toHaveLength(1)
+    expect(sent[0]?.target).toBe('root')
+    for (const title of ['Первый', 'Второй', 'Третий']) expect(sent[0]?.text).toContain(title)
+    // Duplicate reports never duplicate the notification.
+    await expect(service.builderReport(childAgent as never, 't3', { summary: 'x', files: [], validation: 'v' }))
+      .rejects.toBeInstanceOf(EndeavourError)
+    expect(sent).toHaveLength(1)
   })
 
   it('recovers durable plans from replayed root events', () => {

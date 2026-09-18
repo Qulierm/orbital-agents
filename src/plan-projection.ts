@@ -4,7 +4,19 @@
  * transcript definition, and tests all use these functions.
  */
 
-import { foldPlanEvents, type PlanBuilderRoute, type PlanEventPayload, type PlanState, type TaskState, type TaskStatus, type PlanOutcome } from './domain.js'
+import {
+  allTasksReported,
+  executionCursor,
+  firstBlockedReport,
+  foldPlanEvents,
+  reviewCursor,
+  type PlanBuilderRoute,
+  type PlanEventPayload,
+  type PlanState,
+  type TaskState,
+  type TaskStatus,
+  type PlanOutcome,
+} from './domain.js'
 
 /**
  * Display stage derived from durable state; it never changes the persisted
@@ -65,7 +77,7 @@ export interface EndeavourCardData {
   readonly total: number
   /** Short title of the current task, if any. */
   readonly currentTitle?: string
-  /** True while a Builder report awaits Endeavour's quick check. */
+  /** True while the review phase walks reported (Finished) rows. */
   readonly checking: boolean
   readonly terminal?: {
     readonly outcome: PlanOutcome
@@ -103,8 +115,14 @@ function taskRow(task: TaskState): EndeavourCardTask {
 /** Project durable plan state into the exact card payload. */
 export function projectPlanCard(plan: PlanState): EndeavourCardData {
   const completedCount = plan.tasks.filter((task) => task.status === 'succeeded').length
-  const current = plan.tasks.find((task) => task.status === 'running')
-  const checking = current?.report !== undefined
+  // Review starts once every task has a report (or immediately on an early
+  // blocker/failure). While executing, the current row is the unreported
+  // Working task — never an earlier Finished row — and `checking` is only true
+  // during the review phase.
+  const reviewing = allTasksReported(plan) || firstBlockedReport(plan) !== undefined
+  const review = reviewCursor(plan)
+  const current = reviewing ? review : executionCursor(plan)
+  const checking = reviewing && review !== undefined
   const currentSpec = current?.spec.display.title
   return {
     planId: plan.planId,

@@ -251,11 +251,14 @@ describe('English copy and planning prompts', () => {
     expect(prompt).toMatch(/always written in English/i)
   })
 
-  it('requires English Builder prose, one-task execution, and compact evidence', () => {
+  it('requires English Builder prose, whole-plan sequential execution, and compact evidence', () => {
     const prompt = readFileSync('src/prompts/builder.md', 'utf8')
     expect(prompt).toMatch(/all of your prose in English/i)
     expect(prompt).toMatch(/verbatim command output are exempt/i)
-    expect(prompt).toMatch(/Execute only the task that is currently running/i)
+    expect(prompt).toMatch(/receive the WHOLE plan/i)
+    expect(prompt).toMatch(/Execute the tasks in order/i)
+    expect(prompt).toMatch(/continue directly with the next task/i)
+    expect(prompt).toMatch(/never send an\s+ordinary message to the parent/i)
     expect(prompt).toMatch(/compact/i)
   })
 

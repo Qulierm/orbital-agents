@@ -84,26 +84,35 @@ describe('plan state machine', () => {
     expect(() => verifyTask(running, TaskId('t1'), 'succeeded', undefined, 3_000)).toThrow(EndeavourError)
   })
 
-  it('freezes duration at verification and completes only the last task', () => {
+  it('freezes duration at the report and completes only after every verdict', () => {
     let state = startTask(plan(), TaskId('t1'), 2_000)
     state = reportTask(state, TaskId('t1'), { summary: 'a', files: [], validation: 'ok' }, 3_000)
-    state = verifyTask(state, TaskId('t1'), 'succeeded', undefined, 4_000)
-    expect(state.tasks[0]?.finishedAt).toBe(4_000)
-    expect(taskDurationMs(state.tasks[0]!, 99_000)).toBe(2_000)
-    expect(state.terminal).toBeUndefined()
-    expect(nextDispatch(state, TaskId('t1'))?.id).toBe('t2')
-
+    // Report settles Finished evidence: the row is reported and its duration is
+    // frozen at reportedAt even before Endeavour confirms.
+    expect(state.tasks[0]?.report?.reportedAt).toBe(3_000)
+    expect(taskDurationMs(state.tasks[0]!, 99_000)).toBe(1_000)
+    // The next task starts without any Endeavour verdict.
     state = startTask(state, TaskId('t2'), 5_000)
     state = reportTask(state, TaskId('t2'), { summary: 'b', files: [], validation: 'ok' }, 6_000)
-    state = verifyTask(state, TaskId('t2'), 'succeeded', 'checked', 7_000)
-    expect(state.terminal).toEqual({ outcome: 'completed', at: 7_000 })
+    expect(state.terminal).toBeUndefined()
+    // Ordered review: t2 cannot be verified before t1.
+    expect(() => verifyTask(state, TaskId('t2'), 'succeeded', undefined, 7_000)).toThrow(EndeavourError)
+    state = verifyTask(state, TaskId('t1'), 'succeeded', 'checked', 7_500)
+    expect(state.tasks[0]?.finishedAt).toBe(3_000)
+    expect(state.terminal).toBeUndefined()
+    state = verifyTask(state, TaskId('t2'), 'succeeded', 'checked', 8_000)
+    expect(state.tasks[1]?.finishedAt).toBe(6_000)
+    expect(state.terminal).toEqual({ outcome: 'completed', at: 8_000 })
   })
 
-  it('stops the plan on failure and keeps pending tasks waiting', () => {
+  it('stops the plan on an early failure report and keeps pending tasks waiting', () => {
     let state = startTask(plan(), TaskId('t1'), 2_000)
-    state = reportTask(state, TaskId('t1'), { summary: 'a', files: [], validation: 'ok' }, 3_000)
+    // A failure/blocker report stops Builder progression immediately.
+    state = reportTask(state, TaskId('t1'), { summary: 'a', files: [], validation: 'no', failure: 'test failed' }, 3_000)
+    expect(() => startTask(state, TaskId('t2'), 3_500)).toThrow(EndeavourError)
     state = verifyTask(state, TaskId('t1'), 'failed', 'Проверка не прошла', 4_000)
     expect(state.terminal?.outcome).toBe('failed')
+    expect(state.tasks[0]?.finishedAt).toBe(3_000)
     expect(state.tasks[1]?.status).toBe('waiting')
     expect(nextDispatch(state, TaskId('t1'))).toBeUndefined()
   })

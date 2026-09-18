@@ -136,6 +136,7 @@ export interface PlanEventPayload {
 
 /** Error codes for rejected transitions and authorization failures. */
 export type EndeavourErrorCode =
+  | 'plan-blocked'
   | 'transition-invalid'
   | 'task-unknown'
   | 'task-not-current'
@@ -208,14 +209,38 @@ function assertActive(plan: PlanState): void {
   }
 }
 
-/** The first task that has not reached a terminal state, in plan order. */
+/** Builder execution cursor: the first task without a report, in plan order. */
+export function executionCursor(plan: PlanState): TaskState | undefined {
+  return plan.tasks.find((task) => task.report === undefined)
+}
+
+/** Endeavour review cursor: the first REPORTED task still awaiting a verdict. */
+export function reviewCursor(plan: PlanState): TaskState | undefined {
+  return plan.tasks.find((task) =>
+    task.report !== undefined && task.status !== 'succeeded' && task.status !== 'failed')
+}
+
+/** Whether every task carries a Builder report (execution finished). */
+export function allTasksReported(plan: PlanState): boolean {
+  return plan.tasks.every((task) => task.report !== undefined)
+}
+
+/** The first report carrying blocker/failure evidence, when any. */
+export function firstBlockedReport(plan: PlanState): TaskState | undefined {
+  return plan.tasks.find((task) => task.report?.blocker !== undefined || task.report?.failure !== undefined)
+}
+
+/**
+ * Display current: while executing it is the unreported active task; once every
+ * task has a report it is the first Finished task still awaiting review.
+ */
 export function currentTask(plan: PlanState): TaskState | undefined {
-  return plan.tasks.find((task) => task.status !== 'succeeded' && task.status !== 'failed')
+  return allTasksReported(plan) ? reviewCursor(plan) : executionCursor(plan)
 }
 
 /** Index of the current eligible task, or -1. */
 export function currentTaskIndex(plan: PlanState): number {
-  return plan.tasks.findIndex((task) => task.status !== 'succeeded' && task.status !== 'failed')
+  return plan.tasks.findIndex((task) => task.spec.id === currentTask(plan)?.spec.id)
 }
 
 /**
@@ -224,12 +249,19 @@ export function currentTaskIndex(plan: PlanState): number {
  */
 export function startTask(plan: PlanState, taskId: TaskId, at: number): PlanState {
   assertActive(plan)
-  const current = currentTask(plan)
-  if (current === undefined || current.spec.id !== taskId) {
-    throw new EndeavourError('task-not-current', `task ${taskId} is not the current eligible task`)
+  // A blocker/failure report stops Builder progression immediately.
+  const blocked = firstBlockedReport(plan)
+  if (blocked !== undefined) {
+    throw new EndeavourError('plan-blocked', `task ${blocked.spec.id} reported a blocker or failure`)
   }
-  if (current.status !== 'waiting') {
-    throw new EndeavourError('transition-invalid', `task ${taskId} is already ${current.status}`)
+  // Builder may start the next task as soon as every prior task has a report,
+  // without waiting for an Endeavour verdict.
+  const cursor = executionCursor(plan)
+  if (cursor === undefined || cursor.spec.id !== taskId) {
+    throw new EndeavourError('task-not-current', `task ${taskId} is not the current executable task`)
+  }
+  if (cursor.status !== 'waiting') {
+    throw new EndeavourError('transition-invalid', `task ${taskId} is already ${cursor.status}`)
   }
   return {
     ...replaceTask(plan, taskId, (task) => ({ ...task, status: 'running', startedAt: at })),
@@ -253,6 +285,16 @@ export function reportTask(plan: PlanState, taskId: TaskId, report: Omit<TaskRep
   }
   if (task.report !== undefined) {
     throw new EndeavourError('report-duplicate', `task ${taskId} already reported`)
+  }
+  // Reports stay sequential: only the execution cursor may report, and an
+  // earlier blocker/failure stops all later progression.
+  const blocked = firstBlockedReport(plan)
+  if (blocked !== undefined) {
+    throw new EndeavourError('plan-blocked', `task ${blocked.spec.id} reported a blocker or failure`)
+  }
+  const cursor = executionCursor(plan)
+  if (cursor === undefined || cursor.spec.id !== taskId) {
+    throw new EndeavourError('task-not-current', `task ${taskId} is not the reported task`)
   }
   return {
     ...replaceTask(plan, taskId, (state) => ({ ...state, report: { ...report, reportedAt: at } })),
@@ -281,10 +323,21 @@ export function verifyTask(
   if (task.status !== 'running') {
     throw new EndeavourError('transition-invalid', `task ${taskId} is already ${task.status}`)
   }
+  // Review starts only once every task has a report, or immediately for an
+  // early blocker/failure; review itself is strictly ordered and never
+  // dispatches work.
+  if (!allTasksReported(plan) && firstBlockedReport(plan) === undefined) {
+    throw new EndeavourError('transition-invalid', `plan still has unreported tasks`)
+  }
+  const cursor = reviewCursor(plan)
+  if (cursor?.spec.id !== taskId) {
+    throw new EndeavourError('task-not-current', `task ${taskId} is not the current review task`)
+  }
   const withVerdict = replaceTask(plan, taskId, (state) => ({
     ...state,
     status: outcome,
-    finishedAt: at,
+    // Duration freezes at the report time for Finished AND Confirmed rows.
+    finishedAt: state.report?.reportedAt ?? at,
     ...(note === undefined ? {} : { note }),
   }))
   const allSucceeded = withVerdict.tasks.every((state) => state.status === 'succeeded')
@@ -311,7 +364,10 @@ export function verifyTask(
 /** Live or frozen duration of one task, in milliseconds. */
 export function taskDurationMs(task: TaskState, now: number): number | undefined {
   if (task.startedAt === undefined) return undefined
-  return Math.max(0, (task.finishedAt ?? now) - task.startedAt)
+  // A report freezes the duration at reportedAt (Finished), and confirmation
+  // keeps that same value because finishedAt is set to reportedAt.
+  const end = task.finishedAt ?? task.report?.reportedAt ?? now
+  return Math.max(0, end - task.startedAt)
 }
 
 /** Public status mapping: an internal report awaiting verification stays running. */

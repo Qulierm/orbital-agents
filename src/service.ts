@@ -27,6 +27,9 @@ import {
   createPlanState,
   EndeavourError,
   foldPlanEvents,
+  allTasksReported,
+  executionCursor,
+  firstBlockedReport,
   nextDispatch,
   PlanId,
   planEventPayload,
@@ -291,7 +294,7 @@ export class EndeavourService extends Service {
         label: 'Builder',
         request: {
           parent: agent,
-          prompt: [textBlock(builderBrief(input.brief, input.constraints, first))],
+          prompt: [textBlock(wholePlanBrief(input.title, input.brief, input.constraints, input.tasks))],
           agentOptions: builderOptions,
           persona: this.serviceConfig.builderPersona ?? BUILDER_PROMPT,
           ...(this.serviceConfig.builderToolFilter === undefined ? {} : { toolFilter: this.serviceConfig.builderToolFilter }),
@@ -331,10 +334,13 @@ export class EndeavourService extends Service {
   }
 
   /**
-   * Builder-only: submit the report and steer the exact direct parent with a
-   * compact verification request. The public row stays running.
+   * Builder-only: append the report checkpoint and drive the two-phase flow.
+   * Intermediate successful reports send ZERO messages; the final report sends
+   * exactly ONE ordered aggregate review request; a blocker/failure sends ONE
+   * early review request and stops progression. The public row stays running
+   * (Finished) until Endeavour records its verdict.
    */
-  async builderReport(agent: Agent, taskId: string, report: BuilderReportInput): Promise<PlanState> {
+  async builderReport(agent: Agent, taskId: string, report: BuilderReportInput): Promise<BuilderReportOutcome> {
     const childId = agentSessionId(agent)
     if (childId === undefined) throw new EndeavourError('role-forbidden', 'calling agent has no session id')
     const plan = this.getPlanByChild(childId)
@@ -351,20 +357,19 @@ export class EndeavourService extends Service {
         ...(report.failure === undefined ? {} : { failure: report.failure }),
       }, at)
       await this.append(current.rootSessionId, 'task-reported', current, next, at)
-      const task = next.tasks.find((candidate) => candidate.spec.id === taskId)
-      const subagents = this.subagentHost()
-      await subagents.sendMessage(agent, current.rootSessionId, [
-        textBlock([
-          `Builder report for task "${task?.spec.display.title ?? taskId}" (${taskId}).`,
-          `Summary: ${report.summary}`,
-          `Files: ${report.files.join(', ') || 'none'}`,
-          `Validation: ${report.validation}`,
-          report.blocker === undefined ? '' : `Blocker: ${report.blocker}`,
-          report.failure === undefined ? '' : `Failure: ${report.failure}`,
-          'Check the acceptance criteria and record the verdict with endeavour_verify.',
-        ].filter((line) => line !== '').join('\n')),
-      ], { signal: new AbortController().signal })
-      return next
+      const blocked = report.blocker !== undefined || report.failure !== undefined
+      const review = blocked || allTasksReported(next)
+      if (review) {
+        const subagents = this.subagentHost()
+        await subagents.sendMessage(agent, current.rootSessionId, [
+          textBlock(aggregateReviewRequest(next, blocked)),
+        ], { signal: new AbortController().signal })
+      }
+      if (blocked) return { plan: next, phase: 'blocked' }
+      const nextTask = executionCursor(next)?.spec
+      return nextTask === undefined
+        ? { plan: next, phase: 'review' }
+        : { plan: next, phase: 'executing', nextTask }
     })
   }
 
@@ -384,28 +389,60 @@ export class EndeavourService extends Service {
       const at = Date.now()
       const next = verifyTask(current, TaskId(taskId), outcome, note, at)
       await this.append(rootSessionId, next.terminal === undefined ? 'task-verified' : 'plan-finalized', current, next, at)
-      if (next.terminal === undefined && outcome === 'succeeded') {
-        const dispatch = nextDispatch(current, TaskId(taskId))
-        if (dispatch !== undefined) {
-          const subagents = this.subagentHost()
-          await subagents.sendMessage(agent, next.childId, [
-            textBlock(builderBrief(undefined, undefined, dispatch)),
-          ], { signal: new AbortController().signal })
-        }
-      }
-      if (next.terminal?.outcome === 'failed') {
-        const running = next.tasks.find((task) => task.status === 'running')
-        if (running !== undefined) {
-          // Defensive: a failure verdict on the current task cannot leave others running.
-          throw new EndeavourError('transition-invalid', 'failure verdict left a running task')
-        }
-      }
+      // Ordered verdict only: no child messages, no next dispatch. Later
+      // reported rows stay Finished while the review walks the plan in order.
       return next
     })
   }
 }
 
-/** Compose the detailed Builder brief for one task. Never rendered on the card. */
+/**
+ * Compose the whole-plan Builder prompt: objective, plan constraints, every
+ * task in order with its instructions/validation/task constraints, and the
+ * exact sequential protocol. Never rendered on the card.
+ */
+export function wholePlanBrief(
+  title: string,
+  brief: string,
+  constraints: string | undefined,
+  tasks: readonly TaskSpec[],
+): string {
+  const lines: string[] = [
+    `Plan: ${title}`,
+    'Objective:',
+    brief,
+  ]
+  if (constraints !== undefined && constraints !== '') lines.push(`Plan constraints: ${constraints}`)
+  lines.push('', `Ordered tasks (${String(tasks.length)}):`)
+  tasks.forEach((task, index) => {
+    lines.push(
+      `Task ${String(index + 1)} [${task.id}]: ${task.display.title}`,
+      'Instructions:',
+      task.execution.instructions,
+      'Validation criteria:',
+      task.execution.validation,
+    )
+    if (task.execution.constraints !== undefined && task.execution.constraints !== '') {
+      lines.push(`Task constraints: ${task.execution.constraints}`)
+    }
+    lines.push('')
+  })
+  lines.push(
+    'Protocol:',
+    'Execute every task sequentially in this order on your own.',
+    'Before each task call builder_start_task with its task_id; after finishing it call builder_report with your summary, files, and validation evidence.',
+    'After a report continue DIRECTLY with the next task; do not wait for a reply and never send an ordinary message to the parent.',
+    'Stop only after the final task has been reported, or immediately when a task has a blocker or failure (later tasks stay waiting).',
+    'The parent receives one aggregate review request when all tasks are reported (or immediately on a blocker/failure) and will verify each task in order.',
+  )
+  return lines.join('\n')
+}
+
+/**
+ * Compose the detailed single-task brief. Used only for compatibility with a
+ * legacy already-active child that knows just its first task: the text is
+ * returned in the builder_report tool result after a non-final report.
+ */
 export function builderBrief(brief: string | undefined, constraints: string | undefined, task: TaskSpec): string {
   return [
     brief === undefined ? '' : brief,
@@ -417,6 +454,45 @@ export function builderBrief(brief: string | undefined, constraints: string | un
     task.execution.validation,
     `Call builder_start_task with task_id "${task.id}" before executing, and builder_report with your evidence when done.`,
   ].filter((line) => line !== '').join('\n')
+}
+
+/** Result of one Builder report: the phase the plan moved into. */
+export interface BuilderReportOutcome {
+  readonly plan: PlanState
+  readonly phase: 'executing' | 'review' | 'blocked'
+  /** Full next-task brief target while executing (legacy-compatible). */
+  readonly nextTask?: TaskSpec
+}
+
+/** One aggregate review request covering every reported task in order. */
+export function aggregateReviewRequest(plan: PlanState, blocked: boolean): string {
+  const lines = [
+    blocked
+      ? 'Builder reported a blocker/failure and stopped. Review the affected task and record its verdict with endeavour_verify.'
+      : `Builder submitted reports for all ${String(plan.tasks.length)} tasks. Review every task in order and call endeavour_verify for each one.`,
+    '',
+    'Ordered report evidence:',
+  ]
+  plan.tasks.forEach((task, index) => {
+    const report = task.report
+    if (report === undefined) {
+      lines.push(`${String(index + 1)}. [${task.spec.id}] ${task.spec.display.title} — no report (waiting)`)
+      return
+    }
+    lines.push(
+      `${String(index + 1)}. [${task.spec.id}] ${task.spec.display.title}`,
+      `   Summary: ${report.summary}`,
+      `   Files: ${report.files.join(', ') || 'none'}`,
+      `   Validation: ${report.validation}`,
+    )
+    if (report.blocker !== undefined) lines.push(`   Blocker: ${report.blocker}`)
+    if (report.failure !== undefined) lines.push(`   Failure: ${report.failure}`)
+  })
+  lines.push(
+    '',
+    'Inspect each report, the workspace, and the evidence, then record one verdict per task in plan order with endeavour_verify. Do not dispatch anything to the Builder.',
+  )
+  return lines.join('\n')
 }
 
 /** Typed report accepted from the model (kept separate from the service input). */

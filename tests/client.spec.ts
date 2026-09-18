@@ -71,7 +71,7 @@ describe('display stages derive from durable state', () => {
   it('projects identity, stages, report time, and confirmed counts', () => {
     let plan = createPlanState({
       planId: PlanId('p1'), rootSessionId: 'root', childId: 'child', title: 'Plan',
-      tasks: [spec('t1', 'One'), spec('t2', 'Two')], at: 0,
+      tasks: [spec('t1', 'One')], at: 0,
     })
     plan = startTask(plan, TaskId('t1'), 1_000)
     plan = reportTask(plan, TaskId('t1'), { summary: 's', files: [], validation: 'v' }, 2_000)
@@ -83,7 +83,8 @@ describe('display stages derive from durable state', () => {
     plan = verifyTask(plan, TaskId('t1'), 'succeeded', undefined, 3_000)
     card = projectPlanCard(plan)
     expect(card.completedCount).toBe(1)
-    expect(card.tasks[0]?.finishedAt).toBe(3_000)
+    // Duration stays frozen at the report time through confirmation.
+    expect(card.tasks[0]?.finishedAt).toBe(2_000)
     expect(JSON.stringify(card)).not.toContain('instructions')
   })
 })

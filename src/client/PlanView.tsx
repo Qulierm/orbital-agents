@@ -80,12 +80,12 @@ function WorkingGlyph() {
   )
 }
 
-/** Finished: completed work awaiting review — business ring with a pause bar. */
+/** Finished: Builder completed the work — restrained neutral check-ring. */
 function FinishedGlyph() {
   return (
     <svg width={14} height={14} viewBox="0 0 14 14" fill="none" aria-hidden="true">
-      <circle cx="7" cy="7" r="6.4" stroke="currentColor" strokeWidth="1.2" />
-      <path d="M5.4 7h3.2" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+      <circle cx="7" cy="7" r="6.4" stroke="currentColor" strokeWidth="1.2" opacity="0.7" />
+      <path d="M4.6 7.1 6.2 8.7l3.2-3.4" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" opacity="0.85" />
     </svg>
   )
 }

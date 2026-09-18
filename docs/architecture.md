@@ -34,6 +34,25 @@ last task succeeded -> plan terminal completed
 - Duplicate starts, duplicate reports, out-of-order tasks, foreign sessions,
   arbitrary parent ids, and second plans are rejected with typed errors.
 
+## Two-phase protocol
+
+- Execution: the Builder receives the WHOLE plan at spawn and runs it
+  sequentially. After each task it appends a durable `task-reported` checkpoint
+  (persisted status stays `running`; the display stage becomes Finished).
+  Intermediate successful reports send ZERO parent messages and the next task
+  is started directly by the Builder.
+- Review: only when every task has a report does the service send exactly ONE
+  aggregate parent message listing the ordered report evidence and asking
+  Endeavour to verify each item. `endeavour_verify` records one ordered verdict
+  per task, sends nothing to the child and never dispatches. A plan completes
+  only after the last success verdict; the first failed verdict finalizes it as
+  failed.
+- Exception: a report with a blocker/failure sends that single review request
+  immediately and stops progression; later tasks stay waiting.
+- N reports -> 1 notification -> N verdicts. Finished means "Builder reported",
+  Confirmed means "Endeavour verified"; a task's duration freezes at its report
+  time through confirmation.
+
 ## Builder child lifecycle
 
 - `endeavour_plan` creates exactly ONE continuable Builder child per plan.
