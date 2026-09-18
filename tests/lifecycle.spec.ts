@@ -228,6 +228,35 @@ describe('installer lifecycle', () => {
     expect(state.presets.challenger.existed).toBe(false)
   })
 
+  it('removes only the retired endeavour-builder settings block and backs it up', () => {
+    const home = tempHome()
+    seedProfile(home)
+    const settingsPath = join(home, '.dsh', 'settings.yaml')
+    mkdirSync(join(home, '.dsh'), { recursive: true })
+    writeFileSync(settingsPath, [
+      'unrelated-provider:',
+      '  apiKeyEnv: KEEP_ME',
+      'endeavour-builder:',
+      '  mode: custom',
+      '  provider: opencode-go',
+      '  model: gpt-5.6-luna',
+      'other: value',
+      '',
+    ].join('\n'))
+    expect(installer(home, '--tarball', tarball()).status).toBe(0)
+    const after = readFileSync(settingsPath, 'utf8')
+    expect(after).not.toContain('endeavour-builder')
+    expect(after).toContain('KEEP_ME')
+    expect(after).toContain('other: value')
+    const backupRoot = join(home, '.dsh', 'backups', 'endeavour')
+    const settingsBackups = readdirSync(backupRoot).filter((name) => name.startsWith('settings-'))
+    expect(settingsBackups).toHaveLength(1)
+    expect(readFileSync(join(backupRoot, settingsBackups[0]!, 'settings.yaml'), 'utf8')).toContain('endeavour-builder')
+    // Installing again is a no-op for the settings document.
+    expect(installer(home, '--tarball', tarball()).status).toBe(0)
+    expect(readdirSync(backupRoot).filter((name) => name.startsWith('settings-'))).toHaveLength(1)
+  })
+
   it('repairs a Challenger preset that predates the role tools link', () => {
     const home = tempHome()
     seedProfile(home)

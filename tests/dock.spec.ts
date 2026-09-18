@@ -108,8 +108,9 @@ describe('composer plan dock', () => {
     // Peer plans resolve to the persistent Challenger; legacy cards fall back
     // to the historical child id; malformed identity is a no-op.
     expect(cardExecutorId(planData)).toBe(planData.challengerSessionId ?? planData.childId)
-    expect(cardExecutorId({ ...planData, challengerSessionId: undefined, childId: 'child-session' })).toBe('child-session')
-    expect(cardExecutorId({ ...planData, challengerSessionId: undefined, childId: '' })).toBeUndefined()
+    const { challengerSessionId: _peer, ...legacy } = planData
+    expect(cardExecutorId({ ...legacy, childId: 'child-session' })).toBe('child-session')
+    expect(cardExecutorId({ ...legacy, childId: '' })).toBeUndefined()
     expect(cardExecutorId({ ...planData, rootSessionId: '' })).toBeUndefined()
     expect(cardExecutorId({ ...planData, rootSessionId: undefined as never })).toBeUndefined()
   })

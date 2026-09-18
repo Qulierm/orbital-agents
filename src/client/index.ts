@@ -2,7 +2,6 @@
 
 import type { Context as ClientContext } from '@deepseek-ai/cordis'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
-import type { SubagentAddress } from '@deepseek-ai/dsh-subagent/client'
 import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type {} from '@deepseek-ai/dsh-client-ui-chat/client'
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
@@ -15,8 +14,7 @@ import { EndeavourRoleLabel } from './EndeavourRoleLabel.js'
 import type { ModelCatalog } from '@deepseek-ai/dsh-api-session-controller/types'
 import type { ISessions } from '@deepseek-ai/dsh-api-session-controller/client'
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
-import { BuilderRouteControl, type BuilderRouteController } from './BuilderRouteControl.js'
-import { BUILDER_SETTINGS_NAMESPACE, type BuilderRouteSettings } from '../builder-settings-shared.js'
+import { ChallengerModelControl, type ChallengerModelController, type ChallengerSelection } from './ChallengerModelControl.js'
 import { en, NS, type EndeavourKey } from './locales.js'
 import { ensurePlanStyles } from './styles.js'
 import { peerView } from '../peer-projection.js'
@@ -49,7 +47,6 @@ interface ClientServices {
     register(options: unknown, component: unknown): void
   }
   readonly sessions?: {
-    openSubagent?: (address: SubagentAddress) => void
     open?: (id: SessionId) => void
     readonly binding?: (sessionId: string) => {
       readonly session?: {
@@ -62,13 +59,6 @@ interface ClientServices {
     }
   }
   readonly uiWorkspace?: { openSession?: (id: SessionId) => void }
-  readonly settingsScope?: {
-    bind<T>(spec: { namespace: string }): {
-      getSnapshot(): { readonly value: T | undefined }
-      set(field: string, value: unknown): Promise<void>
-      unset(field: string): Promise<void>
-    }
-  }
   readonly remote?: { readonly session?: { modelCatalog(): Promise<unknown> } }
   readonly [serviceName: string]: unknown
   readonly locale: { register(ns: string, dictionaries: { zh: Record<string, string>; en: Record<string, string> }): () => void }
@@ -76,7 +66,7 @@ interface ClientServices {
 }
 
 /** Required services: conversation nodes, slots, addressed sessions, copy. */
-export const inject = ['uiConversation', 'slots', 'sessions', 'locale', 'uiWorkspace', 'settingsScope', 'remote', 'remote.session']
+export const inject = ['uiConversation', 'slots', 'sessions', 'locale', 'uiWorkspace', 'remote', 'remote.session']
 
 /**
  * Register the Definition, the transcript card, and the composer dock. Plans
@@ -143,17 +133,6 @@ export function apply(ctx: ClientContext): void {
       return undefined
     }
   }
-  /** The session snapshot's subagent share, when this session is addressed. */
-  const subagentOf = (sessionId: string): unknown => {
-    try {
-      const binding = (sessionsService?.binding?.(sessionId as SessionId) ?? client.sessions?.binding?.(sessionId)) as unknown as
-        { session?: { getSnapshot?: () => unknown } } | undefined
-      const snapshot = binding?.session?.getSnapshot?.() as { subagent?: unknown } | undefined
-      return snapshot?.subagent
-    } catch {
-      return undefined
-    }
-  }
   const subscribeCurrent = (listener: () => void): (() => void) => {
     try {
       const subscribe = sessionsService?.list?.subscribe ?? client.sessions?.list?.subscribe
@@ -199,46 +178,60 @@ export function apply(ctx: ClientContext): void {
     transientActivation: hasTransientUserActivation(),
   })
 
-  /** Settings bridge for the Builder route control. */
-  const scope = client.settingsScope?.bind<BuilderRouteSettings>({ namespace: BUILDER_SETTINGS_NAMESPACE })
-  const readSettings = (): BuilderRouteSettings => {
-    const value = scope?.getSnapshot().value
-    return value === undefined ? { mode: 'inherit' } : { ...value }
-  }
-  const writeSettings = async (next: BuilderRouteSettings): Promise<void> => {
-    if (scope === undefined) throw new Error('Builder route settings are unavailable in this deployment')
-    await scope.set('mode', next.mode)
-    if (next.mode === 'custom' && next.provider !== undefined && next.model !== undefined) {
-      await scope.set('provider', next.provider)
-      await scope.set('model', next.model)
-      if (next.reasoningEffort === undefined) await scope.unset('reasoningEffort')
-      else await scope.set('reasoningEffort', next.reasoningEffort)
-    } else {
-      await scope.unset('provider')
-      await scope.unset('model')
-      await scope.unset('reasoningEffort')
-    }
-    if (next.maxTokens === undefined) await scope.unset('maxTokens')
-    else await scope.set('maxTokens', next.maxTokens)
-  }
+  /** Live model catalog (no model request; the controller owns caching). */
   const loadCatalog = async (): Promise<ModelCatalog> => {
-    // The controller is reachable as ctx.remote.session; some deployments keep
-    // the dotted service name directly, so both access paths are tried.
     const dotted = (client as { 'remote.session'?: { modelCatalog?: () => Promise<unknown> } })['remote.session']
     const session = client.remote?.session ?? (typeof dotted?.modelCatalog === 'function' ? dotted : undefined)
     if (session === undefined || typeof session.modelCatalog !== 'function') {
       throw new Error('model catalog is unavailable')
     }
-    const raw = await session.modelCatalog() as { ok?: boolean; value?: ModelCatalog; error?: unknown; type?: string } | ModelCatalog
-    if ((raw as { ok?: boolean }).ok === false) {
-      throw new Error(String((raw as { error?: unknown }).error ?? 'model catalog failed'))
-    }
-    const unwrapped = (raw as { value?: ModelCatalog }).value ?? raw
-    const catalog = ((unwrapped as { value?: ModelCatalog }).value ?? unwrapped) as ModelCatalog
+    const raw = await session.modelCatalog() as { ok?: boolean; value?: ModelCatalog; error?: unknown } | ModelCatalog
+    if ((raw as { ok?: boolean }).ok === false) throw new Error(String((raw as { error?: unknown }).error ?? 'model catalog failed'))
+    const unwrapped = ((raw as { value?: ModelCatalog }).value ?? raw) as { value?: ModelCatalog }
+    const catalog = (unwrapped.value ?? unwrapped) as ModelCatalog
     if (!Array.isArray(catalog.groups)) throw new Error('model catalog response had no groups')
     return catalog
   }
-  const builderRoute: BuilderRouteController = { readSettings, writeSettings, loadCatalog }
+
+  /**
+   * Peer model bridge: the paired Challenger owns its ordinary-session model
+   * selection. The root control only mirrors it (projection face) and writes
+   * through the official remote.selectModel for the CHALLENGER session; the
+   * Endeavour route is never touched and the session is never recreated.
+   */
+  const challengerModel = (sessionId: string): ChallengerModelController => {
+    const challengerId = (): string | undefined => {
+      const peer = faceOf(sessionId, 'endeavourPeer')?.getSnapshot() as PeerState | null | undefined
+      const view = peerView(peer ?? null, sessionId)
+      return view?.role === 'endeavour' ? view.counterpartId : undefined
+    }
+    const selectionFace = () => {
+      const id = challengerId()
+      return id === undefined ? undefined : faceOf(id, 'modelSelection')
+    }
+    return {
+      challengerId,
+      readSelection: () => {
+        const value = selectionFace()?.getSnapshot() as { current?: ChallengerSelection; next?: ChallengerSelection } | undefined
+        return value?.next ?? value?.current
+      },
+      subscribeSelection: (listener) => selectionFace()?.subscribe(listener) ?? (() => undefined),
+      loadCatalog,
+      select: async (provider, model, reasoningEffort) => {
+        const id = challengerId()
+        if (id === undefined) throw new Error('the paired Challenger session is unavailable')
+        const remote = (client as unknown as { remote?: { session?: { selectModel?: (request: unknown) => Promise<unknown> } } }).remote?.session
+          ?? (client as unknown as { 'remote.session'?: { selectModel?: (request: unknown) => Promise<unknown> } })['remote.session']
+        if (typeof remote?.selectModel !== 'function') throw new Error('model selection is unavailable in this deployment')
+        await remote.selectModel({
+          sessionId: id,
+          provider,
+          model,
+          ...(reasoningEffort === undefined ? {} : { reasoningEffort }),
+        })
+      },
+    }
+  }
 
   client.uiConversation.events.register(endeavourPlanDefinition)
   client.effect(() => ensurePlanStyles(), 'dsh-endeavour: plan styles')
@@ -258,11 +251,11 @@ export function apply(ctx: ClientContext): void {
   // ... Speed -> limits -> [Builder | route] -> [Endeavour | native model] -> Send.
   client.slots.inject('conversation.input.right', () => client.slots.register({
     name: 'conversation.input.right',
-    id: 'endeavour-builder',
+    id: 'endeavour-challenger-model',
     order: 1000,
     locale: NS,
-    inject: () => ({ builderRoute }),
-  }, BuilderRouteControl as unknown as (props: unknown) => unknown))
+    inject: (sessionId: string) => ({ challengerModel: challengerModel(sessionId) }),
+  }, ChallengerModelControl as unknown as (props: unknown) => unknown))
   client.slots.inject('conversation.input.right', () => client.slots.register({
     name: 'conversation.input.right',
     id: 'endeavour-role',

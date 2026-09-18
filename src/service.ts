@@ -13,12 +13,6 @@ import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 import type { Session } from '@deepseek-ai/dsh-session'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
 import {
-  defaultBuilderSettings,
-  snapshotBuilderSettings,
-  validateBuilderSettings,
-  type BuilderRouteSettings,
-} from './builder-settings.js'
-import {
   PEER_EVENT_TYPE,
   PeerRegistry,
   foldPeerEvents,
@@ -80,7 +74,6 @@ export interface EndeavourConfig {
    * Optional Builder model route. When omitted the child inherits the parent
    * Agent options, so cost separation requires choosing a cheap route here.
    */
-  readonly builderAgentOptions?: AgentOptions
 }
 
 /** Minimal Agent shape this service reads, kept narrow for test fakes. */
@@ -159,28 +152,16 @@ export class EndeavourService extends Service {
   private peerRuntimeDeps: PeerRuntimeDeps | undefined
   private readonly queues = new Map<string, Promise<unknown>>()
   private readonly serviceConfig: EndeavourConfig
-  private builderSettings: () => BuilderRouteSettings
 
   constructor(ctx: Context, config: EndeavourConfig = {}) {
     super(ctx, 'endeavour')
     this.serviceConfig = config
-    this.builderSettings = () => defaultBuilderSettings(config.builderAgentOptions ?? {})
     this.recoverExistingPlans()
   }
 
   /**
-   * Adopt the live settings source installed by the Host Settings section.
-   * The value is snapshotted at every plan creation, so later writes affect
-   * only future Builder children.
-   */
-  setBuilderSettingsSource(source: () => BuilderRouteSettings): void {
-    this.builderSettings = source
-  }
 
   /** The current stored preference, defensively copied. */
-  currentBuilderSettings(): BuilderRouteSettings {
-    return snapshotBuilderSettings(this.builderSettings())
-  }
 
   /**
    * Resolve the exact child options once, at plan creation time.

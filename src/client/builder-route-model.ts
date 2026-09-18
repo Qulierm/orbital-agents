@@ -5,7 +5,6 @@
  */
 
 import type { ModelCatalogModel } from '@deepseek-ai/dsh-api-session-controller/types'
-import type { BuilderRouteSettings } from '../builder-settings.js'
 
 /** Visibility inputs taken from the session projections and session state. */
 export interface BuilderRouteVisibility {

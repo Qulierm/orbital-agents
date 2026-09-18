@@ -14,11 +14,12 @@ import { readFileSync } from 'node:fs'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it, vi } from 'vitest'
-import { BuilderRouteControl, type BuilderRouteController } from '../src/client/BuilderRouteControl.js'
+import { ChallengerModelControl, type ChallengerModelController } from '../src/client/ChallengerModelControl.js'
 import { EndeavourRoleLabel } from '../src/client/EndeavourRoleLabel.js'
 import { STYLE_TEXT } from '../src/client/styles.js'
 import { NS } from '../src/client/locales.js'
 import type { ModelCatalog } from '@deepseek-ai/dsh-api-session-controller/types'
+import * as peerIds from '../src/peer.js'
 
 const catalog: ModelCatalog = {
   default: { provider: 'p1', model: 'm1' },
@@ -29,17 +30,35 @@ const catalog: ModelCatalog = {
   failures: [],
 }
 
-function controller(): BuilderRouteController {
+function controller(): ChallengerModelController {
   return {
-    readSettings: () => ({ mode: 'inherit' }),
-    writeSettings: async () => undefined,
+    challengerId: () => 'session-challenger',
+    readSelection: () => ({ provider: 'p1', model: 'm1' }),
+    subscribeSelection: () => () => undefined,
     loadCatalog: async () => catalog,
+    select: async () => undefined,
   }
 }
 
 function seatProps(preset: string | undefined, subagent: unknown = null): Record<string, unknown> {
+  const { challengerSessionIdFor, peerPairIdFor } = peerIds
   return {
-    useProjection: (key: string) => (key === 'agentPreset' ? preset : null),
+    sessionId: 'session-root',
+    useProjection: (key: string) => {
+      if (key === 'agentPreset') return preset
+      if (key === 'endeavourPeer') {
+        return {
+          version: 1,
+          pairId: peerPairIdFor('session-root'),
+          endeavourSessionId: 'session-root',
+          challengerSessionId: challengerSessionIdFor('session-root'),
+          createdAt: 1,
+          updatedAt: 1,
+          sequence: 1,
+        }
+      }
+      return null
+    },
     useSession: (selector: (state: unknown) => unknown) => selector({ subagent, running: false }),
     t: undefined,
   }
@@ -63,24 +82,16 @@ describe('Endeavour role label', () => {
   })
 })
 
-describe('Challenger group', () => {
-  it('renders a static Builder segment plus a route-only trigger', () => {
-    const html = renderToStaticMarkup(createElement(BuilderRouteControl, {
+describe('Challenger model group', () => {
+  it('renders a static role segment plus a model-only trigger for a paired root', () => {
+    const html = renderToStaticMarkup(createElement(ChallengerModelControl, {
       ...seatProps('endeavour'),
-      builderRoute: controller(),
+      challengerModel: controller(),
     } as never))
-    expect(html).toContain('data-endeavour-role="builder"')
+    expect(html).toContain('data-endeavour-role="challenger-model"')
     expect(html).toContain('>Challenger</span>')
     expect(html).toContain('class="dsh-endeavour-builder-trigger"')
-    expect(html).not.toMatch(/Inherit Endeavour|Inherit Planner|>Inherited</)
-  })
-  it('keeps the route value and full accessible name on the trigger', () => {
-    const html = renderToStaticMarkup(createElement(BuilderRouteControl, {
-      ...seatProps('endeavour'),
-      builderRoute: controller(),
-    } as never))
-    expect(html).toContain('aria-label="Builder model"')
-    expect(html).toContain('title="Builder model"')
+    expect(html).not.toMatch(/Inherit|Automatic|Planner route/i)
   })
 })
 
@@ -104,7 +115,7 @@ describe('slot registration', () => {
     }
     const { apply } = await import('../src/client/index.js')
     apply(fakeClient as never)
-    const builder = registrations.find((entry) => entry.id === 'endeavour-builder')
+    const builder = registrations.find((entry) => entry.id === 'endeavour-challenger-model')
     const role = registrations.find((entry) => entry.id === 'endeavour-role')
     expect(registrations.some((entry) => entry.name === 'conversation.input.left')).toBe(false)
     expect(builder).toMatchObject({ name: 'conversation.input.right', order: 1000, locale: NS })
@@ -115,10 +126,10 @@ describe('slot registration', () => {
     const ordered = [
       { id: 'openai-codex-fast-mode', order: 10 },
       { id: 'openai-codex-quota', order: 20 },
-      { id: 'endeavour-builder', order: builder?.order ?? 0 },
+      { id: 'endeavour-challenger-model', order: builder?.order ?? 0 },
       { id: 'endeavour-role', order: role?.order ?? 0 },
     ].sort((a, b) => a.order - b.order).map((entry) => entry.id)
-    expect(ordered).toEqual(['openai-codex-fast-mode', 'openai-codex-quota', 'endeavour-builder', 'endeavour-role'])
+    expect(ordered).toEqual(['openai-codex-fast-mode', 'openai-codex-quota', 'endeavour-challenger-model', 'endeavour-role'])
     expect((role?.order ?? 0) - (builder?.order ?? 0)).toBe(1)
   })
 })
@@ -191,7 +202,7 @@ describe('injected stylesheet', () => {
   })
 
   it('portals the menu and places it from the trigger rect with scroll/resize tracking', () => {
-    const source = readFileSync('src/client/BuilderRouteControl.tsx', 'utf8')
+    const source = readFileSync('src/client/ChallengerModelControl.tsx', 'utf8')
     expect(source).toContain("createPortal(")
     expect(source).toContain('document.body')
     expect(source).toContain('getBoundingClientRect()')
@@ -200,8 +211,8 @@ describe('injected stylesheet', () => {
     expect(source).toContain('visibility: \'hidden\'')
     expect(source).toContain("'builder.model'")
     expect(source).toContain("'builder.effort'")
-    expect(source).toContain("'builder.automatic'")
-    expect(source).not.toMatch(/Inherit Endeavour|Inherit Planner/)
+    // Visible inherit/Automatic wording is asserted on the rendered output in
+    // the dedicated control spec; here we only pin the portal plumbing.
   })
 
   it('disables native wrapping through stable anchors and shrinks only designated items', () => {

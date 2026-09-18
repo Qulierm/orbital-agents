@@ -9,16 +9,8 @@
 import type { Context } from '@deepseek-ai/cordis'
 import { KNOWN_SESSION_EVENT_TYPES } from '@deepseek-ai/dsh-session'
 // Type-only: resolves the ctx.settings service declaration.
-import type {} from '@deepseek-ai/dsh-settings'
 import { EndeavourService, type EndeavourConfig } from './service.js'
 import { registerEndeavourPeerProjection, registerEndeavourProjection } from './projection-host.js'
-import {
-  BUILDER_SETTINGS_NAMESPACE,
-  BUILDER_SETTINGS_SCHEMA,
-  defaultBuilderSettings,
-  snapshotBuilderSettings,
-  type BuilderRouteSettings,
-} from './builder-settings.js'
 
 export const name = 'endeavour'
 
@@ -59,21 +51,6 @@ export function apply(ctx: Context, config: EndeavourConfig = {}): void {
   } catch {
     // Peer provisioning is additive; a missing host seam must not break plans.
   }
-  // The Builder route preference is an official Host Settings section owned by
-  // this plugin; deployments without a settings provider keep the composition
-  // base (or inherit) unchanged, so service tests need no settings mount.
-  ctx.inject(['settings'], (settingsCtx) => {
-    settingsCtx.settings.installSection(
-      ctx,
-      BUILDER_SETTINGS_NAMESPACE,
-      BUILDER_SETTINGS_SCHEMA,
-      defaultBuilderSettings(config.builderAgentOptions ?? {}),
-      {
-        setSource: (current: () => BuilderRouteSettings) => { service.setBuilderSettingsSource(() => snapshotBuilderSettings(current())) },
-        onChange: () => {},
-      },
-    )
-  })
   registerEndeavourProjection(ctx)
   registerEndeavourPeerProjection(ctx)
 }

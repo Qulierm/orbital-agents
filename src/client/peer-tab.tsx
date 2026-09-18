@@ -5,8 +5,9 @@
  * `endeavourPeer` projection: an Endeavour root shows a `Challenger` tab, the
  * paired Challenger shows an `Endeavour` tab, and an unpaired or corrupt
  * session shows none. A trusted click resets the local view to Chat and then
- * opens the exact counterpart through the official `ISessions.open` — there is
- * no SubagentAddress, no openSubagent and no subagent snapshot anywhere.
+ * opens the exact counterpart through the official `ISessions.open`. The whole
+ * path is ordinary-session navigation: no addressed-child APIs and no
+ * delegation metadata are involved.
  */
 
 import { useLayoutEffect, useRef } from 'react'

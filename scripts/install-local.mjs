@@ -112,6 +112,29 @@ function atomicReplaceDir(source, target) {
   renameSync(staging, target)
 }
 
+/**
+ * Remove the RETIRED `endeavour-builder` settings namespace from the user
+ * settings document (the peer model control owns the Challenger session's
+ * selection now). The document is backed up first and ONLY that top-level
+ * block is removed, so unrelated settings survive untouched.
+ */
+function migrateOwnedSettings() {
+  const settingsPath = join(homeBase, '.dsh', 'settings.yaml')
+  if (!existsSync(settingsPath)) return
+  const text = readFileSync(settingsPath, 'utf8')
+  const lines = text.split('\n')
+  const start = lines.findIndex((line) => /^endeavour-builder:\s*$/.test(line))
+  if (start === -1) return
+  let end = start + 1
+  while (end < lines.length && (lines[end].trim() === '' || /^\s/.test(lines[end]))) end += 1
+  const backupDir = join(backupRoot, `settings-${timestamp()}`)
+  mkdirSync(backupDir, { recursive: true })
+  cpSync(settingsPath, join(backupDir, 'settings.yaml'))
+  lines.splice(start, end - start)
+  writeFileSync(settingsPath, lines.join('\n'))
+  console.log(`install-local: removed the retired endeavour-builder settings namespace (backup at ${backupDir})`)
+}
+
 function presetOwnedByUs(entry = OWNED_PRESETS[0]) {
   return existsSync(join(presetDirOf(entry), OWNERSHIP_MARKER))
 }
@@ -264,6 +287,7 @@ function install(tarball, { force }) {
   // Fail before any mutation (including the package install) on foreign presets.
   preflightPresets({ force })
   const stamp = backup()
+  migrateOwnedSettings()
   try {
     // A file: dependency at an unchanged version is reused from the store, which
     // would leave older builds in place; remove first so the tarball is re-copied.

@@ -78,7 +78,7 @@ owned presets; rollback restores both exact prior states.
 `preset-check` validates both personas, both role mounts, the coding rows, and
 the absence of subagent/delegation mounts.
 
-## 5. Builder route (optional, legacy UI)
+## 5. Model selection (peer-owned)
 
 In the app itself, the root Endeavour composer shows a `Builder · Inherit` chip
 that stores the route for the next Builder child in the `endeavour-builder`

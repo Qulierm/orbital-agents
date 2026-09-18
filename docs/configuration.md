@@ -1,4 +1,27 @@
-# Builder model configuration
+# Challenger model configuration
+
+The persistent Challenger owns the model selection of its own ordinary session.
+There is no next-child route preference any more: the retired
+`endeavour-builder` settings namespace is removed by the installer (with a
+backup) and the old `--configure-builder` CLI flags no longer influence the
+runtime.
+
+## Composer control
+
+The root Endeavour composer shows a `Challenger | model · effort` control next
+to the Endeavour model selector. It mirrors the paired Challenger session's
+`modelSelection` projection and writes through the official
+`remote.session.selectModel` for that session, so:
+
+- selecting a model or an effort changes the CHALLENGER session only;
+- the Challenger's own native ModelSelect updates reactively, and this mirror
+  follows changes made there;
+- the Endeavour route is never touched and no session is ever recreated.
+
+The control is visible only for a paired Endeavour root, is disabled while a
+plan is active or the turn is running, and hides itself in Standard chats and
+outside the pair. A plan reuses the persistent Challenger with its current
+selection; later plans do the same.
 
 ## Composer control (user setting)
 
