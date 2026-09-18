@@ -30,6 +30,12 @@ child, and a replayable plan card inside the Endeavour Chat.
    a live timer per running task, and the frozen duration after verification.
    `Open Builder` opens the child that executes the tasks.
 
+Two ordinary presets ship together: **Endeavour** (planner: `endeavour_plan`,
+`endeavour_verify`) and **Challenger** (executor: `challenger_start_task`,
+`challenger_report`). A plan is delivered once to the persistent Challenger
+session paired with its Endeavour session; the companion is never a subagent and
+is reused by every later plan of that pair.
+
 An Endeavour root session with a plan shows a native `Builder` view tab next to
 `Chat` and `Trajectory`; selecting it opens the plan's existing Builder child
 (see [docs/architecture.md](docs/architecture.md#builder-child-lifecycle)).

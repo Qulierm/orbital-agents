@@ -214,15 +214,32 @@ describe('installer lifecycle', () => {
       expect(existsSync(join(root, id, '.dsh-endeavour-owned'))).toBe(true)
     }
     expect(existsSync(join(root, 'endeavour', 'node_modules', 'dsh-endeavour'))).toBe(true)
-    // Challenger is a plain coding preset: no plugin link, no delegation rows.
-    expect(existsSync(join(root, 'challenger', 'node_modules'))).toBe(false)
+    // Challenger mounts the role tools row, so it links the package too.
+    expect(existsSync(join(root, 'challenger', 'node_modules', 'dsh-endeavour'))).toBe(true)
     const agent = readFileSync(join(root, 'challenger', 'agent.cordis.yml'), 'utf8')
     expect(agent).not.toMatch(/tool-subagent|send_message|subagent_fork/)
+    expect(agent).toMatch(/role: challenger/)
+    const plannerAgent = readFileSync(join(root, 'endeavour', 'agent.cordis.yml'), 'utf8')
+    expect(plannerAgent).toMatch(/role: endeavour/)
     expect(readFileSync(join(root, 'challenger', 'preset.yml'), 'utf8')).toContain('Challenger')
     const state = JSON.parse(readFileSync(join(home, '.dsh', 'backups', 'endeavour', latestStamp(home), 'state.json'), 'utf8'))
     expect(state.presetExisted).toBe(false)
     expect(state.presets.endeavour).toEqual({ dir: join(root, 'endeavour'), existed: false, owned: false })
     expect(state.presets.challenger.existed).toBe(false)
+  })
+
+  it('repairs a Challenger preset that predates the role tools link', () => {
+    const home = tempHome()
+    seedProfile(home)
+    const file = tarball()
+    expect(installer(home, '--tarball', file).status).toBe(0)
+    const root = join(home, '.dsh', '.agent-presets')
+    // Simulate the pre-C3 Challenger install: preset present, no package link.
+    rmSync(join(root, 'challenger', 'node_modules'), { recursive: true, force: true })
+    expect(existsSync(join(root, 'challenger', 'node_modules', 'dsh-endeavour'))).toBe(false)
+    expect(installer(home, '--tarball', file).status).toBe(0)
+    expect(existsSync(join(root, 'challenger', 'node_modules', 'dsh-endeavour'))).toBe(true)
+    expect(readFileSync(join(root, 'challenger', 'agent.cordis.yml'), 'utf8')).toMatch(/role: challenger/)
   })
 
   it('upgrades a legacy Endeavour-only install and restores both sides', () => {

@@ -36,7 +36,7 @@ const PRESET_ID = 'endeavour'
  */
 const OWNED_PRESETS = [
   { id: 'endeavour', linkPackage: true },
-  { id: 'challenger', linkPackage: false },
+  { id: 'challenger', linkPackage: true },
 ]
 const OWNERSHIP_MARKER = '.dsh-endeavour-owned'
 const args = process.argv.slice(2)

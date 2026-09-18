@@ -65,7 +65,20 @@ so restart the app after install/update. Preset discovery itself is re-read on
 every roster read, but a restart is the safe path; already-running sessions
 keep their existing scope.
 
-## 4. Builder route (optional)
+## 4. Peer presets
+
+The installer places **two** owned presets, `~/.dsh/.agent-presets/endeavour`
+and `~/.dsh/.agent-presets/challenger`, each linking
+`node_modules/dsh-endeavour`. Endeavour mounts the planner catalog
+(`endeavour_plan`, `endeavour_verify`); Challenger mounts the executor catalog
+(`challenger_start_task`, `challenger_report`) and keeps the full coding tool
+surface with no delegation or ordinary messaging tools. Uninstall removes both
+owned presets; rollback restores both exact prior states.
+
+`preset-check` validates both personas, both role mounts, the coding rows, and
+the absence of subagent/delegation mounts.
+
+## 5. Builder route (optional, legacy UI)
 
 In the app itself, the root Endeavour composer shows a `Builder · Inherit` chip
 that stores the route for the next Builder child in the `endeavour-builder`

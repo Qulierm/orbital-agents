@@ -72,6 +72,19 @@ describe('scope separation', () => {
       .toThrow(/unknown role/)
   })
 
+  it('assembles the exact role catalog each preset mounts', () => {
+    const planner = readFileSync('preset/endeavour/agent.cordis.yml', 'utf8')
+    const challenger = readFileSync('preset/challenger/agent.cordis.yml', 'utf8')
+    expect(planner).toMatch(/role: endeavour/)
+    expect(challenger).toMatch(/role: challenger/)
+    const plannerCtx = toolContext()
+    applyTools({ ...plannerCtx.ctx, endeavour: {} } as never, { role: 'endeavour' })
+    expect(plannerCtx.registered.map((tool) => tool.name).sort()).toEqual(['endeavour_plan', 'endeavour_verify'])
+    const challengerCtx = toolContext()
+    applyTools({ ...challengerCtx.ctx, endeavour: {} } as never, { role: 'challenger' })
+    expect(challengerCtx.registered.map((tool) => tool.name).sort()).toEqual(['challenger_report', 'challenger_start_task'])
+  })
+
   it('a standard scope cannot satisfy the tools plugin dependencies', () => {
     // Cordis resolves `inject`; without a provider for 'endeavour' the plugin
     // never mounts, so the standard preset has no Endeavour tools. The global

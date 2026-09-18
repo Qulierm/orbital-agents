@@ -77,6 +77,10 @@ export function checkPreset(): string[] {
   if (ours.filter((row) => row.name === TOOLS_ROW_NAME).length !== 1) {
     failures.push('scoped tools row must appear exactly once')
   }
+  const plannerRole = (toolsRows[0]?.config as { role?: unknown } | undefined)?.role
+  if (plannerRole !== 'endeavour') {
+    failures.push('Endeavour tools row must mount config role: endeavour')
+  }
 
   const oursWithoutTools = ours.filter((row) => row.id !== 'endeavour-tools')
   if (oursWithoutTools.length !== standard.length) {
@@ -111,8 +115,29 @@ export function checkPreset(): string[] {
   if (challengerRows.some((row) => String(row.id ?? '').startsWith('tool-subagent'))) {
     failures.push('Challenger preset must not mount subagent/delegation tools')
   }
-  if (challengerRows.some((row) => row.id === 'endeavour-tools' || row.name === TOOLS_ROW_NAME)) {
-    failures.push('Challenger preset must not mount the Endeavour orchestration tools')
+  if (challengerRows.some((row) => row.id === 'endeavour-tools')) {
+    failures.push('Challenger preset must not mount the Endeavour tools row')
+  }
+  const challengerTools = challengerRows.filter((row) => row.name === TOOLS_ROW_NAME)
+  if (challengerTools.length !== 1) {
+    failures.push(`Challenger preset must mount exactly one role tools row (found ${String(challengerTools.length)})`)
+  } else {
+    const role = (challengerTools[0]?.config as { role?: unknown } | undefined)?.role
+    if (role !== 'challenger') failures.push('Challenger tools row must mount config role: challenger')
+  }
+  // Coding capability rows stay intact: every standard row that is not a
+  // subagent/delegation mount must still be present (by id + name) in order.
+  const challengerWithoutTools = challengerRows.filter((row) => row.name !== TOOLS_ROW_NAME)
+  const standardCoding = standard.filter((row) => !String(row.id ?? '').startsWith('tool-subagent'))
+  if (challengerWithoutTools.length !== standardCoding.length) {
+    failures.push(`Challenger coding rows differ from standard (${String(challengerWithoutTools.length)} vs ${String(standardCoding.length)})`)
+  }
+  for (const [index, standardRow] of standardCoding.entries()) {
+    const ourRow = challengerWithoutTools[index]
+    if (ourRow === undefined || ourRow.id !== standardRow.id || ourRow.name !== standardRow.name) {
+      failures.push(`Challenger row ${String(index + 1)} diverged: ${String(standardRow.id)} vs ${String(ourRow?.id)}`)
+      break
+    }
   }
   const challengerText = readFileSync('preset/challenger/agent.cordis.yml', 'utf8')
   if (/send_message|subagent_fork/.test(challengerText)) {

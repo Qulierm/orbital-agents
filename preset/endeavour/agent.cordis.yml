@@ -366,3 +366,5 @@
 # ~/.dsh/.agent-presets.
 - id: endeavour-tools
   name: './node_modules/dsh-endeavour/lib/tools-plugin.js'
+  config:
+    role: endeavour

@@ -34,6 +34,23 @@ last task succeeded -> plan terminal completed
 - Duplicate starts, duplicate reports, out-of-order tasks, foreign sessions,
   arbitrary parent ids, and second plans are rejected with typed errors.
 
+## Peer presets and role catalogs
+
+- Two owned presets ship together: `endeavour` (planner) and `challenger`
+  (executor). Each mounts the package tools row with an explicit `role`, so a
+  preset's agent sees exactly its catalog: `endeavour_plan`/`endeavour_verify`
+  for the planner, `challenger_start_task`/`challenger_report` for the executor.
+  Standard mounts no row and sees none.
+- The installer links `node_modules/dsh-endeavour` into BOTH preset directories
+  because the relative tools row resolves from the composition directory.
+- The service no longer creates subagents: `SubagentHost`, `startContinuable`,
+  `sendMessage` and `SubagentAddress` are removed from active code, and the
+  global plugin injects only `sessions`, `sessionProjections` and
+  `sessionController`.
+- Remaining for the UI/model pass: the composer/dock still use the legacy
+  `Builder` naming and the `endeavour-builder` route settings; the peer model
+  control (Challenger-owned `modelSelection`) replaces them.
+
 ## Two-phase protocol
 
 - Execution: the Builder receives the WHOLE plan at spawn and runs it
