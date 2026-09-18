@@ -156,8 +156,8 @@ function lifecycleHarness(initial: FakeSession[]) {
     if (!sessions.has(id)) sessions.set(id, fakeSession(id, header))
     for (const listener of listeners.get('session/created') ?? []) listener(sessions.get(id))
   }
-  const emit = (name: string, payload: unknown): void => {
-    for (const listener of listeners.get(name) ?? []) listener(payload)
+  const emit = (name: string, ...args: unknown[]): void => {
+    for (const listener of listeners.get(name) ?? []) (listener as (...a: unknown[]) => void)(...args)
   }
   return { service, sessions, creates, messages, attaches, copies, announce, emit, disposers }
 }
@@ -292,6 +292,41 @@ describe('peer session lifecycle', () => {
     h.announce('session-root')
     await settle()
     expect(h.copies).toHaveLength(1)
+    expect(h.creates).toEqual([])
+  })
+
+  it('observes a session that was Standard when created and became Endeavour later', async () => {
+    // The exact live race: the session is created (and announced) as Standard,
+    // so the creation observation must NOT mark it seen; the later official
+    // preset selection is what makes it eligible.
+    const session = fakeSession('session-late', { agentPreset: 'standard', cwd: '/proj' })
+    const h = lifecycleHarness([session])
+    h.service.observeSessionLifecycle()
+    h.announce('session-late')
+    await settle()
+    expect(h.creates).toEqual([])
+    // The user (or the app) selects the Endeavour preset: the host emits the
+    // official event with (sessionId, preset) and the durable event lands.
+    session.events.push({ type: 'agent-preset/selected', data: { agentPreset: 'endeavour' } })
+    session.seq = session.events.length
+    h.emit('agent-preset/selected', 'session-late', 'endeavour')
+    await settle()
+    expect(h.creates).toEqual([{ id: challengerSessionIdFor('session-late'), agentPreset: 'challenger' }])
+    // Repeated selections and a re-mount never duplicate the peer.
+    h.emit('agent-preset/selected', 'session-late', 'endeavour')
+    h.service.observeSessionLifecycle()
+    await settle()
+    expect(h.creates).toHaveLength(1)
+  })
+
+  it('ignores challenger and standard preset selections', async () => {
+    const standard = fakeSession('session-standard', { agentPreset: 'standard', cwd: '/proj' })
+    const challenger = fakeSession('session-challenger', { agentPreset: 'challenger', cwd: '/proj' })
+    const h = lifecycleHarness([standard, challenger])
+    h.service.observeSessionLifecycle()
+    h.emit('agent-preset/selected', 'session-standard', 'standard')
+    h.emit('agent-preset/selected', 'session-challenger', 'challenger')
+    await settle()
     expect(h.creates).toEqual([])
   })
 

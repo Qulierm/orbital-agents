@@ -158,6 +158,42 @@ describe('peer plan creation', () => {
     await expect(h.service.createPlan(rootAgent() as never, planInput())).rejects.toBeInstanceOf(EndeavourError)
   })
 
+  it('self-heals a genuine Endeavour session before authorizing the first plan', async () => {
+    const h = harness()
+    // Simulate the race: the durable pair exists in the log but was never
+    // indexed (the lifecycle missed the selection), so getPeer is absent.
+    // Simulate the race: the durable pair exists in the log but was never
+    // indexed, so getPeer is absent when the tool call arrives.
+    const internal = h.service as unknown as { peers: { bySession: Map<string, unknown> } }
+    const pair = h.pair
+    internal.peers.bySession.clear()
+    const created = await h.service.createPlan(rootAgent() as never, planInput())
+    expect(created.challengerSessionId).toBe(pair.challengerSessionId)
+    // Exactly one plan-ready was delivered to the persistent Challenger.
+    expect(h.inbox.get(pair.challengerSessionId)).toHaveLength(1)
+    // Concurrent first calls converge: one active plan, one peer provision.
+    internal.peers.bySession.clear()
+    const before = h.ensureCalls.length
+    const outcomes = await Promise.allSettled([
+      h.service.createPlan(rootAgent() as never, planInput()),
+      h.service.createPlan(rootAgent() as never, planInput()),
+    ])
+    // The already-active plan wins: both calls reject and neither duplicates work.
+    expect(outcomes.every((outcome) => outcome.status === 'rejected')).toBe(true)
+    expect(h.ensureCalls.length - before).toBe(1)
+  })
+
+  it('never lets a non-Endeavour caller provision a peer through the plan tool', async () => {
+    const h = harness()
+    const internal = h.service as unknown as { peers: { bySession: Map<string, unknown> } }
+    internal.peers.bySession.clear()
+    const stranger = { session: { id: 'session-stranger' } }
+    // A non-Endeavour caller is rejected by the EXACT authorization path
+    // without ever touching the Host provisioning seam.
+    await expect(h.service.createPlan(stranger as never, planInput())).rejects.toBeInstanceOf(PeerError)
+    expect(h.ensureCalls).toEqual([])
+  })
+
   it('skips an append when the exact checkpoint is already durable on that log', () => {
     const h = harness()
     const internal = h.service as unknown as {

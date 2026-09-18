@@ -180,6 +180,7 @@ export type EndeavourErrorCode =
   | 'role-forbidden'
   | 'lineage-mismatch'
   | 'report-duplicate'
+  | 'peer-provision-failed'
 
 /** Typed failure for rejected plan operations. */
 export class EndeavourError extends Error {

@@ -418,13 +418,27 @@ export class EndeavourService extends Service {
     })
     this.lifecycle = lifecycle
     for (const sessionId of runtime.seam.listSessionIds()) lifecycle.observe(sessionId)
-    const events = this.ctx as unknown as { on?: (name: string, listener: (session: unknown) => void) => (() => void) | undefined }
-    const off = events.on?.('session/created', (session: unknown) => {
+    const events = this.ctx as unknown as {
+      on?: (name: string, listener: (...args: unknown[]) => void) => (() => void) | undefined
+    }
+    const offCreated = events.on?.('session/created', (session: unknown) => {
       const id = (session as { readonly id?: unknown } | undefined)?.id
       if (typeof id === 'string' && id !== '') lifecycle.observe(id)
     })
+    // A session created as Standard is announced BEFORE its preset is selected,
+    // so the creation observation is correctly ignored. The official
+    // `agent-preset/selected` event (sessionId, preset) is the moment a session
+    // BECOMES an Endeavour session: observe that exact session then. The durable
+    // selection event has already been appended when this fires, so the
+    // metadata read sees the new preset without relying on the immutable header.
+    const offSelected = events.on?.('agent-preset/selected', (sessionId: unknown, preset: unknown) => {
+      if (preset !== 'endeavour') return
+      if (typeof sessionId !== 'string' || sessionId === '') return
+      lifecycle.observe(sessionId)
+    })
     return () => {
-      if (typeof off === 'function') off()
+      if (typeof offCreated === 'function') offCreated()
+      if (typeof offSelected === 'function') offSelected()
     }
   }
 
@@ -473,6 +487,31 @@ export class EndeavourService extends Service {
     const rootSessionId = agentSessionId(agent)
     if (rootSessionId === undefined) throw new EndeavourError('role-forbidden', 'calling agent has no session id')
     return this.enqueue(rootSessionId, async () => {
+      // Defense in depth: a genuine ordinary Endeavour caller whose pair was not
+      // indexed yet (the creation race) provisions BEFORE authorization, so the
+      // first plan can never fail with "session is not part of a durable pair".
+      // Non-Endeavour callers never provision: they fall through to the exact
+      // authorization below and are rejected without touching the Host.
+      if (this.peers.get(rootSessionId) === undefined) {
+        // A deployment without the host seam keeps the previous behavior: the
+        // authorization below reports the typed pair error.
+        let meta: { readonly origin?: 'subagent'; readonly agentPreset?: string } | undefined
+        try {
+          meta = this.peerRuntime().seam.sessionMeta(rootSessionId)
+        } catch {
+          meta = undefined
+        }
+        if (meta !== undefined && meta.origin !== 'subagent' && meta.agentPreset === 'endeavour') {
+          try {
+            this.peers.set(await this.peerRuntime().provisioner.ensure(rootSessionId))
+          } catch (error) {
+            throw new EndeavourError(
+              'peer-provision-failed',
+              `could not provision the persistent Challenger for ${rootSessionId}: ${error instanceof Error ? error.message : String(error)}`,
+            )
+          }
+        }
+      }
       const pair = assertPairedEndeavour(this.peers.get(rootSessionId), rootSessionId, undefined).pair
       if (this.getActivePlan(rootSessionId) !== undefined) {
         throw new EndeavourError('plan-active', 'this Endeavour session already has an active plan')
