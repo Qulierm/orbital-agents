@@ -8,12 +8,9 @@
 
 import { randomUUID } from 'node:crypto'
 import { Service, type Context } from '@deepseek-ai/cordis'
-import { parentAgentOptionsForDelegation } from '@deepseek-ai/dsh-subagent'
-import { ReasoningEffortId } from '@deepseek-ai/dsh-llm'
 import type { Agent, AgentOptions } from '@deepseek-ai/dsh-agent'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 import type { Session } from '@deepseek-ai/dsh-session'
-import type { ToolRestriction } from '@deepseek-ai/dsh-tools'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
 import {
   defaultBuilderSettings,
@@ -31,18 +28,30 @@ import {
   type PeerState,
 } from './peer.js'
 import { createCordisPeerSeam, type PeerHostSeam } from './peer-host.js'
-import { aggregateReviewRequest, BUILDER_DEFAULT_DENY, wholePlanBrief } from './peer-briefs.js'
-export { aggregateReviewRequest, wholePlanBrief, BUILDER_DEFAULT_DENY } from './peer-briefs.js'
+import {
+  checkpointOutbox,
+  createPeerPlanState,
+  deliverOutboxFact,
+  deliveryKey,
+  planReadyBodyFromPlan,
+  planReadyRelay,
+  planForChallenger,
+  reviewReadyBody,
+  reviewReadyRelay,
+} from './peer-cutover.js'
+import { assertPairedChallenger, assertPairedEndeavour } from './peer-auth.js'
+import { aggregateReviewRequest, wholePlanBrief } from './peer-briefs.js'
+export { aggregateReviewRequest, wholePlanBrief } from './peer-briefs.js'
 import { PeerDeliveryLedger, PeerDeliveryQueue } from './peer-transport.js'
 import { projectPeerState } from './peer-projection.js'
 import { PeerLifecycle, PeerProvisioner } from './peer-service.js'
 import {
-  assertChildRole,
-  assertRootRole,
   createPlanState,
   EndeavourError,
   foldPlanEvents,
   allTasksReported,
+  deliveryFact,
+  pendingDeliveries,
   executionCursor,
   firstBlockedReport,
   nextDispatch,
@@ -72,16 +81,6 @@ export interface EndeavourConfig {
    * Agent options, so cost separation requires choosing a cheap route here.
    */
   readonly builderAgentOptions?: AgentOptions
-  /** Per-child persona; defaults to the project Builder prompt. */
-  readonly builderPersona?: string
-  /**
-   * Child tool scope. When omitted the Builder-safe default deny list applies
-   * (no ordinary parent messaging or delegation); explicit configuration
-   * overrides that default verbatim.
-   */
-  readonly builderToolFilter?: ToolRestriction
-  /** Delegation depth cap passed to the provider. */
-  readonly maxDepth?: number
 }
 
 /** Minimal Agent shape this service reads, kept narrow for test fakes. */
@@ -123,11 +122,6 @@ interface SessionHost {
   list(): readonly Session[]
 }
 
-interface SubagentHost {
-  startContinuable(spec: unknown): Promise<{ childId: string }>
-  sendMessage(sender: Agent, targetId: string, content: ContentBlock[], options: { signal: AbortSignal }): Promise<unknown>
-}
-
 /** One structured Builder report accepted by the service. */
 export interface BuilderReportInput {
   readonly summary: string
@@ -140,7 +134,10 @@ export interface BuilderReportInput {
 /** Outcome of plan creation. */
 export interface PlanCreation {
   readonly planId: string
-  readonly childId: string
+  /** Canonical persistent Challenger session that received the plan. */
+  readonly challengerSessionId: string
+  /** @deprecated legacy alias of `challengerSessionId` for older callers. */
+  readonly childId?: string
   readonly taskCount: number
 }
 
@@ -192,44 +189,6 @@ export class EndeavourService extends Service {
    * - inherit: the Planner's current route through the public upstream
    *   delegation helper.
    */
-  private resolveBuilderRoute(agent: Agent): { options: Partial<AgentOptions>; route: PlanBuilderRoute } {
-    const settings = this.currentBuilderSettings()
-    const valid = validateBuilderSettings(settings).length === 0
-    if (valid && settings.mode === 'custom' && settings.provider !== undefined && settings.model !== undefined) {
-      return {
-        options: {
-          provider: settings.provider,
-          model: settings.model,
-          ...(settings.reasoningEffort === undefined ? {} : { reasoningEffort: ReasoningEffortId(settings.reasoningEffort) }),
-          ...(settings.maxTokens === undefined ? {} : { maxTokens: settings.maxTokens }),
-        },
-        route: {
-          provider: settings.provider,
-          model: settings.model,
-          ...(settings.reasoningEffort === undefined ? {} : { reasoningEffort: settings.reasoningEffort }),
-          inherited: false,
-        },
-      }
-    }
-    let inherited: Partial<AgentOptions>
-    try {
-      inherited = parentAgentOptionsForDelegation(agent)
-    } catch {
-      // Session-less agents (tests, odd callers) fall back to their own options;
-      // production parents always carry the session the helper reads.
-      inherited = { ...(agent as { options?: AgentOptions }).options }
-    }
-    return {
-      options: { ...inherited },
-      route: {
-        provider: inherited.provider ?? '',
-        model: inherited.model ?? '',
-        ...(inherited.reasoningEffort === undefined ? {} : { reasoningEffort: inherited.reasoningEffort }),
-        inherited: true,
-      },
-    }
-  }
-
   /** Serialize one mutation per root session. */
   private enqueue<T>(rootSessionId: string, operation: () => Promise<T>): Promise<T> {
     const previous = this.queues.get(rootSessionId) ?? Promise.resolve()
@@ -254,18 +213,16 @@ export class EndeavourService extends Service {
   private recoverExistingPlans(): void {
     const host = this.sessionHost()
     for (const session of host?.list() ?? []) this.adoptSession(session)
+    // Outbox reconciliation is opportunistic: pending relays are retried once
+    // the runtime is available, and any failure simply stays pending for the
+    // next call. It never mutates plan state beyond settling a delivery.
+    if ([...this.plans.values()].some((plan) => pendingDeliveries(plan).length > 0)) {
+      void this.reconcileOutbox().catch(() => undefined)
+    }
   }
 
   private sessionHost(): SessionHost | undefined {
     return (this.ctx as unknown as { sessions?: SessionHost }).sessions
-  }
-
-  private subagentHost(): SubagentHost {
-    const host = (this.ctx as unknown as { subagents?: SubagentHost }).subagents
-    if (host === undefined) {
-      throw new EndeavourError('role-forbidden', 'subagent service is unavailable')
-    }
-    return host
   }
 
   /** Fold one session's Endeavour events into the durable plan index. */
@@ -335,6 +292,17 @@ export class EndeavourService extends Service {
   /** Runtime seam/provisioner/queue/ledger accessors for the cutover pass. */
   peerDependencies(): PeerRuntimeDeps {
     return this.peerRuntime()
+  }
+
+  /** Outbox runtime view of the peer dependencies (pair reader resolved). */
+  private outboxRuntime(): import('./peer-cutover.js').OutboxRuntime {
+    const deps = this.peerRuntime()
+    return {
+      seam: deps.seam,
+      queue: deps.queue,
+      ledger: deps.ledger,
+      readPair: deps.readPair ?? ((sessionId: string) => this.peers.get(sessionId)),
+    }
   }
 
   /** Lazily built provisioner over the official host seam (additive). */
@@ -443,9 +411,10 @@ export class EndeavourService extends Service {
   }
 
   /**
-   * Create the single active plan and start the continuable Builder child.
-   * The child starts with the first detailed task; later tasks are dispatched
-   * by verification.
+   * Create the single active plan and deliver the whole plan to the persistent
+   * Challenger peer. The caller must be the paired Endeavour side; this method
+   * NEVER creates an agent, never starts a subagent, and never prompts a model
+   * directly (the relay is the only wakeup).
    */
   async createPlan(agent: Agent, input: {
     readonly title: string
@@ -456,56 +425,58 @@ export class EndeavourService extends Service {
     const rootSessionId = agentSessionId(agent)
     if (rootSessionId === undefined) throw new EndeavourError('role-forbidden', 'calling agent has no session id')
     return this.enqueue(rootSessionId, async () => {
+      const pair = assertPairedEndeavour(this.peers.get(rootSessionId), rootSessionId, undefined).pair
       if (this.getActivePlan(rootSessionId) !== undefined) {
         throw new EndeavourError('plan-active', 'this Endeavour session already has an active plan')
       }
       const at = Date.now()
       const planId = PlanId(randomUUID())
-      const first = input.tasks[0]
-      if (first === undefined) throw new EndeavourError('transition-invalid', 'a plan needs at least one task')
-      const subagents = this.subagentHost()
-      const { options: builderOptions, route: builderRoute } = this.resolveBuilderRoute(agent)
-      const started = await subagents.startContinuable({
-        provider: this.serviceConfig.builderProvider ?? 'spawn',
-        label: 'Builder',
-        request: {
-          parent: agent,
-          prompt: [textBlock(wholePlanBrief(input.title, input.brief, input.constraints, input.tasks))],
-          agentOptions: builderOptions,
-          persona: this.serviceConfig.builderPersona ?? BUILDER_PROMPT,
-          // The Builder must never send ordinary parent messages or delegate:
-          // the durable builder_report protocol is its only parent channel.
-          // Scoped registrations (builder_start_task/builder_report) are not
-          // affected by restrictions, so execution keeps its protocol tools.
-          toolFilter: this.serviceConfig.builderToolFilter ?? { deny: [...BUILDER_DEFAULT_DENY] },
-          ...(this.serviceConfig.maxDepth === undefined ? {} : { maxDepth: this.serviceConfig.maxDepth }),
-        },
-        signal: new AbortController().signal,
-      })
-      const childId = String(started.childId)
-      const plan = createPlanState({
+      if (input.tasks.length === 0) throw new EndeavourError('transition-invalid', 'a plan needs at least one task')
+      // Provision (or adopt) the persistent ordinary Challenger: idempotent,
+      // blank, and never a model request.
+      const ensured = await this.peerRuntime().provisioner.ensure(rootSessionId)
+      let plan = createPeerPlanState({
         planId,
-        rootSessionId,
-        childId,
+        pair: ensured,
         title: input.title,
         tasks: input.tasks,
         at,
-        builderRoute,
+        brief: input.brief,
+        ...(input.constraints === undefined ? {} : { constraints: input.constraints }),
       })
       await this.append(rootSessionId, 'plan-created', undefined, plan, at)
-      return { planId: plan.planId, childId, taskCount: plan.tasks.length }
+      // Durable outbox: checkpoint the relay BEFORE any transport attempt so a
+      // crash between the checkpoint and the delivery can be reconciled.
+      const relay = planReadyRelay(ensured, plan, planReadyBodyFromPlan(plan))
+      plan = checkpointOutbox(plan, relay, at)
+      await this.append(rootSessionId, 'delivery-pending', this.plans.get(rootSessionId), plan, at)
+      const fact = deliveryFact(plan, deliveryKey(relay.pairId, plan.planId, relay.messageKind))
+      if (fact !== undefined) {
+        try {
+          const outcome = await deliverOutboxFact(this.outboxRuntime(), plan, relay, fact)
+          plan = outcome.plan
+          if (outcome.delivered) {
+            await this.append(rootSessionId, 'delivery-settled', this.plans.get(rootSessionId), plan, Date.now())
+          }
+        } catch {
+          // The relay stays PENDING and retryable; plan creation already
+          // succeeded durably and reconcileOutbox delivers later.
+        }
+      }
+      return { planId: plan.planId, challengerSessionId: ensured.challengerSessionId, taskCount: plan.tasks.length }
     })
   }
 
-  /** Builder-only: start the current task exactly once, at explicit start time. */
-  async builderStartTask(agent: Agent, taskId: string): Promise<PlanState> {
-    const childId = agentSessionId(agent)
-    if (childId === undefined) throw new EndeavourError('role-forbidden', 'calling agent has no session id')
-    const plan = this.getPlanByChild(childId)
-    if (plan === undefined) throw new EndeavourError('role-forbidden', `session ${childId} is not a plan Builder`)
+  /** Challenger-only: start the current execution item exactly once. */
+  async challengerStartTask(agent: Agent, taskId: string): Promise<PlanState> {
+    const callerId = agentSessionId(agent)
+    if (callerId === undefined) throw new EndeavourError('role-forbidden', 'calling agent has no session id')
+    const plan = planForChallenger(this.plans.values(), callerId)
+    if (plan === undefined) throw new EndeavourError('role-forbidden', `session ${callerId} is not the Challenger of an active plan`)
+    assertPairedChallenger(this.peers.get(callerId), callerId, plan)
     return this.enqueue(plan.rootSessionId, async () => {
       const current = this.plans.get(plan.rootSessionId) ?? plan
-      assertChildRole(current, childId, agentParentSessionId(agent) ?? current.rootSessionId)
+      assertPairedChallenger(this.peers.get(callerId), callerId, current)
       const at = Date.now()
       const next = startTask(current, TaskId(taskId), at)
       await this.append(current.rootSessionId, 'task-started', current, next, at)
@@ -514,22 +485,23 @@ export class EndeavourService extends Service {
   }
 
   /**
-   * Builder-only: append the report checkpoint and drive the two-phase flow.
-   * Intermediate successful reports send ZERO messages; the final report sends
-   * exactly ONE ordered aggregate review request; a blocker/failure sends ONE
-   * early review request and stops progression. The public row stays running
-   * (Finished) until Endeavour records its verdict.
+   * Challenger-only: append the report checkpoint and drive the two-phase flow.
+   * Intermediate successful reports relay NOTHING; the final report (or an
+   * early blocker/failure) checkpoints exactly ONE review-ready outbox fact and
+   * delivers the ordered aggregate to the paired Endeavour. The public row
+   * stays running (Finished) until Endeavour records its verdict.
    */
-  async builderReport(agent: Agent, taskId: string, report: BuilderReportInput): Promise<BuilderReportOutcome> {
-    const childId = agentSessionId(agent)
-    if (childId === undefined) throw new EndeavourError('role-forbidden', 'calling agent has no session id')
-    const plan = this.getPlanByChild(childId)
-    if (plan === undefined) throw new EndeavourError('role-forbidden', `session ${childId} is not a plan Builder`)
+  async challengerReport(agent: Agent, taskId: string, report: BuilderReportInput): Promise<BuilderReportOutcome> {
+    const callerId = agentSessionId(agent)
+    if (callerId === undefined) throw new EndeavourError('role-forbidden', 'calling agent has no session id')
+    const plan = planForChallenger(this.plans.values(), callerId)
+    if (plan === undefined) throw new EndeavourError('role-forbidden', `session ${callerId} is not the Challenger of an active plan`)
+    assertPairedChallenger(this.peers.get(callerId), callerId, plan)
     return this.enqueue(plan.rootSessionId, async () => {
       const current = this.plans.get(plan.rootSessionId) ?? plan
-      assertChildRole(current, childId, agentParentSessionId(agent) ?? current.rootSessionId)
+      const pair = assertPairedChallenger(this.peers.get(callerId), callerId, current).pair
       const at = Date.now()
-      const next = reportTask(current, TaskId(taskId), {
+      let next = reportTask(current, TaskId(taskId), {
         summary: report.summary,
         files: [...report.files],
         validation: report.validation,
@@ -540,10 +512,21 @@ export class EndeavourService extends Service {
       const blocked = report.blocker !== undefined || report.failure !== undefined
       const review = blocked || allTasksReported(next)
       if (review) {
-        const subagents = this.subagentHost()
-        await subagents.sendMessage(agent, current.rootSessionId, [
-          textBlock(aggregateReviewRequest(next, blocked)),
-        ], { signal: new AbortController().signal })
+        const relay = reviewReadyRelay(pair, next, reviewReadyBody(next, blocked))
+        next = checkpointOutbox(next, relay, at)
+        await this.append(next.rootSessionId, 'delivery-pending', this.plans.get(next.rootSessionId), next, at)
+        const fact = deliveryFact(next, deliveryKey(relay.pairId, next.planId, relay.messageKind))
+        if (fact !== undefined) {
+          try {
+            const outcome = await deliverOutboxFact(this.outboxRuntime(), next, relay, fact)
+            next = outcome.plan
+            if (outcome.delivered) {
+              await this.append(next.rootSessionId, 'delivery-settled', this.plans.get(next.rootSessionId), next, Date.now())
+            }
+          } catch {
+            // Pending fact: reconcileOutbox retries without duplicating state.
+          }
+        }
       }
       if (blocked) return { plan: next, phase: 'blocked' }
       const nextTask = executionCursor(next)?.spec
@@ -554,25 +537,65 @@ export class EndeavourService extends Service {
   }
 
   /**
-   * Root-only quick verification. Freezes the duration, finalizes the plan on
-   * last success or any failure, and dispatches the next detailed task to the
-   * same Builder child on success.
+   * Endeavour-only ordered verification. Freezes the duration and finalizes on
+   * the last success or any failure; it NEVER relays anything back.
    */
   async verifyTask(agent: Agent, taskId: string, outcome: 'succeeded' | 'failed', note?: string): Promise<PlanState> {
     const rootSessionId = agentSessionId(agent)
     if (rootSessionId === undefined) throw new EndeavourError('role-forbidden', 'calling agent has no session id')
     const plan = this.plans.get(rootSessionId)
     if (plan === undefined) throw new EndeavourError('role-forbidden', `session ${rootSessionId} has no plan`)
+    assertPairedEndeavour(this.peers.get(rootSessionId), rootSessionId, plan)
     return this.enqueue(rootSessionId, async () => {
       const current = this.plans.get(rootSessionId) ?? plan
-      assertRootRole(current, rootSessionId)
+      assertPairedEndeavour(this.peers.get(rootSessionId), rootSessionId, current)
       const at = Date.now()
       const next = verifyTask(current, TaskId(taskId), outcome, note, at)
       await this.append(rootSessionId, next.terminal === undefined ? 'task-verified' : 'plan-finalized', current, next, at)
-      // Ordered verdict only: no child messages, no next dispatch. Later
-      // reported rows stay Finished while the review walks the plan in order.
       return next
     })
+  }
+
+  /**
+   * Restart/outbox reconciliation: rebuild every pending relay from durable
+   * state (plan-ready from the private brief fields, review-ready from the task
+   * reports) and re-deliver idempotently. Delivered facts are ignored; failures
+   * stay pending and retryable. Safe to call repeatedly and concurrently.
+   */
+  async reconcileOutbox(): Promise<number> {
+    let delivered = 0
+    for (const indexed of [...this.plans.values()]) {
+      if (indexed.pairId === undefined) continue
+      for (const fact of pendingDeliveries(indexed)) {
+        const ok = await this.enqueue(indexed.rootSessionId, async () => {
+          const current = this.plans.get(indexed.rootSessionId)
+          if (current === undefined) return false
+          const currentFact = deliveryFact(current, fact.key)
+          if (currentFact === undefined || currentFact.status === 'delivered') return false
+          const pair = this.peers.get(current.rootSessionId)
+          if (pair === undefined) return false
+          const relay = currentFact.kind === 'plan-ready'
+            ? planReadyRelay(pair, current, planReadyBodyFromPlan(current))
+            : reviewReadyRelay(pair, current, reviewReadyBody(current, firstBlockedReport(current) !== undefined))
+          const outcome = await deliverOutboxFact(this.outboxRuntime(), current, relay, currentFact)
+          if (!outcome.delivered) return false
+          await this.append(outcome.plan.rootSessionId, 'delivery-settled', current, outcome.plan, Date.now())
+          return true
+        })
+        if (ok) delivered += 1
+      }
+    }
+    return delivered
+  }
+
+  /** @deprecated legacy alias; the Challenger catalog uses challengerStartTask. */
+  builderStartTask(agent: Agent, taskId: string): Promise<PlanState> {
+    return this.challengerStartTask(agent, taskId)
+  }
+
+  /** @deprecated legacy alias; the Challenger catalog uses challengerReport. */
+  builderReport(agent: Agent, taskId: string, report: BuilderReportInput): Promise<BuilderReportOutcome> {
+    return this.challengerReport(agent, taskId, report)
   }
 }
 
@@ -608,6 +631,8 @@ export interface PeerRuntimeDeps {
   readonly provisioner: PeerProvisioner
   readonly queue: PeerDeliveryQueue
   readonly ledger: PeerDeliveryLedger
+  /** Pair lookup used by the outbox; defaults to the service registry. */
+  readonly readPair?: (sessionId: string) => PeerState | undefined
 }
 
 /** Typed report accepted from the model (kept separate from the service input). */

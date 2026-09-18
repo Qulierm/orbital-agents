@@ -30,6 +30,9 @@ export function createPeerPlanState(input: {
   readonly title: string
   readonly tasks: readonly TaskSpec[]
   readonly at: number
+  /** Private briefing inputs persisted for restart-safe plan-ready rebuilds. */
+  readonly brief?: string
+  readonly constraints?: string
 }): PlanState {
   return createPlanState({
     planId: input.planId,
@@ -39,6 +42,8 @@ export function createPeerPlanState(input: {
     title: input.title,
     tasks: input.tasks,
     at: input.at,
+    ...(input.brief === undefined ? {} : { executionBrief: input.brief }),
+    ...(input.constraints === undefined ? {} : { planConstraints: input.constraints }),
   })
 }
 
@@ -50,6 +55,20 @@ export function planReadyBody(input: {
   readonly tasks: readonly TaskSpec[]
 }): string {
   return wholePlanBrief(input.title, input.brief, input.constraints, input.tasks)
+}
+
+/**
+ * Rebuild the plan-ready body from DURABLE plan state alone: used by restart
+ * reconciliation, so the private brief/constraints fields must be present for
+ * peer plans (legacy plans without them rebuild from title + tasks).
+ */
+export function planReadyBodyFromPlan(plan: PlanState): string {
+  return wholePlanBrief(
+    plan.title,
+    plan.executionBrief ?? '',
+    plan.planConstraints,
+    plan.tasks.map((task) => task.spec),
+  )
 }
 
 /** Ordered aggregate evidence body for the review-ready relay. */

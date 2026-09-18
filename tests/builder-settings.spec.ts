@@ -73,50 +73,6 @@ const parentAgent = {
   session: { id: 'root', requestHeader: () => ({ provider: 'planner-p', model: 'planner-m', reasoningEffort: 'planner-effort' }) },
 }
 
-describe('service route resolution', () => {
-  async function createWith(settings: BuilderRouteSettings) {
-    const root = fakeSession('root')
-    const { ctx, starts } = fakeContext(root)
-    const service = new EndeavourService(ctx)
-    let current = settings
-    service.setBuilderSettingsSource(() => current)
-    const created = await service.createPlan(parentAgent as never, { title: 'Plan', brief: 'brief', tasks: [spec('t1')] })
-    const plan = service.getPlanByChild('child')
-    return { service, starts, created, plan, setSettings: (next: BuilderRouteSettings) => { current = next } }
-  }
-
-  it('inherit mode passes the Planner route through the public delegation helper', async () => {
-    const { starts, plan } = await createWith({ mode: 'inherit' })
-    expect(starts[0]?.request.agentOptions).toMatchObject({ provider: 'planner-p', model: 'planner-m', reasoningEffort: 'planner-effort', maxTokens: 1000 })
-    expect(plan?.builderRoute).toEqual({ provider: 'planner-p', model: 'planner-m', reasoningEffort: 'planner-effort', inherited: true })
-  })
-
-  it('custom mode pins provider/model and never carries the parent effort', async () => {
-    const { starts, plan } = await createWith({ mode: 'custom', provider: 'cheap', model: 'small' })
-    expect(starts[0]?.request.agentOptions).toEqual({ provider: 'cheap', model: 'small' })
-    expect(plan?.builderRoute).toEqual({ provider: 'cheap', model: 'small', inherited: false })
-  })
-
-  it('custom mode carries an explicit effort and maxTokens', async () => {
-    const { starts, plan } = await createWith({ mode: 'custom', provider: 'cheap', model: 'small', reasoningEffort: 'low', maxTokens: 2048 })
-    expect(starts[0]?.request.agentOptions).toEqual({ provider: 'cheap', model: 'small', reasoningEffort: 'low', maxTokens: 2048 })
-    expect(plan?.builderRoute?.reasoningEffort).toBe('low')
-  })
-
-  it('changing the setting after spawn does not change the spawned plan route', async () => {
-    const { setSettings, plan, service } = await createWith({ mode: 'custom', provider: 'cheap', model: 'small' })
-    setSettings({ mode: 'custom', provider: 'other', model: 'large' })
-    expect(service.getPlanByChild('child')?.builderRoute).toEqual(plan?.builderRoute)
-    expect(plan?.builderRoute?.provider).toBe('cheap')
-  })
-
-  it('invalid settings fall back to inherit safely', async () => {
-    const { starts, plan } = await createWith({ mode: 'custom', provider: 'cheap' })
-    expect(starts[0]?.request.agentOptions).toMatchObject({ provider: 'planner-p', model: 'planner-m' })
-    expect(plan?.builderRoute?.inherited).toBe(true)
-  })
-})
-
 describe('durable route projection', () => {
   it('exposes the route on the card and registers stateVersion 4 with the route in the wire schema', () => {
     const plan = createPlanState({

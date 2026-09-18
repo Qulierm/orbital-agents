@@ -44,7 +44,7 @@ describe('scope separation', () => {
     const { ctx, registered } = toolContext()
     applyGlobal(ctx as never, {})
     expect(registered).toHaveLength(0)
-    expect(globalInject).toEqual(['subagents', 'sessions', 'sessionProjections', 'sessionController'])
+    expect(globalInject).toEqual(['sessions', 'sessionProjections', 'sessionController'])
   })
 
   it('global bundle never calls the tool-registration seam', () => {

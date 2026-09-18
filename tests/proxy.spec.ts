@@ -11,6 +11,7 @@
 import { Context } from '@deepseek-ai/cordis'
 import { describe, expect, it } from 'vitest'
 import { EndeavourError } from '../src/domain.js'
+import { PeerError } from '../src/peer.js'
 import { EndeavourService } from '../src/service.js'
 
 function proxiedService() {
@@ -34,16 +35,16 @@ describe('Cordis service proxy receiver', () => {
       display: { title: 'Первый шаг' },
       execution: { instructions: 'do it', validation: 'checked' },
     }]
-    // Without host services the call must fail as a typed EndeavourError after
+    // Without an established pair the call fails as a typed peer error after
     // traversing the per-root queue and plan maps — never a receiver TypeError.
     await expect(service.createPlan(agent as never, { title: 'План', brief: 'brief', tasks }))
-      .rejects.toBeInstanceOf(EndeavourError)
+      .rejects.toBeInstanceOf(PeerError)
   })
 
-  it('reaches the Builder path through the proxy in builderStartTask', async () => {
+  it('reaches the Challenger path through the proxy in challengerStartTask', async () => {
     const service = proxiedService()
-    const child = { session: { id: 'child-session' } }
-    await expect(service.builderStartTask(child as never, 't1'))
+    const challenger = { session: { id: 'challenger-session' } }
+    await expect(service.challengerStartTask(challenger as never, 't1'))
       .rejects.toBeInstanceOf(EndeavourError)
   })
 })

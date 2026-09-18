@@ -89,8 +89,8 @@ export interface RoleToolService {
     readonly tasks: readonly TaskSpec[]
   }): Promise<{ readonly planId: string; readonly taskCount: number }>
   verifyTask(agent: Agent, taskId: string, outcome: 'succeeded' | 'failed', note?: string): Promise<import('./domain.js').PlanState>
-  startTask(agent: Agent, taskId: string): Promise<import('./domain.js').PlanState>
-  reportTask(agent: Agent, taskId: string, report: BuilderReportInput): Promise<import('./service.js').BuilderReportOutcome>
+  challengerStartTask(agent: Agent, taskId: string): Promise<import('./domain.js').PlanState>
+  challengerReport(agent: Agent, taskId: string, report: BuilderReportInput): Promise<import('./service.js').BuilderReportOutcome>
 }
 
 /**
@@ -137,7 +137,7 @@ export function registerTools(ctx: Context, service: EndeavourService | RoleTool
     },
     output: { schema: { type: 'string' }, render: (_args, value) => text(value) },
     async execute(args, exec) {
-      const plan = await compat.startTask(callingAgent(exec as ToolCallContext), args.task_id)
+      const plan = await compat.challengerStartTask(callingAgent(exec as ToolCallContext), args.task_id)
       const task = plan.tasks.find((candidate) => candidate.spec.id === args.task_id)
       return `task ${args.task_id} started (${task?.status ?? 'running'})`
     },
@@ -152,7 +152,7 @@ export function registerTools(ctx: Context, service: EndeavourService | RoleTool
     },
     output: { schema: { type: 'string' }, render: (_args, value) => text(value) },
     async execute(args, exec) {
-      const outcome = await compat.reportTask(
+      const outcome = await compat.challengerReport(
         callingAgent(exec as ToolCallContext),
         args.task_id,
         parseReport(args.report_json),

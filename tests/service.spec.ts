@@ -1,242 +1,278 @@
-import { describe, expect, it } from 'vitest'
-import { EndeavourError } from '../src/domain.js'
-import { EndeavourService, type EndeavourConfig } from '../src/service.js'
+/**
+ * Peer service cutover tests: persistent-pair plan creation, Challenger
+ * authorization, two-phase relays, ordered verification, outbox recovery and
+ * pair isolation. Everything runs against fakes — no agent is ever created and
+ * no model request exists.
+ */
+
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+
+vi.mock('@deepseek-ai/cordis', () => ({
+  Service: class {
+    ctx: unknown
+    name: string
+    constructor(ctx: unknown, name: string) {
+      this.ctx = ctx
+      this.name = name
+    }
+  },
+}))
+
+import type { TaskSpec } from '../src/domain.js'
+import type { PeerState } from '../src/peer.js'
+
+const { EndeavourService } = await import('../src/service.js')
+const { EndeavourError, PlanId, TaskId } = await import('../src/domain.js')
+const { challengerSessionIdFor, peerEventPayload, peerPairIdFor, PeerError } = await import('../src/peer.js')
+const { PeerDeliveryLedger, PeerDeliveryQueue } = await import('../src/peer-transport.js')
+const { PeerProvisioner } = await import('../src/peer-service.js')
+
+function spec(id: string): TaskSpec {
+  return { id: TaskId(id), display: { title: id }, execution: { instructions: `do ${id}`, validation: `check ${id}` } }
+}
 
 interface FakeEvent { type: string; data: unknown }
 
-function fakeSession(id: string) {
-  const events: FakeEvent[] = []
+function fakeSession(id: string, events: FakeEvent[] = [], preset = 'endeavour') {
+  const list = [...events]
   const session = {
     id,
-    seq: 0,
-    eventAt(seq: number) { return events[seq] },
-    append(type: string, data: unknown) { events.push({ type, data }); session.seq += 1 },
-    events,
+    header: { agentPreset: preset, cwd: '/proj' },
+    seq: list.length,
+    eventAt: (at: number) => list[at],
+    append: (type: string, data: unknown) => { list.push({ type, data }) },
+    events: list,
   }
   return session
 }
 
-function fakeContext(sessions: ReturnType<typeof fakeSession>[]) {
-  const sent: { sender: unknown; target: string; text: string }[] = []
-  const starts: unknown[] = []
+function pairState(rootId: string): PeerState {
+  return {
+    version: 1,
+    pairId: peerPairIdFor(rootId),
+    endeavourSessionId: rootId,
+    challengerSessionId: challengerSessionIdFor(rootId),
+    createdAt: 1,
+    updatedAt: 1,
+    sequence: 1,
+  }
+}
+
+interface Harness {
+  service: InstanceType<typeof EndeavourService>
+  root: ReturnType<typeof fakeSession>
+  challenger: ReturnType<typeof fakeSession>
+  pair: PeerState
+  inbox: Map<string, unknown[]>
+  ensureCalls: { sessionId: string }[]
+  resolves: { sessionId: string; ok: boolean }[]
+  failResolve: Set<string>
+  readPair: (sessionId: string) => PeerState | undefined
+}
+
+function harness(rootId = 'session-root', seedSecondPair = false): Harness {
+  const pair = pairState(rootId)
+  const rootEvent = { type: 'endeavour/peer', data: peerEventPayload('peer-created', undefined, pair, 1) }
+  const root = fakeSession(rootId, [rootEvent])
+  const challenger = fakeSession(pair.challengerSessionId, [rootEvent], 'challenger')
+  const sessions = [root, challenger]
+  const inbox = new Map<string, unknown[]>([[rootId, []], [pair.challengerSessionId, []]])
+  const ensureCalls: { sessionId: string }[] = []
+  const resolves: { sessionId: string; ok: boolean }[] = []
+  const failResolve = new Set<string>()
+  const readPair = (sessionId: string): PeerState | undefined => (sessionId === rootId || sessionId === pair.challengerSessionId ? pair : undefined)
+  const seam = {
+    listSessionIds: () => sessions.map((session) => session.id),
+    sessionMeta: (id: string) => sessions.find((session) => session.id === id)?.header === undefined
+      ? undefined
+      : { id, agentPreset: sessions.find((session) => session.id === id)!.header.agentPreset },
+    createOrdinarySession: async (input: { id: string }) => { void input; return { sessionId: input.id, adopted: false } },
+    resolveAgent: async (id: string) => {
+      const ok = !failResolve.has(id)
+      resolves.push({ sessionId: id, ok })
+      if (!ok) return undefined
+      const box = inbox.get(id)
+      if (box === undefined) return undefined
+      return {
+        followup: (message: unknown) => { box.push(message) },
+        send: (message: unknown) => { box.push(message) },
+      }
+    },
+  }
+  const provisioner = new PeerProvisioner({
+    seam,
+    readPair,
+    hasCheckpoint: () => true,
+    appendPair: async () => undefined,
+    now: () => 1,
+  })
+  const originalEnsure = provisioner.ensure.bind(provisioner)
+  provisioner.ensure = async (sessionId: string) => { ensureCalls.push({ sessionId }); return originalEnsure(sessionId) }
   const ctx = {
     reflect: { provide: () => () => undefined },
     sessions: {
       get: (id: string) => sessions.find((session) => session.id === id),
-      flush: async () => undefined,
+      flush: async () => true,
       list: () => sessions,
     },
-    subagents: {
-      startContinuable: async (spec: unknown) => { starts.push(spec); return { childId: 'child', messageId: 'm1' } },
-      sendMessage: async (sender: unknown, target: string, content: { text?: string }[], _options: unknown) => {
-        sent.push({ sender, target, text: content.map((block) => block.text ?? '').join('\n') })
-      },
-    },
+    sessionProjections: { register: () => () => undefined },
   }
-  return { ctx: ctx as never, sent, starts }
+  const service = new EndeavourService(ctx as never, {})
+  service.setPeerRuntime({ seam, provisioner, queue: new PeerDeliveryQueue(), ledger: new PeerDeliveryLedger() })
+  if (seedSecondPair) void 0
+  return { service, root, challenger, pair, inbox, ensureCalls, resolves, failResolve, readPair }
 }
 
-const rootAgent = { id: 'root' }
-const childAgent = { id: 'child', parentSessionId: 'root', session: { id: 'child', parentId: 'root' } }
+const rootAgent = (rootId = 'session-root') => ({ session: { id: rootId } })
+const challengerAgent = (h: Harness) => ({ session: { id: h.pair.challengerSessionId } })
 
-function planInput() {
-  return {
-    title: 'План',
-    brief: 'brief',
-    tasks: [
-      {
-        id: 't1' as never,
-        display: { title: 'Первый' },
-        execution: { instructions: 'do t1', validation: 'check t1' },
-      },
-      {
-        id: 't2' as never,
-        display: { title: 'Второй' },
-        execution: { instructions: 'do t2', validation: 'check t2' },
-      },
-    ],
-  }
+const planInput = () => ({
+  title: 'Plan',
+  brief: 'Do the whole thing safely.',
+  tasks: [spec('t1'), spec('t2'), spec('t3')],
+})
+
+function relays(h: Harness): number {
+  return (h.inbox.get(h.pair.challengerSessionId)?.length ?? 0) + (h.inbox.get(h.pair.endeavourSessionId)?.length ?? 0)
 }
 
-function makeService(config: EndeavourConfig = {}) {
-  const root = fakeSession('root')
-  const child = fakeSession('child')
-  const { ctx, sent, starts } = fakeContext([root, child])
-  const service = new EndeavourService(ctx, config)
-  return { service, root, child, sent, starts }
-}
-
-describe('EndeavourService', () => {
-  it('creates one active plan, spawns one Builder child, and rejects a second plan', async () => {
-    const { service, starts, root } = makeService()
-    const created = await service.createPlan(rootAgent as never, planInput())
-    expect(created.taskCount).toBe(2)
-    expect(starts).toHaveLength(1)
-    expect(root.events.map((event) => event.type)).toEqual(['endeavour/plan'])
-    await expect(service.createPlan(rootAgent as never, planInput())).rejects.toBeInstanceOf(EndeavourError)
+describe('peer plan creation', () => {
+  it('creates one plan, ensures the pair once, and delivers exactly one plan-ready', async () => {
+    const h = harness()
+    const created = await h.service.createPlan(rootAgent() as never, planInput())
+    expect(created.challengerSessionId).toBe(h.pair.challengerSessionId)
+    expect(created.taskCount).toBe(3)
+    expect(h.ensureCalls).toEqual([{ sessionId: 'session-root' }])
+    expect(h.root.events.map((event) => event.type)).toEqual([
+      'endeavour/peer', 'endeavour/plan', 'endeavour/plan', 'endeavour/plan',
+    ])
+    const plan = h.service.getActivePlan('session-root')
+    expect(plan?.challengerSessionId).toBe(h.pair.challengerSessionId)
+    expect(plan?.pairId).toBe(h.pair.pairId)
+    expect(plan?.childId).toBeUndefined()
+    // Exactly ONE plan-ready landed on the Challenger inbox.
+    expect(h.inbox.get(h.pair.challengerSessionId)).toHaveLength(1)
+    expect(JSON.stringify(h.inbox.get(h.pair.challengerSessionId)?.[0])).toContain('Task 3 [t3]')
+    // No agent was created and no subagent service exists in the context.
+    expect((h.service as unknown as { subagentHost?: unknown }).subagentHost).toBeUndefined()
+    await expect(h.service.createPlan(rootAgent() as never, planInput())).rejects.toBeInstanceOf(EndeavourError)
   })
 
-  it('rejects root sessions trying Builder operations and children trying verification', async () => {
-    const { service } = makeService()
-    const created = await service.createPlan(rootAgent as never, planInput())
-    await expect(service.builderStartTask(rootAgent as never, 't1')).rejects.toBeInstanceOf(EndeavourError)
-    await service.builderStartTask(childAgent as never, 't1')
-    await service.builderReport(childAgent as never, 't1', { summary: 's', files: [], validation: 'v' })
-    await expect(service.verifyTask(childAgent as never, 't1', 'succeeded')).rejects.toBeInstanceOf(EndeavourError)
-    expect(created.childId).toBe('child')
-  })
-
-  it('sends ZERO messages for intermediate reports and ONE aggregate on the final report', async () => {
-    const { service, sent } = makeService()
-    await service.createPlan(rootAgent as never, planInput())
-    await service.builderStartTask(childAgent as never, 't1')
-    const first = await service.builderReport(childAgent as never, 't1', { summary: 'готово', files: ['a.ts'], validation: 'ok' })
-    expect(first.phase).toBe('executing')
-    expect(first.nextTask?.id).toBe('t2')
-    expect(sent).toHaveLength(0)
-    await service.builderStartTask(childAgent as never, 't2')
-    const second = await service.builderReport(childAgent as never, 't2', { summary: 'второй', files: [], validation: 'ok' })
-    expect(second.phase).toBe('review')
-    expect(sent).toHaveLength(1)
-    expect(sent[0]?.target).toBe('root')
-    expect(sent[0]?.text).toContain('endeavour_verify')
-    expect(sent[0]?.text).toContain('Первый')
-    expect(sent[0]?.text).toContain('Второй')
-  })
-
-  it('never dispatches to the child; review is ordered and terminal only after every verdict', async () => {
-    const { service, sent, starts } = makeService()
-    await service.createPlan(rootAgent as never, planInput())
-    await service.builderStartTask(childAgent as never, 't1')
-    await service.builderReport(childAgent as never, 't1', { summary: 's', files: [], validation: 'v' })
-    // Review cannot start before every task has a report.
-    await expect(service.verifyTask(rootAgent as never, 't1', 'succeeded'))
-      .rejects.toBeInstanceOf(EndeavourError)
-    await service.builderStartTask(childAgent as never, 't2')
-    await service.builderReport(childAgent as never, 't2', { summary: 's2', files: [], validation: 'v2' })
-    await expect(service.verifyTask(rootAgent as never, 't2', 'succeeded'))
-      .rejects.toBeInstanceOf(EndeavourError)
-    const afterFirst = await service.verifyTask(rootAgent as never, 't1', 'succeeded')
-    expect(afterFirst.terminal).toBeUndefined()
-    const done = await service.verifyTask(rootAgent as never, 't2', 'succeeded')
-    expect(done.terminal?.outcome).toBe('completed')
-    // Only the single aggregate parent message; nothing was ever sent to the child.
-    expect(sent).toHaveLength(1)
-    expect(sent.every((message) => message.target === 'root')).toBe(true)
-    expect(starts).toHaveLength(1)
-  })
-
-  it('rejects out-of-order and duplicate reports, and stops progression on a blocker', async () => {
-    const { service, sent, root } = makeService()
-    await service.createPlan(rootAgent as never, planInput())
-    await expect(service.builderReport(childAgent as never, 't2', { summary: 's', files: [], validation: 'v' }))
-      .rejects.toBeInstanceOf(EndeavourError)
-    await service.builderStartTask(childAgent as never, 't1')
-    await service.builderReport(childAgent as never, 't1', { summary: 's', files: [], validation: 'v' })
-    await expect(service.builderReport(childAgent as never, 't1', { summary: 'x', files: [], validation: 'v' }))
-      .rejects.toBeInstanceOf(EndeavourError)
-    // The next task is already startable after a successful report...
-    await service.builderStartTask(childAgent as never, 't2')
-    // ...but a blocker report stops all later progression immediately.
-    const blocked = await service.builderReport(childAgent as never, 't2', { summary: 's', files: [], validation: 'v', blocker: 'нет доступа' })
-    expect(blocked.phase).toBe('blocked')
-    expect(sent).toHaveLength(1)
-    await expect(service.builderStartTask(childAgent as never, 't1'))
-      .rejects.toBeInstanceOf(EndeavourError)
-    await service.verifyTask(rootAgent as never, 't1', 'succeeded')
-    const failed = await service.verifyTask(rootAgent as never, 't2', 'failed', 'Не прошло')
-    expect(failed.terminal?.outcome).toBe('failed')
-    expect(service.getActivePlan('root')).toBeUndefined()
-    expect(sent).toHaveLength(1)
-    void root
-  })
-
-  it('runs a 3-task plan with send counts 0, 0, 1 and one ordered aggregate', async () => {
-    const { service, sent } = makeService()
-    const input = planInput()
-    await service.createPlan(rootAgent as never, {
-      ...input,
-      tasks: [
-        ...input.tasks,
-        { id: 't3' as never, display: { title: 'Третий' }, execution: { instructions: 'do t3', validation: 'check t3' } },
-      ],
-    })
-    const phases: string[] = []
+  it('reuses the same Challenger for the next plan after a terminal one', async () => {
+    const h = harness()
+    await h.service.createPlan(rootAgent() as never, planInput())
     for (const id of ['t1', 't2', 't3']) {
-      await service.builderStartTask(childAgent as never, id)
-      const outcome = await service.builderReport(childAgent as never, id, { summary: id, files: [], validation: 'ok' })
-      phases.push(outcome.phase)
-      if (outcome.phase === 'executing') expect(outcome.nextTask?.id).toBe(id === 't1' ? 't2' : 't3')
+      await h.service.challengerStartTask(challengerAgent(h) as never, id)
+      await h.service.challengerReport(challengerAgent(h) as never, id, { summary: id, files: [], validation: 'ok' })
     }
-    expect(phases).toEqual(['executing', 'executing', 'review'])
-    expect(sent).toHaveLength(1)
-    expect(sent[0]?.target).toBe('root')
-    for (const title of ['Первый', 'Второй', 'Третий']) expect(sent[0]?.text).toContain(title)
-    // Duplicate reports never duplicate the notification.
-    await expect(service.builderReport(childAgent as never, 't3', { summary: 'x', files: [], validation: 'v' }))
-      .rejects.toBeInstanceOf(EndeavourError)
-    expect(sent).toHaveLength(1)
+    for (const id of ['t1', 't2', 't3']) await h.service.verifyTask(rootAgent() as never, id, 'succeeded')
+    expect(h.service.getActivePlan('session-root')).toBeUndefined()
+    const second = await h.service.createPlan(rootAgent() as never, planInput())
+    expect(second.challengerSessionId).toBe(h.pair.challengerSessionId)
+    // The provisioner ensure ran per plan, but the pair never changed.
+    expect(h.ensureCalls).toEqual([{ sessionId: 'session-root' }, { sessionId: 'session-root' }])
+    const plans = [...(h.service as unknown as { plans: Map<string, unknown> }).plans.values()]
+    expect(plans).toHaveLength(1)
+    expect((plans[0] as { planId: string }).planId).toBe(second.planId)
+  })
+})
+
+describe('two-phase relays', () => {
+  it('sends zero relays for intermediate reports and exactly one aggregate at the end', async () => {
+    const h = harness()
+    await h.service.createPlan(rootAgent() as never, planInput())
+    const before = relays(h)
+    for (const id of ['t1', 't2']) {
+      const outcome = await h.service.challengerStartTask(challengerAgent(h) as never, id)
+      void outcome
+      const report = await h.service.challengerReport(challengerAgent(h) as never, id, { summary: id, files: [], validation: 'ok' })
+      expect(report.phase).toBe('executing')
+      expect(relays(h)).toBe(before)
+    }
+    await h.service.challengerStartTask(challengerAgent(h) as never, 't3')
+    const final = await h.service.challengerReport(challengerAgent(h) as never, 't3', { summary: 't3', files: [], validation: 'ok' })
+    expect(final.phase).toBe('review')
+    expect(h.inbox.get(h.pair.endeavourSessionId)).toHaveLength(1)
+    const aggregate = JSON.stringify(h.inbox.get(h.pair.endeavourSessionId)?.[0])
+    expect(aggregate).toContain('t1')
+    expect(aggregate).toContain('t3')
+    expect(aggregate).toContain('endeavour_verify')
   })
 
-  it('denies ordinary parent messaging and delegation by default, keeping protocol tools free', async () => {
-    const { service, starts } = makeService()
-    await service.createPlan(rootAgent as never, planInput())
-    const filter = (starts[0] as unknown as { request: { toolFilter?: { deny?: readonly string[]; allow?: readonly string[] } } }).request.toolFilter
-    expect(filter).toBeDefined()
-    const deny = filter?.deny ?? []
-    // Ordinary parent messaging, delegation, and agent/job management are gone.
-    for (const tool of ['send_message', 'subagent', 'subagent_fork', 'list_agents', 'interrupt_agent', 'job_output', 'workflow']) {
-      expect(deny).toContain(tool)
-    }
-    // The durable protocol tools are NOT denied (they are scoped registrations
-    // and restrictions do not affect them; the filter must not pretend to).
-    expect(deny).not.toContain('builder_start_task')
-    expect(deny).not.toContain('builder_report')
-    // Coding/validation surface is not restricted by the default.
-    expect(filter?.allow).toBeUndefined()
-    for (const tool of ['bash', 'read', 'write', 'edit', 'glob', 'grep']) expect(deny).not.toContain(tool)
-  })
-
-  it('lets explicit configuration override the default tool filter verbatim', async () => {
-    const custom = { allow: ['bash', 'read'] }
-    const { service, starts } = makeService({ builderToolFilter: custom })
-    await service.createPlan(rootAgent as never, planInput())
-    const filter = (starts[0] as unknown as { request: { toolFilter?: unknown } }).request.toolFilter
-    expect(filter).toEqual(custom)
-  })
-
-  it('accepts an injected peer runtime without changing public behavior', async () => {
-    const { service } = makeService()
-    const { PeerDeliveryLedger, PeerDeliveryQueue } = await import('../src/peer-transport.js')
-    const { PeerProvisioner } = await import('../src/peer-service.js')
-    const seam = {
-      listSessionIds: () => [],
-      sessionMeta: () => undefined,
-      createOrdinarySession: async (input: { id: string }) => ({ sessionId: input.id, adopted: false }),
-      resolveAgent: async () => undefined,
-    }
-    const provisioner = new PeerProvisioner({
-      seam,
-      readPair: () => undefined,
-      hasCheckpoint: () => false,
-      appendPair: async () => undefined,
-      now: () => 1,
+  it('stops progression on a blocker and sends one early review request', async () => {
+    const h = harness()
+    await h.service.createPlan(rootAgent() as never, planInput())
+    await h.service.challengerStartTask(challengerAgent(h) as never, 't1')
+    const blocked = await h.service.challengerReport(challengerAgent(h) as never, 't1', {
+      summary: 'no access', files: [], validation: 'n/a', blocker: 'permission denied',
     })
-    const runtime = { seam, provisioner, queue: new PeerDeliveryQueue(), ledger: new PeerDeliveryLedger() }
-    service.setPeerRuntime(runtime)
-    expect(service.peerDependencies()).toBe(runtime)
-    // Additive hook only: no plan is created and nothing is delivered.
-    expect(() => { service.observeCurrentSession() }).not.toThrow()
-    expect(service.getActivePlan('root')).toBeUndefined()
-    // Legacy behavior is untouched by the injected runtime.
-    const created = await service.createPlan(rootAgent as never, planInput())
-    expect(created.taskCount).toBe(2)
+    expect(blocked.phase).toBe('blocked')
+    expect(h.inbox.get(h.pair.endeavourSessionId)).toHaveLength(1)
+    await expect(h.service.challengerStartTask(challengerAgent(h) as never, 't2')).rejects.toBeInstanceOf(EndeavourError)
   })
 
-  it('recovers durable plans from replayed root events', () => {
-    const root = fakeSession('root')
-    const { ctx } = fakeContext([root])
-    const before = new EndeavourService(ctx)
-    expect(before.getActivePlan('root')).toBeUndefined()
+  it('verifies in order with zero reverse relays and finalizes only after the last verdict', async () => {
+    const h = harness()
+    await h.service.createPlan(rootAgent() as never, planInput())
+    for (const id of ['t1', 't2', 't3']) {
+      await h.service.challengerStartTask(challengerAgent(h) as never, id)
+      await h.service.challengerReport(challengerAgent(h) as never, id, { summary: id, files: [], validation: 'ok' })
+    }
+    const relaysBefore = relays(h)
+    await expect(h.service.verifyTask(rootAgent() as never, 't2', 'succeeded')).rejects.toBeInstanceOf(EndeavourError)
+    const first = await h.service.verifyTask(rootAgent() as never, 't1', 'succeeded')
+    expect(first.terminal).toBeUndefined()
+    expect(relays(h)).toBe(relaysBefore)
+    await h.service.verifyTask(rootAgent() as never, 't2', 'succeeded')
+    const done = await h.service.verifyTask(rootAgent() as never, 't3', 'succeeded')
+    expect(done.terminal?.outcome).toBe('completed')
+    expect(relays(h)).toBe(relaysBefore)
+  })
+})
+
+describe('authorization and recovery', () => {
+  it('rejects spoofed Challenger or Endeavour callers', async () => {
+    const h = harness()
+    await h.service.createPlan(rootAgent() as never, planInput())
+    const stranger = { session: { id: 'session-other' } }
+    await expect(h.service.challengerStartTask(stranger as never, 't1')).rejects.toBeInstanceOf(EndeavourError)
+    await expect(h.service.verifyTask(stranger as never, 't1', 'succeeded')).rejects.toBeInstanceOf(EndeavourError)
+    const { peerPairIdFor: pairIdOf } = await import('../src/peer.js')
+    const forged = { session: { id: challengerSessionIdFor('session-other') } }
+    void pairIdOf
+    await expect(h.service.challengerStartTask(forged as never, 't1')).rejects.toBeInstanceOf(EndeavourError)
+  })
+
+  it('reconciles a pending plan-ready after a transport failure and never resends a settled one', async () => {
+    const h = harness()
+    h.failResolve.add(h.pair.challengerSessionId)
+    await h.service.createPlan(rootAgent() as never, planInput())
+    // Delivery failed: the fact stays pending on the durable plan.
+    expect(h.inbox.get(h.pair.challengerSessionId)).toHaveLength(0)
+    const plan = h.service.getActivePlan('session-root')
+    const pending = (plan?.deliveries ?? []).filter((fact) => fact.status === 'pending')
+    expect(pending).toHaveLength(1)
+    // The peer resumes; reconcile delivers exactly once and settles.
+    h.failResolve.delete(h.pair.challengerSessionId)
+    const delivered = await h.service.reconcileOutbox()
+    expect(delivered).toBe(1)
+    expect(h.inbox.get(h.pair.challengerSessionId)).toHaveLength(1)
+    expect((h.service.getActivePlan('session-root')?.deliveries ?? []).every((fact) => fact.status === 'delivered')).toBe(true)
+    expect(await h.service.reconcileOutbox()).toBe(0)
+    expect(h.inbox.get(h.pair.challengerSessionId)).toHaveLength(1)
+  })
+
+  it('isolates two independent pairs', async () => {
+    const a = harness('session-root-a')
+    const b = harness('session-root-b')
+    await a.service.createPlan(rootAgent('session-root-a') as never, planInput())
+    await b.service.createPlan(rootAgent('session-root-b') as never, planInput())
+    expect(a.pair.challengerSessionId).not.toBe(b.pair.challengerSessionId)
+    // Each service only knows its own pair and plan.
+    expect(a.service.getActivePlan('session-root-b')).toBeUndefined()
+    await expect(a.service.challengerStartTask({ session: { id: b.pair.challengerSessionId } } as never, 't1'))
+      .rejects.toBeInstanceOf(EndeavourError)
+    expect(PeerError).toBeDefined()
+    expect(PlanId).toBeDefined()
   })
 })

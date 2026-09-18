@@ -138,6 +138,13 @@ export interface PlanState {
   readonly tasks: readonly TaskState[]
   /** Exact route used to spawn the Builder child, once the plan exists. */
   readonly builderRoute?: PlanBuilderRoute
+  /**
+   * Durable execution brief delivered in the plan-ready relay (peer plans).
+   * Private: never projected to the card, dock, or any public projection.
+   */
+  readonly executionBrief?: string
+  /** Durable plan-wide constraints from the same briefing (private). */
+  readonly planConstraints?: string
   readonly terminal?: {
     readonly outcome: PlanOutcome
     readonly at: number
@@ -196,6 +203,9 @@ export function createPlanState(input: {
   readonly at: number
   readonly builderRoute?: PlanBuilderRoute
   readonly deliveries?: readonly PlanDelivery[]
+  /** Private briefing inputs, stored so plan-ready is rebuildable after restart. */
+  readonly executionBrief?: string
+  readonly planConstraints?: string
 }): PlanState {
   if (input.childId === undefined && input.challengerSessionId === undefined) {
     throw new EndeavourError('transition-invalid', 'a plan needs a Builder child or a Challenger session')
@@ -232,6 +242,8 @@ export function createPlanState(input: {
     tasks: input.tasks.map((spec) => ({ spec, status: 'waiting' as const })),
     ...(input.builderRoute === undefined ? {} : { builderRoute: input.builderRoute }),
     ...(input.deliveries === undefined ? {} : { deliveries: input.deliveries }),
+    ...(input.executionBrief === undefined ? {} : { executionBrief: input.executionBrief }),
+    ...(input.planConstraints === undefined ? {} : { planConstraints: input.planConstraints }),
   }
 }
 

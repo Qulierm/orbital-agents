@@ -23,7 +23,7 @@ import {
 export const name = 'endeavour'
 
 /** Required services: subagents, sessions, and the projection registry. */
-export const inject = ['subagents', 'sessions', 'sessionProjections', 'sessionController']
+export const inject = ['sessions', 'sessionProjections', 'sessionController']
 
 /** Accepted row config; every field is optional. */
 export type Config = EndeavourConfig
