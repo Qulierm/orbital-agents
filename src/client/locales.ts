@@ -12,6 +12,7 @@ export const en = {
   'plan.checking': 'Endeavour is checking the result',
   'plan.openBuilder': 'Open Challenger',
   'plan.openLegacyBuilder': 'Open Builder',
+  'plan.openLegacyHint': 'Legacy plan: open its history from Subagents',
   'view.challenger': 'Challenger',
   'view.builder': 'Builder',
   'view.endeavour': 'Endeavour',

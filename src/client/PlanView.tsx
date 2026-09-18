@@ -177,8 +177,16 @@ export function PlanView(props: PlanViewProps): React.ReactElement | null {
             <path d="M2.5 4.5 6 8l3.5-3.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
         </button>
-        <button type="button" className={CLASS.ghost} onClick={onOpenBuilder}>
-          {copy('plan.openBuilder')}
+        <button
+          type="button"
+          className={CLASS.ghost}
+          onClick={onOpenBuilder}
+          // Historical childId-only plans have no persistent peer: the action
+          // is disabled and history stays reachable through native Subagents.
+          disabled={data.challengerSessionId === undefined}
+          title={data.challengerSessionId === undefined ? copy('plan.openLegacyHint') : undefined}
+        >
+          {data.challengerSessionId === undefined ? copy('plan.openLegacyBuilder') : copy('plan.openBuilder')}
           <svg width={12} height={12} viewBox="0 0 12 12" fill="none" aria-hidden="true">
             <path d="M4.5 2.5 8 6l-3.5 3.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
           </svg>

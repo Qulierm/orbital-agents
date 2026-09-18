@@ -36,15 +36,16 @@ Two ordinary presets ship together: **Endeavour** (planner: `endeavour_plan`,
 session paired with its Endeavour session; the companion is never a subagent and
 is reused by every later plan of that pair.
 
-An Endeavour root session with a plan shows a native `Builder` view tab next to
-`Chat` and `Trajectory`; selecting it opens the plan's existing Builder child
-(see [docs/architecture.md](docs/architecture.md#builder-child-lifecycle)).
+A paired Endeavour session shows a native `Challenger` view tab next to `Chat`
+and `Trajectory`, and the Challenger session shows the reciprocal `Endeavour`
+tab; either tab opens the other ordinary session of the pair (see
+[docs/architecture.md](docs/architecture.md)).
 
-The Builder route is **inherited** by default. Pick a different one in the
-composer chip (`Builder · Inherit`) before sending: choose `Inherit Planner` or
-a provider/model with its thinking option. The choice applies to the next
-Builder child and is frozen once the plan exists — see
-[docs/configuration.md](docs/configuration.md).
+The Challenger owns its own session model selection: the composer control next
+to the Endeavour selector mirrors it and writes through the official
+`remote.session.selectModel` — see
+[docs/configuration.md](docs/configuration.md). There is no inherit/Automatic
+route preference any more.
 
 ## Install
 
@@ -60,25 +61,19 @@ order, and installs the owned user preset at
 tarball at the same name/version still refreshes the installed artifact
 (remove-before-add).
 
-## Builder route
+## Model selection (peer-owned)
 
-```sh
-# show current state (configured values or "inherited")
-node /Users/nikita/Documents/Coding/dsh-endeavour/scripts/install-local.mjs --show-builder
+The root composer's `Challenger | model · effort` control mirrors the paired
+Challenger session's own selection and writes through the official
+`remote.session.selectModel` for that session; the Endeavour route is never
+touched. The retired Builder-route flags (`--configure-builder`,
+`--show-builder`, `--reset-builder`) were removed and are rejected by the
+installer — see [docs/configuration.md](docs/configuration.md).
 
-# configure a separate Builder route (provider and model are required)
-node /Users/nikita/Documents/Coding/dsh-endeavour/scripts/install-local.mjs \
-  --configure-builder --provider <provider-id> --model <model-id> \
-  [--reasoning-effort <effort-id>] [--max-tokens <n>]
-
-# reset back to inherited
-node /Users/nikita/Documents/Coding/dsh-endeavour/scripts/install-local.mjs --reset-builder
-```
-
-Configuration writes only the `endeavour` row of the profile patch, backs up
-before mutating, and never stores secrets. If nothing is configured, the card
-and `--show-builder` both report that the Builder inherits the Planner route;
-cost separation requires choosing a cheap route explicitly.
+Installation first runs a read-only legacy-plan preflight over the real session
+storage: a NONTERMINAL `childId`-only plan aborts the install (with the affected
+session ids and remediation) before any mutation; terminal historical plans are
+allowed and stay readable.
 
 ## Lifecycle
 

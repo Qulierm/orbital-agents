@@ -80,29 +80,11 @@ the absence of subagent/delegation mounts.
 
 ## 5. Model selection (peer-owned)
 
-In the app itself, the root Endeavour composer shows a `Builder · Inherit` chip
-that stores the route for the next Builder child in the `endeavour-builder`
-settings namespace (no restart needed). The commands below manage the
-composition fallback used when no user preference is stored.
-
-The Builder inherits the Planner route unless you configure a separate one:
-
-```sh
-# show configured values or the inherited fallback
-node /Users/nikita/Documents/Coding/dsh-endeavour/scripts/install-local.mjs --show-builder
-
-# configure (provider and model are required; values are validated)
-node /Users/nikita/Documents/Coding/dsh-endeavour/scripts/install-local.mjs \
-  --configure-builder --provider <provider-id> --model <model-id> \
-  [--reasoning-effort <effort-id>] [--max-tokens <n>]
-
-# return to inherited
-node /Users/nikita/Documents/Coding/dsh-endeavour/scripts/install-local.mjs --reset-builder
-```
-
-Each mutation backs up the profile first and touches only the `endeavour` row
-of `~/.dsh/profiles/desktop/cordis.patch.yml`. Configuration survives
-re-install and rollback. See [configuration.md](configuration.md).
+The root composer mirrors the persistent Challenger's own model selection; see
+[configuration.md](configuration.md). The retired Builder-route flags are
+rejected by the installer. Installation first runs a read-only legacy-plan
+preflight: a nonterminal `childId`-only plan aborts the install with the
+affected session ids and remediation (terminal historical plans are allowed).
 
 ## 5. Uninstall and rollback
 

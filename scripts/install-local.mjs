@@ -93,18 +93,6 @@ function timestamp() {
   return new Date().toISOString().replace(/[:.]/g, '-')
 }
 
-function readPatchFile(path) {
-  if (!existsSync(path)) return []
-  const parsed = load(readFileSync(path, 'utf8'))
-  return Array.isArray(parsed) ? parsed : []
-}
-
-function writePatchFile(path, entries) {
-  const header = `# Your patch layer for this dsh profile, applied after every bundle layer:\n`
-    + `# managed entries for ${PLUGIN} appear below; keep other edits intact.\n`
-  writeFileSync(path, header + dump(entries, { lineWidth: 120 }))
-}
-
 /** Copy a directory to a fresh atomic location then swap it in. */
 function atomicReplaceDir(source, target) {
   const staging = `${target}.staging-${timestamp()}`
@@ -255,57 +243,6 @@ function latestBackup() {
   return stamps.at(-1)
 }
 
-function ensurePatchRow(entries, config) {
-  const others = entries.filter((entry) => !(entry && typeof entry === 'object' && entry.id === 'endeavour'))
-  return [...others, { id: 'endeavour', name: PLUGIN, config }]
-}
-
-function configureBuilder() {
-  const provider = flag('--provider')
-  const model = flag('--model')
-  if (typeof provider !== 'string' || provider.trim() === '' || typeof model !== 'string' || model.trim() === '') {
-    throw new Error('--configure-builder requires non-empty --provider and --model; nothing was changed')
-  }
-  const maxTokensRaw = flag('--max-tokens')
-  let maxTokens
-  if (maxTokensRaw !== undefined) {
-    maxTokens = Number(maxTokensRaw)
-    if (!Number.isSafeInteger(maxTokens) || maxTokens < 1) throw new Error('--max-tokens must be a positive integer')
-  }
-  backup()
-  const patchPath = join(profileDir, 'cordis.patch.yml')
-  const entries = readPatchFile(patchPath)
-  const builderAgentOptions = {
-    provider: provider.trim(),
-    model: model.trim(),
-    ...(flag('--reasoning-effort') === undefined ? {} : { reasoningEffort: flag('--reasoning-effort') }),
-    ...(maxTokens === undefined ? {} : { maxTokens }),
-  }
-  writePatchFile(patchPath, ensurePatchRow(entries, { builderAgentOptions }))
-  console.log(`install-local: Builder route set (${builderAgentOptions.provider} / ${builderAgentOptions.model})${maxTokens === undefined ? '' : ` maxTokens=${String(maxTokens)}`}`)
-}
-
-function showBuilder() {
-  const entries = readPatchFile(join(profileDir, 'cordis.patch.yml'))
-  const row = entries.find((entry) => entry && typeof entry === 'object' && entry.id === 'endeavour')
-  const options = row?.config?.builderAgentOptions
-  if (options === undefined) {
-    console.log('Builder route: inherited (no separate provider/model configured; the Builder uses the Planner route)')
-    return
-  }
-  console.log(`Builder route: configured provider=${String(options.provider)} model=${String(options.model)}`
-    + `${options.reasoningEffort === undefined ? '' : ` reasoningEffort=${String(options.reasoningEffort)}`}`
-    + `${options.maxTokens === undefined ? '' : ` maxTokens=${String(options.maxTokens)}`}`)
-}
-
-function resetBuilder() {
-  backup()
-  const patchPath = join(profileDir, 'cordis.patch.yml')
-  const entries = readPatchFile(patchPath).filter((entry) => !(entry && typeof entry === 'object' && entry.id === 'endeavour'))
-  writePatchFile(patchPath, entries)
-  console.log('install-local: Builder route reset; the Builder inherits the Planner route')
-}
-
 function install(tarball, { force }) {
   // Strictly read-only gate, FIRST: no mutation happens before it passes.
   preflightLegacyPlans()
@@ -430,11 +367,39 @@ function listBackups() {
   }
 }
 
+// Every accepted flag, with whether it takes a value. Retired Builder-route
+// flags are gone: an unknown flag fails clearly instead of doing nothing.
+const FLAGS = [
+  { name: '--tarball', value: true },
+  { name: '--profile', value: true },
+  { name: '--rollback', value: true },
+  { name: '--force', value: false },
+  { name: '--uninstall', value: false },
+  { name: '--list-backups', value: false },
+]
+function rejectUnknownFlags() {
+  for (let i = 0; i < args.length; i += 1) {
+    const arg = args[i]
+    if (!arg.startsWith('--')) continue
+    const known = FLAGS.find((entry) => entry.name === arg)
+    if (known === undefined) {
+      throw new Error(`unknown flag ${arg}; supported flags: ${FLAGS.map((entry) => entry.name).join(', ')} (the Builder-route flags were retired with the peer model)`)
+    }
+    if (known.value && (args[i + 1] === undefined || args[i + 1].startsWith('--'))) {
+      throw new Error(`${arg} requires a value`)
+    }
+  }
+}
+
+try {
+  rejectUnknownFlags()
+} catch (error) {
+  console.error(`install-local: ${String(error.message)}`)
+  process.exit(1)
+}
+
 if (args.includes('--uninstall')) uninstall()
 else if (args.includes('--rollback')) rollback(flag('--rollback'))
-else if (args.includes('--configure-builder')) configureBuilder()
-else if (args.includes('--show-builder')) showBuilder()
-else if (args.includes('--reset-builder')) resetBuilder()
 else if (args.includes('--list-backups')) listBackups()
 else install(flag('--tarball'), { force: args.includes('--force') })
 

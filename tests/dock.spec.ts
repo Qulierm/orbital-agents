@@ -76,7 +76,10 @@ describe('composer plan dock', () => {
     expect(html).toContain(CLASS.glyphFinished)
     expect(html).toContain(`${CLASS.row} ${CLASS.rowRunning}`)
     expect(html).toContain(CLASS.ghost)
-    expect(html).toContain('Open Challenger')
+    // The fixture is a LEGACY card: the action is disabled and history is
+    // reachable through native Subagents instead of the peer tab.
+    expect(html).toContain('Open Builder')
+    expect(html).toContain('disabled=""')
     expect(html).not.toContain('Plan completed')
     expect(html).not.toContain('●')
     expect(html).not.toContain('instructions')
@@ -102,6 +105,13 @@ describe('composer plan dock', () => {
     expect(html).toContain('Failed')
     expect(html).toContain('Verification did not pass')
     expect(html).not.toContain('Plan failed')
+  })
+
+  it('keeps the peer action enabled for canonical peer plans', () => {
+    const peerCard = { ...planData, challengerSessionId: 'challenger-x', pairId: 'pair-x' } as typeof planData
+    const html = renderDock(peerCard)
+    expect(html).toContain('Open Challenger')
+    expect(html).not.toContain('disabled=""')
   })
 
   it('derives the executor session and stays safe when identity is missing', () => {

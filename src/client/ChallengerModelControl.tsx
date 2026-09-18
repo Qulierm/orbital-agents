@@ -87,25 +87,19 @@ function peerRoleOfProjection(peer: unknown, sessionId: string | undefined): 'en
 export function ChallengerModelControl(props: ChallengerModelControlProps): React.ReactElement | null {
   const copy = copyFrom(props)
   const useProjection = (props as { readonly useProjection?: (key: string) => unknown }).useProjection
-  const useSession = (props as { readonly useSession?: (selector: (state: unknown) => unknown) => unknown }).useSession
-
   const agentPreset = typeof useProjection === 'function' ? (useProjection('agentPreset') as string | undefined) : undefined
   const peer = typeof useProjection === 'function' ? useProjection('endeavourPeer') : undefined
   const plan = typeof useProjection === 'function'
     ? (useProjection('endeavourPlan') as { readonly terminal?: unknown } | null | undefined)
     : undefined
-  const sessionState = typeof useSession === 'function'
-    ? (useSession((state: unknown) => state) as { readonly subagent?: unknown; readonly running?: boolean } | undefined)
-    : undefined
   const sessionId = (props as { readonly sessionId?: string }).sessionId
   const visibility: BuilderRouteVisibility = {
     agentPreset,
-    isSubagent: sessionState?.subagent !== undefined && sessionState?.subagent !== null,
     planActive: plan !== undefined && plan !== null && plan.terminal === undefined,
-    running: sessionState?.running === true,
+    running: false,
   }
-  // Visibility is explicit: an Endeavour ROOT (never Standard, never an
-  // addressed subagent) that belongs to a valid pair. A plan or a running turn
+  // Visibility is explicit: the paired ENDEAVOUR side of a valid pair, decided
+  // solely by the peer projection (role) — never by session-state child flags. A plan or a running turn
   // disables the control instead of hiding it.
   const role = peerRoleOfProjection(peer, sessionId)
   const challengerId = props.challengerModel.challengerId()

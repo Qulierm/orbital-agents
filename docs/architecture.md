@@ -2,11 +2,13 @@
 
 ## Orchestration
 
-- One durable plan per Endeavour root session, one continuable Builder child
-  created through `ctx.subagents.startContinuable` with the `spawn` provider,
-  sequential tasks, no worktrees or parallel work.
-- The Builder child receives a per-child persona (the packaged Builder prompt)
-  and optional `agentOptions` / `toolFilter` from config.
+- One durable plan per Endeavour root session, executed by its persistent
+  ordinary **Challenger** peer (one logical session = two ordinary sessions:
+  Endeavour + Challenger), sequential tasks, no worktrees or parallel work.
+- A plan is delivered ONCE to the Challenger with the whole-plan brief through
+  the typed peer transport (`plan-ready`); intermediate reports relay nothing
+  and the final/blocker report sends exactly one ordered `review-ready`
+  aggregate back to Endeavour.
 - Durable events (`endeavour/plan`) are appended to the root/Endeavour session
   log with `session.append` and flushed through `ctx.sessions.flush`. Every
   payload is a whole-value checkpoint: `{ kind, at, plan }` where `plan` is the
@@ -69,6 +71,13 @@ last task succeeded -> plan terminal completed
 - N reports -> 1 notification -> N verdicts. Finished means "Builder reported",
   Confirmed means "Endeavour verified"; a task's duration freezes at its report
   time through confirmation.
+
+## Legacy Builder child lifecycle (historical plans only)
+
+> Historical note: plans created before the peer runtime used a continuable
+> Builder child. Those terminal plans stay readable through the `childId`
+> fallback; their mutation paths are rejected and new plans never create a
+> child.
 
 ## Builder child lifecycle
 

@@ -569,15 +569,6 @@ export class EndeavourService extends Service {
     return delivered
   }
 
-  /** @deprecated legacy alias; the Challenger catalog uses challengerStartTask. */
-  builderStartTask(agent: Agent, taskId: string): Promise<PlanState> {
-    return this.challengerStartTask(agent, taskId)
-  }
-
-  /** @deprecated legacy alias; the Challenger catalog uses challengerReport. */
-  builderReport(agent: Agent, taskId: string, report: BuilderReportInput): Promise<BuilderReportOutcome> {
-    return this.challengerReport(agent, taskId, report)
-  }
 }
 
 /**

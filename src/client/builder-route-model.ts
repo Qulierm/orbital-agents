@@ -6,21 +6,23 @@
 
 import type { ModelCatalogModel } from '@deepseek-ai/dsh-api-session-controller/types'
 
-/** Visibility inputs taken from the session projections and session state. */
+/**
+ * Visibility inputs. Addressed-child hiding is decided by the PEER projection
+ * (a Challenger session resolves to role 'challenger'), never by session-state
+ * subagent flags.
+ */
 export interface BuilderRouteVisibility {
   /** `agentPreset` projection value for the current session. */
   readonly agentPreset: string | undefined
-  /** True when the current session is an addressed subagent (Builder child). */
-  readonly isSubagent: boolean
   /** True when the Endeavour plan is active (no terminal outcome yet). */
   readonly planActive: boolean
-  /** True while the parent session is running a turn. */
+  /** True while the session is running a turn. */
   readonly running: boolean
 }
 
 /** Whether the control renders at all. */
 export function builderControlVisible(input: BuilderRouteVisibility): boolean {
-  return input.agentPreset === 'endeavour' && !input.isSubagent
+  return input.agentPreset === 'endeavour'
 }
 
 /** Whether the control is disabled, with the English reason for the title. */

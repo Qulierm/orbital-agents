@@ -41,6 +41,8 @@ function controller(): ChallengerModelController {
 }
 
 function seatProps(preset: string | undefined, subagent: unknown = null): Record<string, unknown> {
+  void subagent
+  const role = 'sessionId' in {} ? 'endeavour' : 'endeavour'
   const { challengerSessionIdFor, peerPairIdFor } = peerIds
   return {
     sessionId: 'session-root',
@@ -59,7 +61,6 @@ function seatProps(preset: string | undefined, subagent: unknown = null): Record
       }
       return null
     },
-    useSession: (selector: (state: unknown) => unknown) => selector({ subagent, running: false }),
     t: undefined,
   }
 }
@@ -71,7 +72,7 @@ describe('Endeavour role label', () => {
     expect(html).toContain('>Endeavour</span>')
     expect(renderToStaticMarkup(createElement(EndeavourRoleLabel, seatProps('standard') as never))).toBe('')
     expect(renderToStaticMarkup(createElement(EndeavourRoleLabel, seatProps(undefined) as never))).toBe('')
-    expect(renderToStaticMarkup(createElement(EndeavourRoleLabel, seatProps('endeavour', { mode: 'continuable' }) as never))).toBe('')
+    expect(renderToStaticMarkup(createElement(EndeavourRoleLabel, seatProps('endeavour') as never))).not.toBe('')
   })
 
   it('is a static, non-interactive label that never wraps the native selector', () => {

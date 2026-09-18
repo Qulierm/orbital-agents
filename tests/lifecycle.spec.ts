@@ -145,22 +145,22 @@ describe('installer lifecycle', () => {
     expect(readFileSync(join(preset, 'preset.yml'), 'utf8')).toContain('Endeavour')
   })
 
-  it('configures, displays, and resets only the Endeavour Builder route', () => {
+  it('retired Builder-route flags fail clearly without touching the profile', () => {
     const home = tempHome()
     seedProfile(home)
-    expect(installer(home, '--tarball', tarball()).status).toBe(0)
-    const configured = installer(home, '--configure-builder', '--provider', 'acme', '--model', 'fast-1', '--max-tokens', '32000')
-    expect(configured.status).toBe(0)
-    const patch = readFileSync(join(home, '.dsh', 'profiles', 'desktop', 'cordis.patch.yml'), 'utf8')
-    expect(patch).toContain('builderAgentOptions')
-    expect(patch).toContain('fast-1')
-    const shown = installer(home, '--show-builder')
-    expect(shown.stdout).toContain('configured provider=acme model=fast-1')
-    const invalid = installer(home, '--configure-builder', '--provider', 'acme', '--model', '')
-    expect(invalid.status).not.toBe(0)
-    expect(readFileSync(join(home, '.dsh', 'profiles', 'desktop', 'cordis.patch.yml'), 'utf8')).toContain('fast-1')
-    expect(installer(home, '--reset-builder').status).toBe(0)
-    expect(installer(home, '--show-builder').stdout).toContain('inherited')
+    const before = readFileSync(join(home, '.dsh', 'profiles', 'desktop', 'cordis.patch.yml'), 'utf8')
+    for (const flag of ['--configure-builder', '--show-builder', '--reset-builder']) {
+      const result = installer(home, flag)
+      expect(result.status).not.toBe(0)
+      expect(result.stderr).toContain('unknown flag')
+      expect(result.stderr).toContain(flag)
+    }
+    expect(readFileSync(join(home, '.dsh', 'profiles', 'desktop', 'cordis.patch.yml'), 'utf8')).toBe(before)
+    expect(existsSync(join(home, '.dsh', 'backups', 'endeavour'))).toBe(false)
+    // A flag that needs a value is rejected too.
+    const missing = installer(home, '--rollback')
+    expect(missing.status).not.toBe(0)
+    expect(missing.stderr).toContain('requires a value')
   })
 
   it('uninstalls owned preset and bundle entry but preserves a user-authored preset', () => {
@@ -197,7 +197,9 @@ describe('installer lifecycle', () => {
     expect(installed.status).toBe(0)
     const stamp = /--rollback (\S+)/.exec(installed.stdout)?.[1]
     expect(stamp).toBeTruthy()
-    expect(installer(home, '--configure-builder', '--provider', 'acme', '--model', 'fast-1').status).toBe(0)
+    // A second install takes its own backup (the replacement for the retired
+    // route CLI) with both presets present.
+    expect(installer(home, '--tarball', tarball()).status).toBe(0)
     expect(installer(home, '--rollback', stamp!).status).toBe(0)
     expect(manifest(home).dsh.profile.bundles).toEqual(['@deepseek-ai/dsh-base', 'dsh-context'])
     expect(existsSync(join(home, '.dsh', '.agent-presets', 'endeavour'))).toBe(false)
@@ -350,7 +352,9 @@ describe('installer lifecycle', () => {
     seedProfile(home)
     expect(installer(home, '--tarball', tarball()).status).toBe(0)
     // Second mutation takes a backup with BOTH presets present.
-    expect(installer(home, '--configure-builder', '--provider', 'acme', '--model', 'fast-1').status).toBe(0)
+    // A second install takes its own backup (the replacement for the retired
+    // route CLI) with both presets present.
+    expect(installer(home, '--tarball', tarball()).status).toBe(0)
     const stamp = latestStamp(home)
     const root = join(home, '.dsh', '.agent-presets')
     rmSync(join(root, 'challenger'), { recursive: true, force: true })
@@ -364,7 +368,9 @@ describe('installer lifecycle', () => {
     seedProfile(home)
     expect(installer(home, '--tarball', tarball()).status).toBe(0)
     // A later mutation captures a backup where BOTH presets existed.
-    expect(installer(home, '--configure-builder', '--provider', 'acme', '--model', 'fast-1').status).toBe(0)
+    // A second install takes its own backup (the replacement for the retired
+    // route CLI) with both presets present.
+    expect(installer(home, '--tarball', tarball()).status).toBe(0)
     const stamp = latestStamp(home)
     // Simulate an interrupted backup: the challenger copy never landed.
     rmSync(join(home, '.dsh', 'backups', 'endeavour', stamp, 'preset-challenger'), { recursive: true, force: true })

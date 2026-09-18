@@ -1,10 +1,9 @@
 # Challenger model configuration
 
 The persistent Challenger owns the model selection of its own ordinary session.
-There is no next-child route preference any more: the retired
+There is no "next child" route preference any more: the retired
 `endeavour-builder` settings namespace is removed by the installer (with a
-backup) and the old `--configure-builder` CLI flags no longer influence the
-runtime.
+per-run backup) and the old Builder-route CLI flags are gone.
 
 ## Composer control
 
@@ -18,76 +17,37 @@ to the Endeavour model selector. It mirrors the paired Challenger session's
   follows changes made there;
 - the Endeavour route is never touched and no session is ever recreated.
 
-The control is visible only for a paired Endeavour root, is disabled while a
-plan is active or the turn is running, and hides itself in Standard chats and
-outside the pair. A plan reuses the persistent Challenger with its current
-selection; later plans do the same.
+The control is visible only on the paired Endeavour side of a valid pair, is
+disabled while a plan is active or the turn is running, and hides itself in
+Standard chats, in the Challenger session and outside the pair. The Challenger
+session keeps its own native selector as the single local control.
 
-## Composer control (user setting)
+## Peer presets
 
-The root Endeavour composer carries a `Builder · Inherit` chip. Open it and
-choose `Inherit Planner`, or a provider-grouped model plus its Thinking option
-(the adapter-owned effort list, or `Provider default`). The choice is stored in
-the `endeavour-builder` Host Settings namespace, applies to the **next** Builder
-child only, and never changes a Builder that already exists. The control is
-hidden in Standard chats and in the Builder child itself, and disabled while a
-plan is active or the turn is running.
+Two owned presets are installed and linked:
 
-## Composition base and CLI
+- `endeavour` — planner catalog: `endeavour_plan`, `endeavour_verify`;
+- `challenger` — executor catalog: `challenger_start_task`,
+  `challenger_report`, plus the ordinary coding tools (no delegation and no
+  ordinary messaging tools).
 
-By default the Builder **inherits** the Planner route: the child Agent gets
-the same provider/model as the Endeavour chat, so both roles share one bill.
-`--show-builder` prints exactly that state:
+A plan reuses the persistent Challenger with its current selection; later plans
+on the same pair do the same. Terminal historical plans recorded before the
+peer runtime stay readable as history.
 
-```
-Builder route: inherited (no separate provider/model configured; the Builder uses the Planner route)
-```
+## Retired flags
 
-Cost separation requires choosing a separate route explicitly. Nothing is
-selected automatically and no secrets are stored.
+`--configure-builder`, `--show-builder` and `--reset-builder` were removed.
+The installer rejects them (and any other unknown flag) with a clear message and
+changes nothing. `--tarball`, `--profile`, `--rollback`, `--force`,
+`--uninstall` and `--list-backups` remain.
 
-## Configure
+## Migration
 
-```sh
-node /Users/nikita/Documents/Coding/dsh-endeavour/scripts/install-local.mjs \
-  --configure-builder --provider <provider-id> --model <model-id> \
-  [--reasoning-effort <effort-id>] [--max-tokens <n>]
-```
-
-- `--provider` and `--model` are required and must be non-empty; an empty
-  value aborts the command without changing anything.
-- `--max-tokens` must be a positive integer when present.
-- The command backs up the profile, then updates only the `endeavour` row of
-  `~/.dsh/profiles/desktop/cordis.patch.yml`:
-
-```yaml
-- id: endeavour
-  name: dsh-endeavour
-  config:
-    builderAgentOptions:
-      provider: <provider-id>
-      model: <model-id>
-      reasoningEffort: <effort-id>   # optional
-      maxTokens: <n>                 # optional
-```
-
-The configuration survives re-install and rollback because it lives in the
-profile patch, which the installer backs up and restores.
-
-## Show and reset
-
-```sh
-node /Users/nikita/Documents/Coding/dsh-endeavour/scripts/install-local.mjs --show-builder
-node /Users/nikita/Documents/Coding/dsh-endeavour/scripts/install-local.mjs --reset-builder
-```
-
-`--reset-builder` removes the row's config and returns the Builder to the
-inherited Planner route.
-
-## How it is applied
-
-`builderAgentOptions` is passed to `ctx.subagents.startContinuable` as
-`agentOptions` when the plan creates the single continuable Builder child, with
-the packaged Builder persona (`lib/prompts/builder.md`) as its per-child
-persona. The Planner model is still chosen normally in the Endeavour chat; this
-setting only steers the child.
+On install the installer first scans the real session storage read-only and
+refuses to continue while a NONTERMINAL legacy (`childId`-only) plan exists,
+listing the affected sessions and the remediation (finish it with the previous
+plugin version, or archive/cancel it explicitly). Terminal legacy plans are
+allowed and stay readable. After the scan it removes only the retired
+`endeavour-builder` block from `~/.dsh/settings.yaml`, after backing the file up;
+unrelated settings keys are never touched.

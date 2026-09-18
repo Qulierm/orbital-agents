@@ -59,11 +59,11 @@ interface View {
 function props(options: {
   preset?: string | undefined
   peer?: unknown
-  subagent?: unknown
   selection?: ChallengerSelection
   fail?: boolean
   challengerId?: string | undefined
   noChallenger?: boolean
+  sessionId?: string
 }): { props: Record<string, unknown>; calls: View['calls'] } {
   const calls: View['calls'] = []
   const selection = options.selection ?? { provider: 'p1', model: 'm1', reasoningEffort: 'low' }
@@ -85,8 +85,7 @@ function props(options: {
         if (key === 'endeavourPeer') return 'peer' in options ? options.peer : pair()
         return null
       },
-      useSession: (selector: (state: unknown) => unknown) => selector({ subagent: options.subagent ?? null, running: false }),
-      sessionId: 'session-root',
+      sessionId: options.sessionId ?? 'session-root',
       challengerModel: controller,
       t: undefined,
     } as never,
@@ -123,7 +122,8 @@ describe('visibility', () => {
     // Before the catalog resolves the RAW id is shown; the pretty name arrives
     // with the live catalog (asserted in the read-side test below).
     expect(render({ preset: 'standard' }).container.textContent).toBe('')
-    expect(render({ subagent: { mode: 'continuable' } }).container.textContent).toBe('')
+    // The paired CHALLENGER side is hidden by its peer role alone.
+    expect(render({ peer: pair(), sessionId: pair().challengerSessionId }).container.textContent).toBe('')
     expect(render({ peer: null }).container.textContent).toBe('')
     expect(render({ peer: { ...pair(), challengerSessionId: 'forged' } }).container.textContent).toBe('')
     expect(render({ noChallenger: true }).container.textContent).toBe('')
