@@ -234,16 +234,20 @@ export interface EndeavourTabNavigation {
  */
 export function openEndeavourTab(sessionId: string | undefined, navigation: EndeavourTabNavigation): boolean {
   if (sessionId === undefined) return false
+  // Reset Chat for the CHILD first, then resolve the exact address and read
+  // the PARENT's preset/plan with the parent id (never the child id).
   navigation.resetChat(sessionId)
   if (!navigation.transientActivation) return false
+  const child = addressedContinuableChild(sessionId, navigation.subagent)
+  if (child === undefined) return false
   const target = endeavourTabTarget(
     sessionId,
     navigation.subagent,
-    navigation.readParentPreset(sessionId) ?? 'endeavour',
-    navigation.readParentPlan(sessionId),
+    navigation.readParentPreset(child.parentSessionId) ?? 'endeavour',
+    navigation.readParentPlan(child.parentSessionId),
   )
   if (target === undefined) return false
-  navigation.openParent(target.parentSessionId)
+  navigation.openParent(child.parentSessionId)
   return true
 }
 

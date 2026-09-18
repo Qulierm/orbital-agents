@@ -254,16 +254,20 @@ describe('reciprocal Endeavour tab', () => {
 
   it('resets Chat before opening the parent, and never opens on replay mounts', () => {
     const calls: string[] = []
+    const readerIds: string[] = []
     const nav = {
       resetChat: () => { calls.push('chat') },
       subagent: { address: childAddress },
-      readParentPlan: () => ({ rootSessionId: 'root', childId: 'child' }),
-      readParentPreset: () => 'endeavour',
+      // Regression: the parent readers must receive the PARENT id, never the
+      // child id, or the click silently no-ops in the deployed app.
+      readParentPlan: (id: string) => { readerIds.push(id); return id === 'root' ? { rootSessionId: 'root', childId: 'child' } : undefined },
+      readParentPreset: (id: string) => { readerIds.push(id); return id === 'root' ? 'endeavour' : undefined },
       openParent: (id: string) => { calls.push(`open:${id}`) },
       transientActivation: true,
     }
     expect(openEndeavourTab('child', nav)).toBe(true)
     expect(calls).toEqual(['chat', 'open:root'])
+    expect(readerIds.every((id) => id === 'root')).toBe(true)
     calls.length = 0
     expect(openEndeavourTab('child', { ...nav, transientActivation: false })).toBe(false)
     expect(calls).toEqual(['chat'])
