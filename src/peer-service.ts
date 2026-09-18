@@ -32,6 +32,8 @@ export interface PeerProvisionDeps {
   readonly appendPair: (rootSessionId: string, state: PeerState, kind: PeerEventKind, at: number) => Promise<void>
   /** Clock (injected for tests). */
   readonly now: () => number
+  /** Fail-closed diagnostic sink (started sessions are never rewritten). */
+  readonly diagnose?: (message: string) => void
 }
 
 /** Serialized provisioner: one in-flight ensure per Endeavour session. */
@@ -96,7 +98,15 @@ export class PeerProvisioner {
         await this.deps.appendPair(endeavourSessionId, repaired, 'peer-updated', at)
         return repaired
       }
-      this.assertChallenger(peerMeta)
+      // Composition repair runs BEFORE the challenger assertion: a recomposed
+      // member still has the challenger header and must be healed, not rejected.
+      await this.repairMemberPreset(peerMeta)
+      this.assertChallenger(this.deps.seam.sessionMeta(challengerSessionId) ?? peerMeta)
+      // Composition repair: a blank pair member whose IMMUTABLE header is the
+      // Challenger preset but whose latest selection was recomposed (the blank
+      // Hero preset picker could do this) is put back through the official
+      // agentPresets.select. Started sessions fail closed with a diagnostic and
+      // are NEVER rewritten; arbitrary sessions are never touched.
       // Upgrade repair for pairs created by earlier versions: the ordinary
       // Challenger joins its Endeavour workspace and inherits the Endeavour
       // route ONCE when it has no durable selection of its own. Both steps are
@@ -126,6 +136,28 @@ export class PeerProvisioner {
     await this.deps.appendPair(endeavourSessionId, state, 'peer-created', at)
     await this.repairAttachments(endeavourSessionId, challengerSessionId, meta.cwd)
     return state
+  }
+
+  /**
+   * Put a pair member back to its frozen preset when the immutable header says
+   * `challenger`, the durable pair role is the challenger, the latest SELECTED
+   * preset diverged and no turn ever started. Anything else is left untouched;
+   * a started mismatch only produces a diagnostic.
+   */
+  private async repairMemberPreset(peerMeta: PeerSessionMeta): Promise<void> {
+    const header = peerMeta.headerAgentPreset
+    const selected = peerMeta.selectedAgentPreset
+    if (header !== 'challenger' || selected === undefined || selected === 'challenger') return
+    if (peerMeta.hasTurnStart === true) {
+      this.deps.diagnose?.(`peer preset mismatch on a STARTED session ${peerMeta.id}: header=challenger selected=${selected}; left untouched`)
+      return
+    }
+    try {
+      await this.deps.seam.repairPreset?.(peerMeta.id, 'challenger')
+      this.deps.diagnose?.(`peer preset repaired on ${peerMeta.id}: ${selected} -> challenger`)
+    } catch (error) {
+      this.deps.diagnose?.(`peer preset repair failed on ${peerMeta.id}: ${String(error)}`)
+    }
   }
 
   /**

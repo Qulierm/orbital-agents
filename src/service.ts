@@ -296,6 +296,10 @@ export class EndeavourService extends Service {
         seam,
         readPair: (sessionId) => this.peers.get(sessionId) ?? this.latestDurablePair(sessionId),
         hasCheckpoint: (sessionId) => this.sessionHasPeerCheckpoint(sessionId),
+        diagnose: (message) => {
+          const logger = (this.ctx as unknown as { logger?: { warn?(message: string): void } }).logger
+          logger?.warn?.(`dsh-endeavour: ${message}`)
+        },
         appendPair: async (rootSessionId, state, kind, at) => {
           // The SAME validated checkpoint lands on BOTH ordinary logs; the role
           // of each member is derived from its own session id at read time.

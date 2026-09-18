@@ -16,7 +16,19 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import type { PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
-import type { ModelCatalog, ModelCatalogModel } from '@deepseek-ai/dsh-api-session-controller/types'
+import type { ModelCatalogModel } from '@deepseek-ai/dsh-api-session-controller/types'
+
+/**
+ * Catalog face the control renders from. Structurally identical to the official
+ * ModelDirectory state the native ModelSelect consumes (`groups`), so the
+ * bridge can hand over the directory value without any translation.
+ */
+export interface DirectoryCatalog {
+  readonly groups: readonly {
+    readonly id: string
+    readonly models: readonly ModelCatalogModel[]
+  }[]
+}
 import { validatePeerState, type PeerState } from '../peer.js'
 import { peerView } from '../peer-projection.js'
 import { copyFrom } from './PlanCard.js'
@@ -43,7 +55,7 @@ export interface ChallengerModelController {
   readonly challengerId: () => string | undefined
   readonly readSelection: () => ChallengerSelection | undefined
   readonly subscribeSelection: (listener: () => void) => () => void
-  readonly loadCatalog: () => Promise<ModelCatalog>
+  readonly loadCatalog: () => Promise<unknown>
   /** Official `remote.session.selectModel` for the Challenger session. */
   readonly select: (provider: string, model: string, reasoningEffort: string | undefined) => Promise<void>
 }
@@ -57,7 +69,7 @@ export type ChallengerModelControlProps =
 type CatalogState =
   | { readonly kind: 'idle' }
   | { readonly kind: 'loading' }
-  | { readonly kind: 'ready'; readonly catalog: ModelCatalog }
+  | { readonly kind: 'ready'; readonly catalog: DirectoryCatalog }
   | { readonly kind: 'error'; readonly message: string }
 
 type Pane = 'root' | 'model' | 'effort'
@@ -124,7 +136,7 @@ export function ChallengerModelControl(props: ChallengerModelControlProps): Reac
   const loadCatalog = useCallback((): void => {
     setCatalog({ kind: 'loading' })
     void props.challengerModel.loadCatalog().then(
-      (result) => { setCatalog({ kind: 'ready', catalog: result }) },
+      (result) => { setCatalog({ kind: 'ready', catalog: result as DirectoryCatalog }) },
       (error: unknown) => { setCatalog({ kind: 'error', message: String((error as Error).message ?? error) }) },
     )
   }, [props.challengerModel])
@@ -224,7 +236,7 @@ export function ChallengerModelControl(props: ChallengerModelControlProps): Reac
     if (catalog.kind === 'error') list.push({ id: 'error', kind: 'note', label: copy('builder.error') })
     if (catalogValue !== undefined) {
       for (const group of catalogValue.groups) {
-        list.push({ id: `group:${group.id}`, kind: 'group', label: group.name })
+        list.push({ id: `group:${group.id}`, kind: 'group', label: (group as { readonly name?: string }).name ?? group.id })
         for (const model of group.models) {
           list.push({
             id: `model:${group.id}:${model.id}`,

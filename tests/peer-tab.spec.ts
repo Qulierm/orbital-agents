@@ -9,7 +9,6 @@ import { StrictMode, createElement } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
 import { afterEach, describe, expect, it } from 'vitest'
-import { PeerReturnDock } from '../src/client/PeerReturnDock.js'
 import {
   openPeerTab,
   PeerTabView,
@@ -137,39 +136,6 @@ describe('registration', () => {
     expect((entries[1]?.options.label as () => string)()).toBe('Endeavour')
     expect(entries[0]?.options.order).toBe(20)
     expect(entries[0]?.options.name).toBe('conversation.view')
-  })
-
-  it('renders the blank-peer return button and clicks the exact root', () => {
-    const container = document.createElement('div')
-    document.body.appendChild(container)
-    const root = createRoot(container)
-    let peer: { counterpartId: string } | null = { counterpartId: 'session-root' }
-    const listeners = new Set<() => void>()
-    const opens: string[] = []
-    const props = {
-      t: undefined,
-      useProjection: () => null,
-      openCounterpart: (id: string) => { opens.push(id) },
-      peerReturn: {
-        getSnapshot: () => peer,
-        subscribe: (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener) } },
-      },
-      planSource: { getSnapshot: () => null, subscribe: () => () => undefined },
-    }
-    act(() => { root.render(createElement(PeerReturnDock, props as never)) })
-    roots.push(root)
-    containers.push(container)
-    const button = container.querySelector('button')
-    expect(button?.textContent).toContain('Endeavour')
-    expect(button?.getAttribute('aria-label')).toBe('Open the paired Endeavour session')
-    act(() => { button?.click() })
-    expect(opens).toEqual(['session-root'])
-    // Session switch / HMR: losing the pair removes the affordance immediately.
-    act(() => {
-      peer = null
-      for (const listener of [...listeners]) listener()
-    })
-    expect(container.querySelector('button')).toBeNull()
   })
 
   it('is navigation only and selects exactly once under StrictMode', () => {

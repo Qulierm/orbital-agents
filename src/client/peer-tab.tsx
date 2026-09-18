@@ -57,6 +57,58 @@ export interface PeerTabTargets {
 }
 
 /**
+ * Peer-activity activation targets: when the current session belongs to a valid
+ * durable pair, its plugin-owned activity target must be ACTIVE so the shell
+ * classifies the session as having Conversation content.
+ */
+export interface PeerActivityTargets {
+  readonly currentSession: () => string | undefined
+  readonly subscribeCurrent: (listener: () => void) => () => void
+  readonly peerFace: (sessionId: string, key: string) => PeerProjectionFace | undefined
+  /** Activate the plugin-owned activity target for one session. */
+  readonly activate: (sessionId: string) => void
+}
+
+/**
+ * Activate the peer activity target for the current session while it belongs to
+ * a valid pair (either role), ONCE per session. The target owns a registered
+ * view definition, so activation publishes the conversation snapshot and the
+ * native header/View strip renders even though the session has no turns.
+ * Idempotent across re-mounts, session switches and projection updates; client
+ * view state only (no durable event, no prompt, no model request).
+ */
+export function reconcilePeerActivity(targets: PeerActivityTargets): () => void {
+  let subscribed: string | undefined
+  let disposeFace: (() => void) | undefined
+  let activated: string | undefined
+
+  const refresh = (): void => {
+    const sessionId = targets.currentSession()
+    if (subscribed !== sessionId) {
+      disposeFace?.()
+      disposeFace = undefined
+      subscribed = sessionId
+      if (sessionId !== undefined) {
+        const face = targets.peerFace(sessionId, 'endeavourPeer')
+        if (face !== undefined) disposeFace = face.subscribe(refresh)
+      }
+    }
+    if (sessionId === undefined || sessionId === activated) return
+    const peer = targets.peerFace(sessionId, 'endeavourPeer')?.getSnapshot()
+    if (peerTabTarget(sessionId, peer) === undefined) return
+    activated = sessionId
+    targets.activate(sessionId)
+  }
+
+  const disposeCurrent = targets.subscribeCurrent(refresh)
+  refresh()
+  return () => {
+    disposeCurrent()
+    disposeFace?.()
+  }
+}
+
+/**
  * Keep exactly one peer tab registered while the current session belongs to a
  * valid pair; role changes switch the entry (label and destination) and every
  * other case unregisters it. Idempotent under repeated notifications.

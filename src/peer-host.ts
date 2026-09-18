@@ -24,7 +24,14 @@ export interface PeerSessionMeta {
   readonly cwd?: string
   /** Undefined means created outside the subagent driver. */
   readonly origin?: 'subagent'
+  /** Effective preset (latest selection, else the creation header). */
   readonly agentPreset?: string
+  /** IMMUTABLE creation header preset. */
+  readonly headerAgentPreset?: string
+  /** Latest durable `agent-preset/selected` value, when one exists. */
+  readonly selectedAgentPreset?: string
+  /** True once the session started a turn (its composition is then frozen). */
+  readonly hasTurnStart?: boolean
 }
 
 /** Live-agent delivery face used by the transport. */
@@ -94,6 +101,14 @@ export interface PeerHostSeam {
    * unsupported.
    */
   copyModelSelection?(fromSessionId: string, toSessionId: string): Promise<void>
+  /**
+   * Recompose a pair member back to its frozen preset through the official
+   * `agentPresets.select` (durable selection append + flush). Never prompts and
+   * never starts a request.
+   */
+  repairPreset?(sessionId: string, preset: string): Promise<void>
+  /** The deployment's default route, when the Host exposes it. */
+  defaultSelection?(): PeerModelSelection | undefined
 }
 
 /** Minimal cordis-shaped surface the adapter reads. */
@@ -144,6 +159,15 @@ export interface PeerResolveFailure {
  * extends a base preset therefore appears as its base in the header and as e.g.
  * `endeavour` in the event, so the event wins whenever it exists.
  */
+function hasTurnStart(session: RawSession): boolean {
+  const seq = session.seq
+  if (typeof seq !== 'number' || typeof session.eventAt !== 'function') return false
+  for (let at = seq - 1; at >= 0; at -= 1) {
+    if (session.eventAt(at)?.type === 'turn/start') return true
+  }
+  return false
+}
+
 function selectedPreset(session: RawSession): string | undefined {
   const seq = session.seq
   if (typeof seq !== 'number' || typeof session.eventAt !== 'function') return undefined
@@ -216,12 +240,16 @@ function durableSelection(session: RawSession): PeerModelSelection | undefined {
 function rawMeta(session: RawSession | undefined): PeerSessionMeta | undefined {
   if (session === undefined || session === null) return undefined
   const header = session.header ?? session.meta
-  const agentPreset = selectedPreset(session) ?? header?.agentPreset
+  const selected = selectedPreset(session)
+  const agentPreset = selected ?? header?.agentPreset
   return {
     id: session.id,
     ...(header?.cwd === undefined ? {} : { cwd: header.cwd }),
     ...(header?.origin === undefined ? {} : { origin: header.origin }),
     ...(agentPreset === undefined ? {} : { agentPreset }),
+    ...(header?.agentPreset === undefined ? {} : { headerAgentPreset: header.agentPreset }),
+    ...(selected === undefined ? {} : { selectedAgentPreset: selected }),
+    ...(hasTurnStart(session) ? { hasTurnStart: true } : {}),
   }
 }
 
@@ -301,11 +329,28 @@ export function createCordisPeerSeam(ctx: unknown): PeerHostSeam {
         ...(selection.reasoningEffort === undefined ? {} : { reasoningEffort: selection.reasoningEffort }),
       })
     },
+    defaultSelection: () => {
+      const defaults = get?.('agentDefaultModel') as { currentSelection?(): unknown } | undefined
+      const value = defaults?.currentSelection?.()
+      return projectedSelection(value)
+    },
+    repairPreset: async (sessionId, preset) => {
+      const presets = get?.('agentPresets') as { select?(agent: unknown, preset: string): Promise<unknown> } | undefined
+      if (typeof presets?.select !== 'function') return
+      const resolved = await controller.resolveAgent?.(sessionId) as { readonly agent?: unknown } | undefined
+      const agent = resolved?.agent
+      if (agent === undefined) throw new Error(`cannot repair the preset of ${sessionId}: no live agent`)
+      await presets.select(agent, preset)
+    },
     copyModelSelection: async (fromSessionId, toSessionId) => {
       // NEVER overwrite what the Challenger already chose.
       const target = selectionOf(toSessionId)
       if (target !== undefined) return
-      const source = selectionOf(fromSessionId)
+      // Effective source route: the Endeavour session's own durable selection,
+      // then the deployment default when it never selected anything.
+      const source = selectionOf(fromSessionId) ?? projectedSelection(
+        (get?.('agentDefaultModel') as { currentSelection?(): unknown } | undefined)?.currentSelection?.(),
+      )
       if (source === undefined) return
       await controller.selectModel?.({
         sessionId: toSessionId,

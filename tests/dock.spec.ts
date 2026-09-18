@@ -10,7 +10,6 @@ import { describe, expect, it } from 'vitest'
 import { en, formatEnglish } from '../src/client/locales.js'
 import { cardExecutorId, copyFrom } from '../src/client/PlanCard.js'
 import { PLAN_DOCK_ID, PLAN_DOCK_ORDER, PlanDock, registerPlanDock } from '../src/client/PlanDock.js'
-import { PEER_RETURN_DOCK_ID, PEER_RETURN_DOCK_ORDER, PeerReturnDock, registerPeerReturnDock } from '../src/client/PeerReturnDock.js'
 import { planAction } from '../src/client/plan-action.js'
 import { initialCollapsed, PlanView, shouldAutoCollapse } from '../src/client/PlanView.js'
 import { CLASS, ensurePlanStyles, STYLE_ELEMENT_ID, STYLE_TEXT } from '../src/client/styles.js'
@@ -43,23 +42,6 @@ function renderDock(data: EndeavourCardData | null | undefined, currentSessionId
 }
 
 /** Render the fallback with a fixed pair observable and optional plan source. */
-function renderReturn(options: { peer?: { counterpartId: string } | null; plan?: unknown; opens?: string[]; sessionId?: string }): string {
-  return renderToStaticMarkup(createElement(PeerReturnDock, {
-    useProjection: () => null,
-    t: undefined,
-    openCounterpart: (id: string) => { options.opens?.push(id) },
-    peerReturn: {
-      getSnapshot: () => options.peer ?? null,
-      subscribe: () => () => undefined,
-    },
-    planSource: {
-      getSnapshot: () => options.plan ?? null,
-      subscribe: () => () => undefined,
-    },
-    ...(options.sessionId === undefined ? {} : { currentSessionId: options.sessionId }),
-  } as never))
-}
-
 describe('role-aware plan action', () => {
   const peerCard = { ...planData, challengerSessionId: 'challenger-x', pairId: 'pair-x' } as EndeavourCardData
 
@@ -82,52 +64,6 @@ describe('role-aware plan action', () => {
     const peerHtml = renderDock(peerCard, 'challenger-x')
     expect(peerHtml).toContain('Open Endeavour')
     expect(peerHtml).not.toContain('Open Challenger')
-  })
-})
-
-describe('blank peer return fallback', () => {
-  it('registers on the same dock slot just above the plan dock', () => {
-    const calls: { injected?: string; options?: Record<string, unknown> } = {}
-    registerPeerReturnDock({
-      inject(name, callback) { calls.injected = name; callback() },
-      register(options) { calls.options = options as unknown as Record<string, unknown> },
-    }, () => ({ openCounterpart: () => undefined }))
-    expect(calls.injected).toBe('conversation.input.dock')
-    expect(calls.options?.id).toBe(PEER_RETURN_DOCK_ID)
-    expect(Number(calls.options?.order)).toBe(PEER_RETURN_DOCK_ORDER)
-    expect(PEER_RETURN_DOCK_ORDER).toBeLessThan(PLAN_DOCK_ORDER)
-  })
-
-  it('renders for a blank paired Challenger and opens the exact root', () => {
-    const opens: string[] = []
-    const html = renderReturn({ peer: { counterpartId: 'session-root' }, opens })
-    expect(html).toContain('Endeavour')
-    expect(html).toContain('Open the paired Endeavour session')
-    expect(html).toContain('dsh-endeavour-ghost')
-  })
-
-  it('hides on the root, on Standard sessions and for a canonical peer plan', () => {
-    expect(renderReturn({ peer: null })).toBe('')
-    const peerCard = { ...planData, challengerSessionId: 'challenger-x', pairId: 'pair-x' } as EndeavourCardData
-    expect(renderReturn({ peer: { counterpartId: 'root-session' }, plan: peerCard, sessionId: 'challenger-x' })).toBe('')
-  })
-
-  it('still renders for a historical legacy plan whose action is disabled', () => {
-    // The paired root may carry a childId-only plan: its action is disabled
-    // history, so the peer would otherwise have no way back.
-    const html = renderReturn({ peer: { counterpartId: 'root-session' }, plan: planData, sessionId: 'challenger-x' })
-    expect(html).toContain('Endeavour')
-  })
-
-  it('switches to the shared dock (no duplicate) once a plan arrives', () => {
-    const peerCard = { ...planData, challengerSessionId: 'challenger-x', pairId: 'pair-x' } as EndeavourCardData
-    // No plan: fallback visible, shared dock empty.
-    expect(renderReturn({ peer: { counterpartId: 'session-root' } })).toContain('Endeavour')
-    expect(renderDock(null, 'challenger-x')).toBe('')
-    // Plan arrives: the shared dock's role-aware action is the return path and
-    // the fallback disappears, so exactly one return affordance exists.
-    expect(renderReturn({ peer: { counterpartId: 'root-session' }, plan: peerCard, sessionId: 'challenger-x' })).toBe('')
-    expect(renderDock(peerCard, 'challenger-x')).toContain('Open Endeavour')
   })
 })
 

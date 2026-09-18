@@ -145,24 +145,43 @@ describe('visibility', () => {
 })
 
 describe('peer bridge wiring', () => {
-  it('writes through official remote.session.selectModel for the CHALLENGER session only', async () => {
+  it('bridges the official ModelDirectory for load, read and select on the CHALLENGER session', async () => {
     vi.resetModules()
-    const calls: unknown[] = []
+    const loads: string[] = []
+    const selections: unknown[] = []
     const pairState = pair()
-    const face = (value: unknown) => {
-      const listeners = new Set<() => void>()
-      return { getSnapshot: () => value, subscribe: (l: () => void) => { listeners.add(l); return () => { listeners.delete(l) } } }
-    }
+    const face = (value: unknown) => ({
+      getSnapshot: () => value,
+      subscribe: () => () => undefined,
+    })
     const faces = new Map<string, unknown>([
       ['session-root:endeavourPeer', face(pairState)],
-      [`${pairState.challengerSessionId}:modelSelection`, face({ next: { provider: 'p1', model: 'm1', reasoningEffort: 'low' } })],
     ])
+    // The directory is the SAME official store the native selector renders.
+    let current: unknown = { provider: 'p1', model: 'm1', reasoningEffort: 'low' }
+    const listeners = new Set<() => void>()
+    const directories = new Map<string, unknown>()
+    const directoryFor = (id: string) => {
+      let directory = directories.get(id)
+      if (directory === undefined) {
+        directory = {
+          store: {
+            getSnapshot: () => ({ current }),
+            subscribe: (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener) } },
+          },
+          load: async () => { loads.push(id); return { groups: [{ id: 'p1', models: [{ id: 'm1', name: 'Model 1' }] }] } },
+          select: async (selection: unknown) => { selections.push({ id, selection }) },
+        }
+        directories.set(id, directory)
+      }
+      return directory
+    }
     const registrations: { options: Record<string, unknown>; component: unknown }[] = []
     const fakeClient = {
       effect: () => undefined,
       locale: { register: () => undefined },
-      uiConversation: { events: { register: () => undefined } },
-      remote: { session: { selectModel: async (request: unknown) => { calls.push(request) }, modelCatalog: async () => catalog } },
+      uiConversation: { events: { register: () => undefined }, views: { register: () => undefined } },
+      modelDirectories: { directoryFor },
       sessions: {
         binding: (id: string) => ({ session: { projections: { faceOf: (key: string) => faces.get(`${id}:${key}`) } } }),
       },
@@ -182,14 +201,19 @@ describe('peer bridge wiring', () => {
     const controller = injected.challengerModel
     expect(controller.challengerId()).toBe(pairState.challengerSessionId)
     expect(controller.readSelection()).toEqual({ provider: 'p1', model: 'm1', reasoningEffort: 'low' })
+    const catalog = await controller.loadCatalog()
+    expect(loads).toEqual([pairState.challengerSessionId])
+    expect((catalog as { groups: unknown[] }).groups).toHaveLength(1)
     await controller.select('p1', 'm2', 'high')
     await controller.select('p1', 'm2', undefined)
-    expect(calls).toEqual([
-      { sessionId: pairState.challengerSessionId, provider: 'p1', model: 'm2', reasoningEffort: 'high' },
-      { sessionId: pairState.challengerSessionId, provider: 'p1', model: 'm2' },
+    expect(selections).toEqual([
+      { id: pairState.challengerSessionId, selection: { provider: 'p1', model: 'm2', reasoningEffort: 'high' } },
+      { id: pairState.challengerSessionId, selection: { provider: 'p1', model: 'm2' } },
     ])
-    // The Endeavour session itself is never the target of a selection write.
-    expect(calls.every((call) => (call as { sessionId: string }).sessionId !== 'session-root')).toBe(true)
+    // The Endeavour session itself is never the target of a write, and the
+    // controller identity is stable across injections (HMR/re-render safe).
+    expect(selections.every((call) => (call as { id: string }).id !== 'session-root')).toBe(true)
+    expect(injected.challengerModel).toBe(controller)
   })
 })
 

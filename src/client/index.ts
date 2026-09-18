@@ -8,14 +8,26 @@ import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type {} from '@deepseek-ai/dsh-api-session-controller/client'
 import type {} from '@deepseek-ai/dsh-client-ui-workspace/client'
 import { endeavourPlanDefinition } from './definition.js'
+import { endeavourPeerNodeDefinition, endeavourPeerViewDefinition, PEER_ACTIVITY_TARGET } from './peer-activity.js'
 import { PlanCard, type EndeavourInjected, type PlanCardProps } from './PlanCard.js'
 import { registerPlanDock } from './PlanDock.js'
-import { registerPeerReturnDock } from './PeerReturnDock.js'
 import { EndeavourRoleLabel } from './EndeavourRoleLabel.js'
 import type { ModelCatalog } from '@deepseek-ai/dsh-api-session-controller/types'
 import type { ISessions } from '@deepseek-ai/dsh-api-session-controller/client'
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 import { ChallengerModelControl, type ChallengerModelController, type ChallengerSelection } from './ChallengerModelControl.js'
+
+/** Structural view of the official ModelDirectory the native selector uses. */
+interface DirectoryLike {
+  readonly store?: {
+    getSnapshot?(): {
+      readonly current?: { readonly provider?: unknown; readonly model?: unknown; readonly reasoningEffort?: unknown } | null
+    }
+    subscribe?(listener: () => void): () => void
+  }
+  load?(): Promise<unknown>
+  select?(selection: { provider: string; model: string; reasoningEffort?: string }): Promise<void>
+}
 import { en, NS, type EndeavourKey } from './locales.js'
 import { ensurePlanStyles } from './styles.js'
 import { peerView } from '../peer-projection.js'
@@ -24,6 +36,7 @@ import {
   hasTransientUserActivation,
   openPeerTab,
   peerTabTarget,
+  reconcilePeerActivity,
   reconcilePeerTab,
   registerPeerTabEntry,
   type PeerProjectionFace,
@@ -38,8 +51,22 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
 
 /** Narrow view of the client services this plugin consumes. */
 interface ClientServices {
+  readonly modelDirectories?: {
+    directoryFor?(sessionId: string): {
+      readonly store?: {
+        getSnapshot?(): {
+          readonly current?: { readonly provider?: unknown; readonly model?: unknown; readonly reasoningEffort?: unknown } | null
+        }
+        subscribe?(listener: () => void): () => void
+      }
+      load?(): Promise<unknown>
+      select?(selection: { provider: string; model: string; reasoningEffort?: string }): Promise<void>
+    } | undefined
+  }
   readonly uiConversation: {
     readonly events: { register(definition: unknown): void }
+    /** View-definition registry (peer activity target). */
+    readonly views?: { register(definition: unknown): void }
     /** Per-session binding used to reset the active conversation view. */
     readonly binding?: (sessionId: string) => { readonly activate?: (view: string) => void } | undefined
   }
@@ -67,7 +94,7 @@ interface ClientServices {
 }
 
 /** Required services: conversation nodes, slots, addressed sessions, copy. */
-export const inject = ['uiConversation', 'slots', 'sessions', 'locale', 'uiWorkspace', 'remote', 'remote.session']
+export const inject = ['uiConversation', 'slots', 'sessions', 'locale', 'uiWorkspace', 'modelDirectories', 'remote', 'remote.session']
 
 /**
  * Register the Definition, the transcript card, and the composer dock. Plans
@@ -227,41 +254,77 @@ export function apply(ctx: ClientContext): void {
    * through the official remote.selectModel for the CHALLENGER session; the
    * Endeavour route is never touched and the session is never recreated.
    */
+  /**
+   * Per-session controller over the OFFICIAL ModelDirectory (`modelDirectories`)
+   * the native ModelSelect uses. Loading, current-selection resolution (durable
+   * projection, then Host default) and writing all go through that directory, so
+   * the Challenger control behaves exactly like a native selector on the
+   * Challenger session. Identity is memoized per counterpart id so renders and
+   * HMR never swap the store out from under the component.
+   */
+  const challengerControllers = new Map<string, ChallengerModelController>()
   const challengerModel = (sessionId: string): ChallengerModelController => {
     const challengerId = (): string | undefined => {
       const peer = faceOf(sessionId, 'endeavourPeer')?.getSnapshot() as PeerState | null | undefined
       const view = peerView(peer ?? null, sessionId)
       return view?.role === 'endeavour' ? view.counterpartId : undefined
     }
-    const selectionFace = () => {
+    const directory = (): DirectoryLike | undefined => {
       const id = challengerId()
-      return id === undefined ? undefined : faceOf(id, 'modelSelection')
+      if (id === undefined) return undefined
+      const resolver = client.modelDirectories
+      return resolver?.directoryFor?.(id)
     }
-    return {
+    const readSelection = (): ChallengerSelection | undefined => {
+      const current = directory()?.store?.getSnapshot?.().current
+      if (current === null || current === undefined) return undefined
+      const { provider, model, reasoningEffort } = current
+      if (typeof provider !== 'string' || typeof model !== 'string' || provider === '' || model === '') return undefined
+      return typeof reasoningEffort === 'string' && reasoningEffort !== ''
+        ? { provider, model, reasoningEffort }
+        : { provider, model }
+    }
+    // One stable controller per session: every closure below resolves the
+    // CURRENT directory lazily, so HMR and re-renders keep the same identity
+    // without ever pointing at a stale store.
+    const existing = challengerControllers.get(sessionId)
+    if (existing !== undefined) return existing
+    const controller: ChallengerModelController = {
       challengerId,
-      readSelection: () => {
-        const value = selectionFace()?.getSnapshot() as { current?: ChallengerSelection; next?: ChallengerSelection } | undefined
-        return value?.next ?? value?.current
+      readSelection,
+      subscribeSelection: (listener) => directory()?.store?.subscribe?.(listener) ?? (() => undefined),
+      loadCatalog: async () => {
+        const target = directory()
+        if (target === undefined) throw new Error('the paired Challenger session is unavailable')
+        return target.load?.()
       },
-      subscribeSelection: (listener) => selectionFace()?.subscribe(listener) ?? (() => undefined),
-      loadCatalog,
       select: async (provider, model, reasoningEffort) => {
-        const id = challengerId()
-        if (id === undefined) throw new Error('the paired Challenger session is unavailable')
-        const remote = (client as unknown as { remote?: { session?: { selectModel?: (request: unknown) => Promise<unknown> } } }).remote?.session
-          ?? (client as unknown as { 'remote.session'?: { selectModel?: (request: unknown) => Promise<unknown> } })['remote.session']
-        if (typeof remote?.selectModel !== 'function') throw new Error('model selection is unavailable in this deployment')
-        await remote.selectModel({
-          sessionId: id,
-          provider,
-          model,
-          ...(reasoningEffort === undefined ? {} : { reasoningEffort }),
-        })
+        const target = directory()
+        if (target === undefined) throw new Error('the paired Challenger session is unavailable')
+        await target.select?.({ provider, model, ...(reasoningEffort === undefined ? {} : { reasoningEffort }) })
       },
     }
+    challengerControllers.set(sessionId, controller)
+    return controller
   }
 
   client.uiConversation.events.register(endeavourPlanDefinition)
+  // Peer activity: the durable `endeavour/peer` checkpoint is legitimate
+  // Conversation content, so both halves of a pair leave the blank Hero and
+  // render the native header + View strip without any synthetic turn.
+  client.uiConversation.events.register(endeavourPeerNodeDefinition)
+  client.uiConversation.views?.register(endeavourPeerViewDefinition)
+  client.effect(() => reconcilePeerActivity({
+    currentSession,
+    subscribeCurrent,
+    peerFace: faceOf,
+    activate: (sessionId) => {
+      const binding = client.uiConversation.binding?.(sessionId)
+      // The target OWNS a registered view definition, so activation publishes
+      // the conversation snapshot (unlike an unregistered target).
+      binding?.activate?.(PEER_ACTIVITY_TARGET)
+    },
+  }), 'dsh-endeavour: peer activity')
   client.effect(() => ensurePlanStyles(), 'dsh-endeavour: plan styles')
   client.effect(() => client.locale.register(NS, { zh: en, en }), 'dsh-endeavour: dictionaries')
   client.slots.inject('conversation.chat.node', () => client.slots.register({
@@ -271,7 +334,6 @@ export function apply(ctx: ClientContext): void {
     inject: injected,
   }, PlanCard as unknown as (props: PlanCardProps) => unknown))
   registerPlanDock(client.slots, injected)
-  registerPeerReturnDock(client.slots, injected)
   // The composer toolbar keeps both role groups together on the trailing side:
   // Speed (openai-codex-fast-mode, order 10) and limits (openai-codex-quota,
   // order 20) stay ahead, then the Builder group (1000) and the Endeavour role

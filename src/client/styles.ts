@@ -236,12 +236,11 @@ export const STYLE_TEXT = `
   flex-shrink: 1;
   min-width: 0;
 }
-/* Left-side controls (workspace, access select, plan) keep their own space;
-   only their text may ellipsize, never reorder. */
-[data-composer-card] :has(> [data-slot="conversation.input.left"]) > div {
-  min-width: 0;
-  overflow: hidden;
-}
+/* Left-side controls (workspace, access select, plan) keep their own space and
+   never reorder. NO overflow/clip is applied to the input-left parent: rc.2
+   mounts the native access-mode RiskConfirmation popover inside that subtree, so
+   clipping it silently swallowed the "Enable Full access?" modal. Text-level
+   ellipsis is applied to the control labels themselves instead. */
 /* Speed (order 10) and limits (order 20) are native right-slot entries ahead
    of the two role groups; CSS never reorders them and they keep their size. */
 [data-composer-card] [data-slot="conversation.input.right"] > * { order: 0; }
@@ -252,6 +251,13 @@ export const STYLE_TEXT = `
 }
 /* Tighter gaps only when both role groups are present. */
 [data-composer-card]:has([data-endeavour-role]) :has(> [data-slot="conversation.input.left"]) { gap: 8px; min-width: 0; }
+[data-composer-card] :has(> [data-slot="conversation.input.left"]) [data-slot="conversation.input.left"] > button,
+[data-composer-card] :has(> [data-slot="conversation.input.left"]) [data-slot="conversation.input.left"] > div > button {
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 [data-composer-card]:has([data-endeavour-role]) :has(> [data-slot="conversation.input.right"]) { gap: 8px; min-width: 0; }
 /* Shrink priority 1: effort captions collapse below the normal card width;
    the compact Builder trigger sheds its caption a little earlier so it never
