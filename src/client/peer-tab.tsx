@@ -81,10 +81,19 @@ export function reconcilePeerActivity(targets: PeerActivityTargets): () => void 
   let subscribed: string | undefined
   let disposeFace: (() => void) | undefined
   let activated: string | undefined
+  let retry: ReturnType<typeof setTimeout> | undefined
+  let attempts = 0
+
+  const clearRetry = (): void => {
+    if (retry !== undefined) clearTimeout(retry)
+    retry = undefined
+  }
 
   const refresh = (): void => {
     const sessionId = targets.currentSession()
     if (subscribed !== sessionId) {
+      clearRetry()
+      attempts = 0
       disposeFace?.()
       disposeFace = undefined
       subscribed = sessionId
@@ -95,7 +104,17 @@ export function reconcilePeerActivity(targets: PeerActivityTargets): () => void 
     }
     if (sessionId === undefined || sessionId === activated) return
     const peer = targets.peerFace(sessionId, 'endeavourPeer')?.getSnapshot()
-    if (peerTabTarget(sessionId, peer) === undefined) return
+    if (peerTabTarget(sessionId, peer) === undefined) {
+      // The projection face may bind right after the shell mounts; retry a
+      // bounded number of times instead of waiting for a session switch.
+      if (attempts < 12 && sessionId === targets.currentSession()) {
+        attempts += 1
+        clearRetry()
+        retry = setTimeout(refresh, 250)
+      }
+      return
+    }
+    clearRetry()
     activated = sessionId
     targets.activate(sessionId)
   }
@@ -103,6 +122,7 @@ export function reconcilePeerActivity(targets: PeerActivityTargets): () => void 
   const disposeCurrent = targets.subscribeCurrent(refresh)
   refresh()
   return () => {
+    clearRetry()
     disposeCurrent()
     disposeFace?.()
   }

@@ -88,6 +88,9 @@ export class PeerProvisioner {
             ? (meta.cwd === undefined ? {} : { cwd: meta.cwd })
             : { workspaceId }),
         })
+        // The adopted session is live now: heal its composition BEFORE the
+        // attachments so a recomposed member is restored on every restart.
+        await this.repairMemberPreset(this.deps.seam.sessionMeta(challengerSessionId) ?? { id: challengerSessionId })
         await this.repairAttachments(endeavourSessionId, challengerSessionId, meta.cwd)
         // A challenger that is merely NOT LIVE in this process (cold persisted
         // session) is not a lost pair: the ROOT's durable checkpoint is

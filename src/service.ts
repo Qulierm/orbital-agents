@@ -299,6 +299,9 @@ export class EndeavourService extends Service {
         diagnose: (message) => {
           const logger = (this.ctx as unknown as { logger?: { warn?(message: string): void } }).logger
           logger?.warn?.(`dsh-endeavour: ${message}`)
+          // A repair diagnostic must be visible even when the host logger is
+          // not wired to the console (fail-closed transparency).
+          console.warn(`dsh-endeavour: ${message}`)
         },
         appendPair: async (rootSessionId, state, kind, at) => {
           // The SAME validated checkpoint lands on BOTH ordinary logs; the role

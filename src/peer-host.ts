@@ -336,7 +336,9 @@ export function createCordisPeerSeam(ctx: unknown): PeerHostSeam {
     },
     repairPreset: async (sessionId, preset) => {
       const presets = get?.('agentPresets') as { select?(agent: unknown, preset: string): Promise<unknown> } | undefined
-      if (typeof presets?.select !== 'function') return
+      if (typeof presets?.select !== 'function') {
+        throw new Error('agentPresets.select is unavailable in this deployment')
+      }
       const resolved = await controller.resolveAgent?.(sessionId) as { readonly agent?: unknown } | undefined
       const agent = resolved?.agent
       if (agent === undefined) throw new Error(`cannot repair the preset of ${sessionId}: no live agent`)
