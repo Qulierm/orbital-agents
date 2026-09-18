@@ -191,6 +191,13 @@ export class PeerRegistry {
   }
 }
 
+declare module '@deepseek-ai/dsh-session/types' {
+  interface SessionEventMap {
+    /** One whole-value persistent peer-pair checkpoint. */
+    'endeavour/peer': PeerEventPayload
+  }
+}
+
 /** Random durable id helper for transport receipts (not a session id). */
 export function peerReceiptId(): string {
   return randomUUID()

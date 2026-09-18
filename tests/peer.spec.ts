@@ -6,6 +6,11 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import {
+  latestPeerView,
+  peerView,
+  projectPeerState,
+} from '../src/peer-projection.js'
+import {
   challengerSessionIdFor,
   createPeerState,
   foldPeerEvents,
@@ -66,6 +71,45 @@ describe('pair state', () => {
   it('stays free of subagent vocabulary in the new runtime module', () => {
     const source = readFileSync('src/peer.ts', 'utf8')
     expect(source).not.toMatch(/startContinuable|openSubagent|SubagentAddress|subagents\./)
+  })
+})
+
+describe('peer projection', () => {
+  it('projects both sides of the same validated state and rejects corrupt data', () => {
+    const state = createPeerState({ endeavourSessionId: 'session-root', at: 1 })
+    const rootView = peerView(state, 'session-root')
+    const challengerView = peerView(state, state.challengerSessionId)
+    expect(rootView?.role).toBe('endeavour')
+    expect(challengerView?.role).toBe('challenger')
+    expect(rootView?.counterpartId).toBe(challengerView?.sessionId)
+    expect(challengerView?.counterpartId).toBe(rootView?.sessionId)
+    expect(rootView?.pairId).toBe(challengerView?.pairId)
+    // Missing / unrelated / corrupt states never project.
+    expect(peerView(undefined, 'session-root')).toBeNull()
+    expect(peerView(state, 'session-other')).toBeNull()
+    expect(projectPeerState(undefined)).toBeNull()
+    expect(projectPeerState({ pairId: 'x' })).toBeNull()
+    expect(projectPeerState({ ...state, challengerSessionId: 'session-forged' })).toBeNull()
+    expect(projectPeerState(state)).toEqual(state)
+    const events = [peerEventPayload('peer-created', undefined, state, 1)]
+    expect(latestPeerView(events, 'session-root')?.role).toBe('endeavour')
+    expect(latestPeerView(events, state.challengerSessionId)?.role).toBe('challenger')
+    expect(latestPeerView(events, 'session-other')).toBeNull()
+  })
+})
+
+describe('peer repair marker', () => {
+  it('marks a valid peer row byte-safely and leaves other rows untouched', async () => {
+    const repair = await import('../scripts/repair-session-events.mjs') as unknown as { markLine: (line: string) => string | null }
+    const line = JSON.stringify({ seq: 7, type: 'endeavour/peer', data: { kind: 'peer-created', at: 3, plan: { version: 1, pairId: 'pair-x', endeavourSessionId: 'session-a', challengerSessionId: 'session-b', createdAt: 1, updatedAt: 1, sequence: 1 } } })
+    const marked = repair.markLine(line)
+    expect(marked).not.toBeNull()
+    const parsed = JSON.parse(marked as string) as { seq: number; ignorable?: boolean; data: unknown }
+    expect(parsed.ignorable).toBe(true)
+    expect(parsed.seq).toBe(7)
+    expect(JSON.stringify(parsed.data)).toBe(JSON.stringify((JSON.parse(line) as { data: unknown }).data))
+    expect((marked as string).replace(',"ignorable":true', '')).toBe(line)
+    expect(repair.markLine(JSON.stringify({ seq: 8, type: 'other/event', data: {} }))).toBeNull()
   })
 })
 

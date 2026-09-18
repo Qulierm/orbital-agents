@@ -26,6 +26,8 @@ import { join, relative } from 'node:path'
 
 /** Event type this repair owns. */
 export const EVENT_TYPE = 'endeavour/plan'
+/** Every informational type this repair marks (plan + persistent peer pairs). */
+export const EVENT_TYPES = ['endeavour/plan', 'endeavour/peer']
 /** Exact text inserted after the type field. */
 export const MARKER_TEXT = ',"ignorable":true'
 
@@ -90,7 +92,7 @@ function compressZstd(text) {
 
 /** Insert the marker into one line, or return null when nothing applies. */
 export function markLine(line) {
-  if (!line.includes(`"type":"${EVENT_TYPE}"`)) return null
+  if (!EVENT_TYPES.some((type) => line.includes(`"type":"${type}"`))) return null
   if (line.includes('"ignorable":true')) return null
   let parsed
   try {
@@ -98,8 +100,8 @@ export function markLine(line) {
   } catch {
     return null
   }
-  if (parsed?.type !== EVENT_TYPE) return null
-  const marker = `"type":"${EVENT_TYPE}"`
+  if (!EVENT_TYPES.includes(parsed?.type)) return null
+  const marker = `"type":"${parsed.type}"`
   const at = line.indexOf(marker)
   if (at < 0) return null
   const updated = `${line.slice(0, at + marker.length)}${MARKER_TEXT}${line.slice(at + marker.length)}`
@@ -109,7 +111,7 @@ export function markLine(line) {
   } catch {
     return null
   }
-  if (after?.ignorable !== true || after?.seq !== parsed.seq || after?.type !== EVENT_TYPE) return null
+  if (after?.ignorable !== true || after?.seq !== parsed.seq || !EVENT_TYPES.includes(after?.type)) return null
   if (JSON.stringify(after.data) !== JSON.stringify(parsed.data)) return null
   return updated
 }

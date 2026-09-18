@@ -22,6 +22,13 @@ import {
   type BuilderRouteSettings,
 } from './builder-settings.js'
 import {
+  PEER_EVENT_TYPE,
+  PeerRegistry,
+  foldPeerEvents,
+  type PeerEventPayload,
+  type PeerState,
+} from './peer.js'
+import {
   assertChildRole,
   assertRootRole,
   createPlanState,
@@ -135,6 +142,8 @@ export interface PlanCreation {
  */
 export class EndeavourService extends Service {
   private readonly plans = new Map<string, PlanState>()
+  /** Durable peer pairs indexed from both ordinary sides. */
+  private readonly peers = new PeerRegistry()
   private readonly queues = new Map<string, Promise<unknown>>()
   private readonly serviceConfig: EndeavourConfig
   private builderSettings: () => BuilderRouteSettings
@@ -246,15 +255,46 @@ export class EndeavourService extends Service {
   /** Fold one session's Endeavour events into the durable plan index. */
   adoptSession(session: Session): PlanState | undefined {
     const events: PlanEventPayload[] = []
+    const peerEvents: PeerEventPayload[] = []
     const count = session.seq as unknown as number
     for (let seq = 0; seq < count; seq += 1) {
       const event = session.eventAt(seq as never) as SessionEvent | undefined
-      if (event === undefined || event.type !== ENDEAVOUR_EVENT_TYPE) continue
-      events.push(event.data)
+      if (event === undefined) continue
+      if (event.type === PEER_EVENT_TYPE) peerEvents.push(event.data)
+      else if (event.type === ENDEAVOUR_EVENT_TYPE) events.push(event.data)
+    }
+    // Peer recovery indexes BOTH ordinary sides; a corrupt pair stays unused.
+    const peer = foldPeerEvents(peerEvents)
+    if (peer !== undefined) {
+      try {
+        this.peers.set(peer)
+      } catch {
+        // Invalid durable pair: ignored rather than poisoning recovery.
+      }
     }
     const plan = foldPlanEvents(events)
     if (plan !== undefined) this.plans.set(plan.rootSessionId, plan)
     return plan
+  }
+
+  /** Durable peer pair seen from either ordinary side, if any. */
+  getPeer(sessionId: string): PeerState | undefined {
+    return this.peers.get(sessionId)
+  }
+
+  /** Role of one ordinary session inside its pair, if any. */
+  peerRole(sessionId: string): 'endeavour' | 'challenger' | undefined {
+    return this.peers.roleOf(sessionId)
+  }
+
+  /** The other ordinary member of the pair, if the session is paired. */
+  peerOfSession(sessionId: string): string | undefined {
+    return this.peers.peerOf(sessionId)
+  }
+
+  /** All recovered/indexed pairs (provisioning is not implemented yet). */
+  peerPairs(): readonly PeerState[] {
+    return this.peers.pairs()
   }
 
   /** Append one checkpoint to its owning root session and flush durability. */

@@ -11,16 +11,22 @@ import type { Context } from '@deepseek-ai/cordis'
 import { z as zod, type ZodType } from 'zod'
 // Type-only: resolves the ctx.sessionProjections service declaration.
 import type {} from '@deepseek-ai/dsh-session-projection'
+import { projectPeerState } from './peer-projection.js'
+import type { PeerState } from './peer.js'
 import { projectPlanCard, type EndeavourCardData } from './plan-projection.js'
 
 declare module '@deepseek-ai/dsh-session-projection/types' {
   interface SessionProjectionStateMap {
     /** Latest durable Endeavour plan card, or null before the first plan. */
     endeavourPlan: EndeavourCardData | null
+    /** Latest durable peer pair for this session, or null when unpaired. */
+    endeavourPeer: PeerState | null
   }
   interface SessionProjectionMap {
     /** Latest durable Endeavour plan card, or null before the first plan. */
     endeavourPlan: EndeavourCardData | null
+    /** Latest durable peer pair for this session, or null when unpaired. */
+    endeavourPeer: PeerState | null
   }
 }
 
@@ -62,6 +68,39 @@ const cardSchema: ZodType<EndeavourCardData | null> = zod.union([
   }),
   zod.null(),
 ]) as ZodType<EndeavourCardData | null>
+
+/** Durable peer-pair view: the same validated state for both members. */
+const peerSchema: ZodType<PeerState | null> = zod.union([
+  zod.object({
+    version: zod.literal(1),
+    pairId: zod.string(),
+    endeavourSessionId: zod.string(),
+    challengerSessionId: zod.string(),
+    createdAt: zod.number(),
+    updatedAt: zod.number(),
+    sequence: zod.number(),
+  }),
+  zod.null(),
+]) as ZodType<PeerState | null>
+
+/**
+ * Register the `endeavourPeer` projection on the global plugin's context.
+ * stateVersion 1 carries the whole validated pair checkpoint; each member
+ * derives its own role/counterpart with `peerView`.
+ */
+export function registerEndeavourPeerProjection(ctx: Context): void {
+  ctx.sessionProjections.register<'endeavourPeer', PeerState | null>({
+    key: 'endeavourPeer',
+    stateSchema: peerSchema,
+    init: () => null,
+    apply: (state, event) => {
+      if (event.type === 'endeavour/peer') return projectPeerState(event.data.plan)
+      return state
+    },
+    wire: { viewSchema: peerSchema, view: (state) => state },
+    stateVersion: 1,
+  })
+}
 
 /**
  * Register the `endeavourPlan` projection on the global plugin's context.

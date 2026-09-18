@@ -11,7 +11,7 @@ import { KNOWN_SESSION_EVENT_TYPES } from '@deepseek-ai/dsh-session'
 // Type-only: resolves the ctx.settings service declaration.
 import type {} from '@deepseek-ai/dsh-settings'
 import { EndeavourService, type EndeavourConfig } from './service.js'
-import { registerEndeavourProjection } from './projection-host.js'
+import { registerEndeavourPeerProjection, registerEndeavourProjection } from './projection-host.js'
 import {
   BUILDER_SETTINGS_NAMESPACE,
   BUILDER_SETTINGS_SCHEMA,
@@ -39,8 +39,13 @@ export type Config = EndeavourConfig
  * installer's session repair, and this admission is deliberately kept for the
  * whole process lifetime — never removed at runtime.
  */
-export function admitEndeavourEvents(known: ReadonlySet<string> = KNOWN_SESSION_EVENT_TYPES): void {
-  (known as Set<string>).add('endeavour/plan')
+export function admitEndeavourEvents(
+  known: ReadonlySet<string> = KNOWN_SESSION_EVENT_TYPES,
+): void {
+  // Structural cast: the admission set is the runtime Set behind the readonly view.
+  const admit = known as unknown as { add(value: string): unknown }
+  admit.add('endeavour/plan')
+  admit.add('endeavour/peer')
 }
 
 export function apply(ctx: Context, config: EndeavourConfig = {}): void {
@@ -62,4 +67,5 @@ export function apply(ctx: Context, config: EndeavourConfig = {}): void {
     )
   })
   registerEndeavourProjection(ctx)
+  registerEndeavourPeerProjection(ctx)
 }
