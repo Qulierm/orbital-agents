@@ -19,9 +19,11 @@ import { BUILDER_SETTINGS_NAMESPACE, type BuilderRouteSettings } from '../builde
 import { en, NS, type EndeavourKey } from './locales.js'
 import { ensurePlanStyles } from './styles.js'
 import {
+  hasTransientUserActivation,
   openBuilderTab,
   reconcileBuilderTab,
   registerBuilderTabEntry,
+  type BuilderTabOpenView,
   type ProjectionFace,
 } from './builder-tab.js'
 
@@ -125,12 +127,18 @@ export function apply(ctx: ClientContext): void {
    * Chat), then the SAME addressed bridge the dock's Open Builder uses. No
    * spawn, no settings write, no model call.
    */
-  const selectBuilderTab = (sessionId: string): boolean => openBuilderTab(sessionId, {
-    activateChat: (id) => {
+  /**
+   * The official selector the native tab strip uses (`selectView`): it
+   * activates the target AND persists the per-session view preference. The
+   * view receives it as the `openView` prop, so this is the same path a tab
+   * click takes — no private store poke.
+   */
+  const selectBuilderTab = (sessionId: string, openView?: BuilderTabOpenView): boolean => openBuilderTab(sessionId, {
+    resetChat: () => {
       try {
-        client.uiConversation.binding?.(id)?.activate?.('chat')
+        openView?.('chat', '')
       } catch {
-        // The view store is already unavailable; a missing reset must not throw.
+        // A missing selector must never break the navigation attempt.
       }
     },
     readPlan: (id) => faceOf(id, 'endeavourPlan')?.getSnapshot(),
@@ -139,6 +147,7 @@ export function apply(ctx: ClientContext): void {
       childSessionId: target.childSessionId as SessionId,
       mode: 'continuable',
     }),
+    transientActivation: hasTransientUserActivation(),
   })
 
   /** Settings bridge for the Builder route control. */

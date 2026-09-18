@@ -140,26 +140,40 @@ describe('reconcileBuilderTab', () => {
 })
 
 describe('openBuilderTab', () => {
-  it('resets Chat before opening the exact child exactly once', () => {
+  it('resets Chat before opening the exact child exactly once on a real click', () => {
     const calls: string[] = []
     const opened: unknown[] = []
     const result = openBuilderTab('root', {
-      activateChat: (sessionId) => { calls.push(`chat:${sessionId}`) },
+      resetChat: (sessionId) => { calls.push(`chat:${sessionId}`) },
       readPlan: () => { calls.push('plan'); return { rootSessionId: 'root', childId: 'child' } },
       open: (address) => { calls.push('open'); opened.push(address) },
+      transientActivation: true,
     })
     expect(result).toBe(true)
     expect(calls).toEqual(['chat:root', 'plan', 'open'])
     expect(opened).toEqual([{ parentSessionId: 'root', childSessionId: 'child' }])
   })
 
+  it('resets Chat but never auto-opens on a replay/restore mount', () => {
+    const calls: string[] = []
+    const result = openBuilderTab('root', {
+      resetChat: () => { calls.push('chat') },
+      readPlan: () => { calls.push('plan'); return { rootSessionId: 'root', childId: 'child' } },
+      open: () => { calls.push('open') },
+      transientActivation: false,
+    })
+    expect(result).toBe(false)
+    expect(calls).toEqual(['chat'])
+  })
+
   it('resets Chat and fails safely when the child vanished or the projection is corrupt', () => {
     for (const plan of [undefined, null, { rootSessionId: 'root' }, { rootSessionId: 'other', childId: 'child' }, { rootSessionId: 'root', childId: '' }]) {
       const calls: string[] = []
       const result = openBuilderTab('root', {
-        activateChat: () => { calls.push('chat') },
+        resetChat: () => { calls.push('chat') },
         readPlan: () => plan,
         open: () => { calls.push('open') },
+        transientActivation: true,
       })
       expect(result).toBe(false)
       expect(calls).toEqual(['chat'])
@@ -169,9 +183,10 @@ describe('openBuilderTab', () => {
   it('does nothing without a session', () => {
     const calls: string[] = []
     expect(openBuilderTab(undefined, {
-      activateChat: () => { calls.push('chat') },
+      resetChat: () => { calls.push('chat') },
       readPlan: () => ({ rootSessionId: 'root', childId: 'child' }),
       open: () => { calls.push('open') },
+      transientActivation: true,
     })).toBe(false)
     expect(calls).toEqual([])
   })
@@ -188,7 +203,11 @@ describe('registerBuilderTabEntry', () => {
         return () => { unregistered += 1 }
       },
     }
-    const dispose = registerBuilderTabEntry(slots, (sessionId) => sessionId === 'root')
+    const dispose = registerBuilderTabEntry(slots, (sessionId, openView) => {
+      if (sessionId !== 'root') return false
+      openView?.('chat', '')
+      return true
+    })
     expect(entries).toHaveLength(1)
     const options = entries[0]?.options ?? {}
     expect(options.name).toBe('conversation.view')
@@ -196,9 +215,11 @@ describe('registerBuilderTabEntry', () => {
     expect(options.order).toBe(20)
     expect(options.locale).toBe('endeavour')
     expect((options.label as () => string)()).toBe('Builder')
-    const bridge = (options.inject as (sessionId: string) => { builderTab: { select: () => boolean } })('root')
-    expect(bridge.builderTab.select()).toBe(true)
-    const other = (options.inject as (sessionId: string) => { builderTab: { select: () => boolean } })('standard')
+    const selectors: string[] = []
+    const bridge = (options.inject as (sessionId: string) => { builderTab: { select: (openView?: (view: string, focus: string) => void) => boolean } })('root')
+    expect(bridge.builderTab.select((view) => { selectors.push(view) })).toBe(true)
+    expect(selectors).toEqual(['chat'])
+    const other = (options.inject as (sessionId: string) => { builderTab: { select: (openView?: (view: string, focus: string) => void) => boolean } })('standard')
     expect(other.builderTab.select()).toBe(false)
     expect(entries[0]?.component).toBe(BuilderTabView)
     dispose()

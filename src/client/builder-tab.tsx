@@ -103,27 +103,43 @@ export function reconcileBuilderTab(faces: BuilderTabFaces): () => void {
 
 /** Navigation dependencies of the explicit tab selection. */
 export interface BuilderTabNavigation {
-  /** Reset the root's active view to Chat (must run before opening). */
-  readonly activateChat: (sessionId: string) => void
+  /** Reset the root's active view to Chat through the official selector. */
+  readonly resetChat: (sessionId: string) => void
   /** The plan projection snapshot for that session. */
   readonly readPlan: (sessionId: string) => unknown
   /** Open the addressed child through the shared Open Builder bridge. */
   readonly open: (address: BuilderTabTarget) => void
+  /**
+   * Whether the browser reports transient user activation (a real click).
+   * Mounts caused by replay/restore/HMR are NOT user activations, so they only
+   * reset Chat and never auto-open the child.
+   */
+  readonly transientActivation: boolean
 }
 
 /**
  * Explicit tab selection: restore Chat FIRST so a return to the root never
- * auto-navigates, then open the existing child exactly once. A missing or
- * corrupt projection only restores Chat and reports `false`; there is no
- * guessed fallback navigation of our own.
+ * auto-navigates, then open the existing child exactly once — only for a real
+ * user activation. A missing/corrupt projection or a replay mount resets Chat
+ * and reports `false`; there is no guessed fallback navigation of our own.
  */
 export function openBuilderTab(sessionId: string | undefined, navigation: BuilderTabNavigation): boolean {
   if (sessionId === undefined) return false
-  navigation.activateChat(sessionId)
+  navigation.resetChat(sessionId)
+  if (!navigation.transientActivation) return false
   const target = builderTabTarget(sessionId, 'endeavour', navigation.readPlan(sessionId))
   if (target === undefined) return false
   navigation.open(target)
   return true
+}
+
+/** The view's official selector: selects a view and persists the preference. */
+export type BuilderTabOpenView = (view: string, focus: string) => void
+
+/** Transient user activation check (absent in test/SSR environments). */
+export function hasTransientUserActivation(): boolean {
+  const activation = (globalThis as { navigator?: { userActivation?: { isActive?: boolean } } }).navigator?.userActivation
+  return activation?.isActive === true
 }
 
 /** Minimal slot registry surface used for registration. */
@@ -144,21 +160,24 @@ export interface BuilderTabEntryOptions {
 
 /** Bridge handed to the mounted view. */
 export interface BuilderTabBridge {
-  readonly select: () => boolean
+  readonly select: (openView?: BuilderTabOpenView) => boolean
 }
 
 /**
  * Register the view entry once. `openBuilderTab` runs only when the host mounts
  * the view for an explicit activation; the entry itself never navigates.
  */
-export function registerBuilderTabEntry(slots: BuilderTabSlots, selectFor: (sessionId: string) => boolean): () => void {
+export function registerBuilderTabEntry(
+  slots: BuilderTabSlots,
+  selectFor: (sessionId: string, openView?: BuilderTabOpenView) => boolean,
+): () => void {
   return slots.register({
     name: 'conversation.view',
     id: 'endeavour-builder',
     order: 20,
     locale: 'endeavour',
     label: () => en['view.builder'],
-    inject: (sessionId: string) => ({ builderTab: { select: () => selectFor(sessionId) } }),
+    inject: (sessionId: string) => ({ builderTab: { select: (openView?: BuilderTabOpenView) => selectFor(sessionId, openView) } }),
   }, BuilderTabView)
 }
 
@@ -176,10 +195,11 @@ export type BuilderTabViewProps =
  */
 export function BuilderTabView(props: BuilderTabViewProps): React.ReactElement | null {
   const ran = useRef(false)
+  const openView = (props as { readonly openView?: BuilderTabOpenView }).openView
   useLayoutEffect(() => {
     if (ran.current) return
     ran.current = true
-    props.builderTab?.select()
+    props.builderTab?.select(openView)
   }, [])
   return null
 }
