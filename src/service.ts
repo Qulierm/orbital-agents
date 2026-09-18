@@ -299,9 +299,16 @@ export class EndeavourService extends Service {
         appendPair: async (rootSessionId, state, kind, at) => {
           // The SAME validated checkpoint lands on BOTH ordinary logs; the role
           // of each member is derived from its own session id at read time.
+          // Each side is appended AT MOST ONCE per (pairId, sequence): a
+          // re-mount/repair race can never duplicate a checkpoint, and a side
+          // that already carries it is never rewritten.
           const payload = peerEventPayload(kind, undefined, state, at)
-          await this.appendEvent(rootSessionId, PEER_EVENT_TYPE, payload)
-          await this.appendEvent(state.challengerSessionId, PEER_EVENT_TYPE, payload)
+          if (!this.sessionHasPeerCheckpoint(rootSessionId, state)) {
+            await this.appendEvent(rootSessionId, PEER_EVENT_TYPE, payload)
+          }
+          if (!this.sessionHasPeerCheckpoint(state.challengerSessionId, state)) {
+            await this.appendEvent(state.challengerSessionId, PEER_EVENT_TYPE, payload)
+          }
           this.peers.set(state)
         },
         now: () => Date.now(),
@@ -314,16 +321,23 @@ export class EndeavourService extends Service {
     return this.provisioner
   }
 
-  /** True when THAT session log carries a validated peer checkpoint. */
-  private sessionHasPeerCheckpoint(sessionId: string): boolean {
+  /**
+   * True when THAT session log carries a peer checkpoint. With `state` given it
+   * is true only for the SAME pair and sequence, so an append is skipped when
+   * the checkpoint is already durably present.
+   */
+  private sessionHasPeerCheckpoint(sessionId: string, state?: PeerState): boolean {
     const session = this.sessionHost()?.get(sessionId)
     if (session === undefined) return false
     const count = session.seq as unknown as number
     for (let seq = 0; seq < count; seq += 1) {
       const event = session.eventAt(seq as never) as SessionEvent | undefined
       if (event === undefined || event.type !== PEER_EVENT_TYPE) continue
-      const state = projectPeerState((event.data as PeerEventPayload | undefined)?.plan)
-      if (state !== null && peerRoleOf(state, sessionId) !== undefined) return true
+      const checkpoint = projectPeerState((event.data as PeerEventPayload | undefined)?.plan)
+      if (checkpoint === null || peerRoleOf(checkpoint, sessionId) === undefined) continue
+      if (state === undefined) return true
+      // Same pair AND same sequence: this exact checkpoint is already durable.
+      if (checkpoint.pairId === state.pairId && checkpoint.sequence === state.sequence) return true
     }
     return false
   }

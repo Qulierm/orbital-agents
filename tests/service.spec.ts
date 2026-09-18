@@ -158,6 +158,22 @@ describe('peer plan creation', () => {
     await expect(h.service.createPlan(rootAgent() as never, planInput())).rejects.toBeInstanceOf(EndeavourError)
   })
 
+  it('skips an append when the exact checkpoint is already durable on that log', () => {
+    const h = harness()
+    const internal = h.service as unknown as {
+      sessionHasPeerCheckpoint(sessionId: string, state?: PeerState): boolean
+    }
+    // Present: the log carries this pair at this sequence.
+    expect(internal.sessionHasPeerCheckpoint('session-root')).toBe(true)
+    expect(internal.sessionHasPeerCheckpoint('session-root', h.pair)).toBe(true)
+    // Absent for a NEWER sequence (a real repair must still be written)...
+    expect(internal.sessionHasPeerCheckpoint('session-root', { ...h.pair, sequence: h.pair.sequence + 1 })).toBe(false)
+    // ...and for a session outside the pair.
+    expect(internal.sessionHasPeerCheckpoint('session-unknown')).toBe(false)
+    // One checkpoint per log: a re-mount can never append a duplicate.
+    expect(h.root.events.filter((event) => event.type === 'endeavour/peer')).toHaveLength(1)
+  })
+
   it('reuses the same Challenger for the next plan after a terminal one', async () => {
     const h = harness()
     await h.service.createPlan(rootAgent() as never, planInput())
