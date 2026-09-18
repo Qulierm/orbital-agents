@@ -25,6 +25,7 @@ const { EndeavourService } = await import('../src/service.js')
 const { challengerSessionIdFor, peerEventPayload, peerPairIdFor } = await import('../src/peer.js')
 const { PeerDeliveryLedger, PeerDeliveryQueue } = await import('../src/peer-transport.js')
 const { PeerProvisioner } = await import('../src/peer-service.js')
+const { createCordisPeerSeam } = await import('../src/peer-host.js')
 
 interface FakeSession {
   id: string
@@ -133,6 +134,42 @@ function lifecycleHarness(initial: FakeSession[]) {
 async function settle(): Promise<void> {
   for (let i = 0; i < 6; i += 1) await Promise.resolve()
 }
+
+describe('session metadata resolution', () => {
+  /** Real sessions record the CREATION preset in the header and the SELECTED
+   *  preset as an `agent-preset/selected` event; the event must win. */
+  function seamMeta(events: { type: string; data: unknown }[], headerPreset?: string) {
+    const session = {
+      id: 'session-x',
+      header: { cwd: '/proj', ...(headerPreset === undefined ? {} : { agentPreset: headerPreset }) },
+      seq: events.length,
+      eventAt: (at: number) => events[at],
+    }
+    const ctx = {
+      get: (name: string) => {
+        if (name === 'sessions') return { get: (id: string) => (id === 'session-x' ? session : undefined), list: () => [session] }
+        if (name === 'sessionController') return { create: async () => ({}), resolveAgent: async () => ({}) }
+        return undefined
+      },
+    }
+    return createCordisPeerSeam(ctx).sessionMeta('session-x')
+  }
+
+  it('prefers the selected preset event over the creation header', () => {
+    expect(seamMeta([{ type: 'agent-preset/selected', data: { agentPreset: 'endeavour' } }], 'standard')?.agentPreset).toBe('endeavour')
+  })
+
+  it('uses the LAST selection, so switching away from Endeavour is respected', () => {
+    expect(seamMeta([
+      { type: 'agent-preset/selected', data: { agentPreset: 'endeavour' } },
+      { type: 'agent-preset/selected', data: { agentPreset: 'standard' } },
+    ], 'standard')?.agentPreset).toBe('standard')
+  })
+
+  it('falls back to the header when no selection event exists', () => {
+    expect(seamMeta([], 'endeavour')?.agentPreset).toBe('endeavour')
+  })
+})
 
 describe('peer session lifecycle', () => {
   it('creates exactly one peer when an Endeavour session is announced, without a plan, prompt or model call', async () => {

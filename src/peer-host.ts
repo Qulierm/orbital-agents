@@ -75,6 +75,9 @@ interface RawSession {
   readonly id: string
   readonly header?: { readonly cwd?: string; readonly origin?: 'subagent'; readonly agentPreset?: string }
   readonly meta?: { readonly cwd?: string; readonly origin?: 'subagent'; readonly agentPreset?: string }
+  /** Live event log access, when the store exposes it. */
+  readonly seq?: number
+  eventAt?(at: number): { readonly type?: string; readonly data?: unknown } | undefined
 }
 
 interface RawSessionsService {
@@ -100,14 +103,35 @@ export interface PeerResolveFailure {
   readonly reason: string
 }
 
+/**
+ * The session header records the preset a session was CREATED with, but the
+ * USER-selected preset is recorded as an `agent-preset/selected` event (the
+ * same source the official `agentPreset` projection folds). A user preset that
+ * extends a base preset therefore appears as its base in the header and as e.g.
+ * `endeavour` in the event, so the event wins whenever it exists.
+ */
+function selectedPreset(session: RawSession): string | undefined {
+  const seq = session.seq
+  if (typeof seq !== 'number' || typeof session.eventAt !== 'function') return undefined
+  for (let at = seq - 1; at >= 0; at -= 1) {
+    const event = session.eventAt(at)
+    if (event === undefined) continue
+    if (event.type !== 'agent-preset/selected') continue
+    const value = (event.data as { readonly agentPreset?: unknown } | undefined)?.agentPreset
+    return typeof value === 'string' && value !== '' ? value : undefined
+  }
+  return undefined
+}
+
 function rawMeta(session: RawSession | undefined): PeerSessionMeta | undefined {
   if (session === undefined || session === null) return undefined
   const header = session.header ?? session.meta
+  const agentPreset = selectedPreset(session) ?? header?.agentPreset
   return {
     id: session.id,
     ...(header?.cwd === undefined ? {} : { cwd: header.cwd }),
     ...(header?.origin === undefined ? {} : { origin: header.origin }),
-    ...(header?.agentPreset === undefined ? {} : { agentPreset: header.agentPreset }),
+    ...(agentPreset === undefined ? {} : { agentPreset }),
   }
 }
 
