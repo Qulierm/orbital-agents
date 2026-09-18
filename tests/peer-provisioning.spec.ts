@@ -136,6 +136,24 @@ describe('provisioning', () => {
     expect(repaired.sequence).toBe(2)
   })
 
+  it('writes exactly one initial checkpoint when concurrent mounts adopt the same session', async () => {
+    // The live race: several plugin mounts observe the same newly eligible
+    // Endeavour session at once. Only the creating instance may write the
+    // initial checkpoint; adopters must never grow the log.
+    const { seam } = fakeSeam([{ id: 'session-race', agentPreset: 'endeavour' }])
+    const state = newState()
+    const first = provisioner(seam, state)
+    const second = provisioner(seam, state)
+    const [a, b] = await Promise.all([first.ensure('session-race'), second.ensure('session-race')])
+    await new Promise((resolve) => setTimeout(resolve, 250))
+    expect(a.challengerSessionId).toBe(b.challengerSessionId)
+    // Exactly ONE initial (sequence 1) checkpoint per log: a later one-sided
+    // repair may legitimately add a sequence-2 update, never a duplicate create.
+    const initial = (id: string) => (state.logs.get(id) ?? []).filter((entry) => entry.sequence === 1).length
+    expect(initial('session-race')).toBe(1)
+    expect(initial(a.challengerSessionId)).toBe(1)
+  })
+
   it('writes the identical reciprocal checkpoint to both ordinary logs and repairs one-sided crashes', async () => {
     const { seam } = fakeSeam([{ id: 'session-a', agentPreset: 'endeavour' }])
     const state = newState()
@@ -160,12 +178,15 @@ describe('provisioning', () => {
     expect(state.logs.get('session-a')).toHaveLength(1)
 
     // Session created with no events on either side (pair registry empty).
+    // The initial checkpoint is creator-only, so an ADOPTED orphan is healed by
+    // a short deferred re-check that lets a concurrent creator win first.
     const orphan = fakeSeam([
       { id: 'session-b', agentPreset: 'endeavour' },
       { id: challengerSessionIdFor('session-b'), agentPreset: 'challenger' },
     ])
     const orphanState = newState()
     const orphanPair = await provisioner(orphan.seam, orphanState).ensure('session-b')
+    await new Promise((resolve) => setTimeout(resolve, 250))
     expect(orphanState.logs.get('session-b')).toHaveLength(1)
     expect(orphanState.logs.get(orphanPair.challengerSessionId)).toHaveLength(1)
     // An existing challenger session is ADOPTED, never recreated.

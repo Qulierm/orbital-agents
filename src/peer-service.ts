@@ -128,7 +128,7 @@ export class PeerProvisioner {
     if (peerMeta !== undefined) this.assertChallenger(peerMeta)
     // Official create/adopt: the controller owns composition and conflict
     // semantics, so an existing challenger is adopted rather than recreated.
-    await this.deps.seam.createOrdinarySession({
+    const created = await this.deps.seam.createOrdinarySession({
       id: challengerSessionId,
       agentPreset: 'challenger',
       ...(workspaceId === undefined
@@ -136,7 +136,20 @@ export class PeerProvisioner {
         : { workspaceId }),
     })
     const state = createPeerState({ endeavourSessionId, at })
-    await this.deps.appendPair(endeavourSessionId, state, 'peer-created', at)
+    // Creator-only initial checkpoint: concurrent mounts can all adopt the same
+    // deterministic session, and each of them writing `peer-created` would grow
+    // the log (observed live: 16 identical checkpoints in one launch). The
+    // instance that actually CREATED the session writes it; an adopter re-checks
+    // shortly after and only writes when the creator's checkpoint never landed.
+    if (created.adopted !== true || this.deps.hasCheckpoint(endeavourSessionId)) {
+      await this.deps.appendPair(endeavourSessionId, state, 'peer-created', at)
+    } else {
+      const timer = setTimeout(() => {
+        if (this.deps.hasCheckpoint(endeavourSessionId)) return
+        void this.deps.appendPair(endeavourSessionId, state, 'peer-created', this.deps.now()).catch(() => undefined)
+      }, 150)
+      if (typeof (timer as { unref?: () => void }).unref === 'function') (timer as { unref(): void }).unref()
+    }
     await this.repairAttachments(endeavourSessionId, challengerSessionId, meta.cwd)
     return state
   }
