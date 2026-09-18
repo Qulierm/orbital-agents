@@ -269,10 +269,13 @@ export function createCordisPeerSeam(ctx: unknown): PeerHostSeam {
       // never a prompt and never a model request. An existing id is adopted.
       // A known workspace is passed so the controller performs the official
       // attach itself (the same path the UI uses).
+      // The controller accepts a workspaceId OR a cwd, never both: a workspace
+      // implies its canonical path, so the id wins when known.
       const value = await controller.create?.({
         sessionId: input.id,
-        ...(input.cwd === undefined ? {} : { cwd: input.cwd }),
-        ...(input.workspaceId === undefined ? {} : { workspaceId: input.workspaceId }),
+        ...(input.workspaceId === undefined
+          ? (input.cwd === undefined ? {} : { cwd: input.cwd })
+          : { workspaceId: input.workspaceId }),
         agentPreset: input.agentPreset,
       })
       const sessionId = value?.sessionId ?? input.id
@@ -300,7 +303,8 @@ export function createCordisPeerSeam(ctx: unknown): PeerHostSeam {
     },
     copyModelSelection: async (fromSessionId, toSessionId) => {
       // NEVER overwrite what the Challenger already chose.
-      if (selectionOf(toSessionId) !== undefined) return
+      const target = selectionOf(toSessionId)
+      if (target !== undefined) return
       const source = selectionOf(fromSessionId)
       if (source === undefined) return
       await controller.selectModel?.({

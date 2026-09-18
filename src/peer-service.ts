@@ -82,8 +82,9 @@ export class PeerProvisioner {
         await this.deps.seam.createOrdinarySession({
           id: challengerSessionId,
           agentPreset: 'challenger',
-          ...(meta.cwd === undefined ? {} : { cwd: meta.cwd }),
-          ...(workspaceId === undefined ? {} : { workspaceId }),
+          ...(workspaceId === undefined
+            ? (meta.cwd === undefined ? {} : { cwd: meta.cwd })
+            : { workspaceId }),
         })
         await this.repairAttachments(endeavourSessionId, challengerSessionId, meta.cwd)
         const repaired: PeerState = { ...existing, updatedAt: at, sequence: existing.sequence + 1 }
@@ -112,8 +113,9 @@ export class PeerProvisioner {
     await this.deps.seam.createOrdinarySession({
       id: challengerSessionId,
       agentPreset: 'challenger',
-      ...(meta.cwd === undefined ? {} : { cwd: meta.cwd }),
-      ...(workspaceId === undefined ? {} : { workspaceId }),
+      ...(workspaceId === undefined
+        ? (meta.cwd === undefined ? {} : { cwd: meta.cwd })
+        : { workspaceId }),
     })
     const state = createPeerState({ endeavourSessionId, at })
     await this.deps.appendPair(endeavourSessionId, state, 'peer-created', at)

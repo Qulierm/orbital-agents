@@ -23,6 +23,7 @@ import {
   hasTransientUserActivation,
   openPeerTab,
   peerTabTarget,
+  reconcilePeerActivation,
   reconcilePeerTab,
   registerPeerTabEntry,
   type PeerProjectionFace,
@@ -40,7 +41,12 @@ interface ClientServices {
   readonly uiConversation: {
     readonly events: { register(definition: unknown): void }
     /** Per-session binding used to reset the active conversation view. */
-    readonly binding?: (sessionId: string) => { readonly activate?: (view: string) => void } | undefined
+    readonly binding?: (sessionId: string) => {
+      readonly activate?: (view: string) => void
+      readonly snapshot?: { readonly getSnapshot?: () => unknown }
+      /** Existing publication nudge (client view state only). */
+      readonly rebuild?: () => void
+    } | undefined
   }
   readonly slots: {
     inject(name: string, callback: () => void): void
@@ -275,13 +281,39 @@ export function apply(ctx: ClientContext): void {
         role,
         selectPeerTab,
       ),
-      // Official, event-free activation: the blank Challenger session shows its
-      // native header and View ring (Chat/Trajectory/Endeavour) instead of the
-      // empty hero, so the reciprocal tab is reachable immediately.
-      activateConversation: (sessionId) => {
-        const binding = client.uiConversation.binding?.(sessionId)
-        binding?.activate?.('chat')
-      },
     }), 'dsh-endeavour: peer navigation tab')
   })
+  // Blank-peer chrome, wired at APPLY scope (no slot dependency): the blank
+  // Challenger session mounts no View ring, so the activation must not wait for
+  // a chat view. Activating its Chat target through the official uiConversation
+  // binding makes conversationPhase active, so the native header and the
+  // Chat/Trajectory/Endeavour ring render and the reciprocal tab is reachable
+  // immediately. Client view state only: no durable event, no prompt, no model
+  // request, and it is idempotent across re-mounts and session switches.
+  client.effect(() => reconcilePeerActivation({
+    currentSession,
+    subscribeCurrent,
+    peerFace: faceOf,
+    activateConversation: (sessionId) => {
+      const binding = client.uiConversation.binding?.(sessionId)
+      if (binding === undefined) return
+      binding.activate?.('chat')
+      // The app publishes a conversation snapshot only when its assembly is
+      // dirty, and a BLANK session has no pending events: the activation is
+      // recorded in the monotonic active set but stays invisible until the next
+      // publication. Nudge the SAME binding to republish (client view state
+      // only — no durable event, no prompt, no model request) so the native
+      // header and the View ring render for a peer with no turns.
+      const snapshot = (binding as { readonly snapshot?: { getSnapshot?: () => unknown } }).snapshot?.getSnapshot?.() as
+        | { readonly activeTargets?: { readonly size?: number } | readonly unknown[] }
+        | undefined
+      const active = snapshot?.activeTargets
+      const size = active === undefined
+        ? 0
+        : Array.isArray(active)
+          ? active.length
+          : ((active as { readonly size?: number }).size ?? 0)
+      if (size === 0) (binding as { rebuild?: () => void }).rebuild?.()
+    },
+  }), 'dsh-endeavour: blank peer chrome')
 }
