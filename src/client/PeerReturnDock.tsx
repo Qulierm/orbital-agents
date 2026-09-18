@@ -9,15 +9,19 @@
  * the same `ISessions.open` bridge the peer tab uses.
  *
  * It renders ONLY while the current session is the Challenger side of a valid
- * pair AND no plan is projected (when a plan exists, the shared dock's
- * role-aware `Open Endeavour` action is the return path and this entry hides to
- * avoid duplication). It is a pure client-side surface: no DOM injection, no
- * synthetic events, no prompt, no durable write.
+ * pair AND the shared dock offers no usable return action: either no plan is
+ * projected at all, or the projected plan is a historical `childId`-only card
+ * whose action is deliberately disabled. A canonical peer plan hides this entry
+ * because the shared dock's role-aware `Open Endeavour` action is then the
+ * return path (exactly one affordance). It is a pure client-side surface: no
+ * DOM injection, no synthetic events, no prompt, no durable write.
  */
 
 import { useSyncExternalStore } from 'react'
 import type { PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
+import type { EndeavourCardData } from '../plan-projection.js'
 import { copyFrom, type EndeavourInjected } from './PlanCard.js'
+import { planAction } from './plan-action.js'
 import { CLASS } from './styles.js'
 
 /** Complete dock renderer props (session scope supplies the injection). */
@@ -44,9 +48,10 @@ export function PeerReturnDock(props: PeerReturnDockProps): React.ReactElement |
     source?.getSnapshot ?? noopSnapshot,
     source?.getSnapshot ?? noopSnapshot,
   )
-  // Only the paired Challenger side, and only while the shared dock has nothing
-  // to show (its role-aware action already provides the return path).
-  if (peer === null || plan !== null) return null
+  // Only the paired Challenger side, and only while the shared dock cannot
+  // navigate (nothing projected, or a legacy card whose action is disabled).
+  if (peer === null) return null
+  if (plan !== null && planAction(plan as EndeavourCardData, props.currentSessionId).kind === 'peer') return null
   const target = peer.counterpartId
   return (
     <div className={CLASS.dockWrap}>

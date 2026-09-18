@@ -43,7 +43,7 @@ function renderDock(data: EndeavourCardData | null | undefined, currentSessionId
 }
 
 /** Render the fallback with a fixed pair observable and optional plan source. */
-function renderReturn(options: { peer?: { counterpartId: string } | null; plan?: unknown; opens?: string[] }): string {
+function renderReturn(options: { peer?: { counterpartId: string } | null; plan?: unknown; opens?: string[]; sessionId?: string }): string {
   return renderToStaticMarkup(createElement(PeerReturnDock, {
     useProjection: () => null,
     t: undefined,
@@ -56,6 +56,7 @@ function renderReturn(options: { peer?: { counterpartId: string } | null; plan?:
       getSnapshot: () => options.plan ?? null,
       subscribe: () => () => undefined,
     },
+    ...(options.sessionId === undefined ? {} : { currentSessionId: options.sessionId }),
   } as never))
 }
 
@@ -105,9 +106,17 @@ describe('blank peer return fallback', () => {
     expect(html).toContain('dsh-endeavour-ghost')
   })
 
-  it('hides on the root, on Standard sessions and when a plan is present', () => {
+  it('hides on the root, on Standard sessions and for a canonical peer plan', () => {
     expect(renderReturn({ peer: null })).toBe('')
-    expect(renderReturn({ peer: { counterpartId: 'session-root' }, plan: { planId: 'p' } })).toBe('')
+    const peerCard = { ...planData, challengerSessionId: 'challenger-x', pairId: 'pair-x' } as EndeavourCardData
+    expect(renderReturn({ peer: { counterpartId: 'root-session' }, plan: peerCard, sessionId: 'challenger-x' })).toBe('')
+  })
+
+  it('still renders for a historical legacy plan whose action is disabled', () => {
+    // The paired root may carry a childId-only plan: its action is disabled
+    // history, so the peer would otherwise have no way back.
+    const html = renderReturn({ peer: { counterpartId: 'root-session' }, plan: planData, sessionId: 'challenger-x' })
+    expect(html).toContain('Endeavour')
   })
 
   it('switches to the shared dock (no duplicate) once a plan arrives', () => {
@@ -117,7 +126,7 @@ describe('blank peer return fallback', () => {
     expect(renderDock(null, 'challenger-x')).toBe('')
     // Plan arrives: the shared dock's role-aware action is the return path and
     // the fallback disappears, so exactly one return affordance exists.
-    expect(renderReturn({ peer: { counterpartId: 'session-root' }, plan: peerCard })).toBe('')
+    expect(renderReturn({ peer: { counterpartId: 'root-session' }, plan: peerCard, sessionId: 'challenger-x' })).toBe('')
     expect(renderDock(peerCard, 'challenger-x')).toContain('Open Endeavour')
   })
 })
