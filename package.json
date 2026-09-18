@@ -1,7 +1,7 @@
 {
   "name": "dsh-endeavour",
-  "version": "0.1.0",
-  "description": "Endeavour orchestration for DeepSeek Harness: one durable plan, one continuable Builder child, and a replayable plan card in the Endeavour Chat.",
+  "version": "0.2.0",
+  "description": "Persistent Endeavour/Challenger ordinary-session peer runtime for DSH: durable plans, two-phase Challenger execution and peer navigation.",
   "type": "module",
   "license": "MIT",
   "private": false,

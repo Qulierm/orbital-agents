@@ -51,7 +51,7 @@ route preference any more.
 
 ```sh
 node /Users/nikita/Documents/Coding/dsh-endeavour/scripts/install-local.mjs \
-  --tarball /Users/nikita/Documents/Coding/dsh-endeavour/dsh-endeavour-0.1.0.tgz
+  --tarball /Users/nikita/Documents/Coding/dsh-endeavour/dsh-endeavour-0.2.0.tgz
 ```
 
 The installer backs up the desktop profile and any existing user preset first,

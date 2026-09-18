@@ -38,7 +38,7 @@ function seedProfile(home: string): string {
 
 function tarball(): string {
   const home = tempHome()
-  const path = join(home, 'dsh-endeavour-0.1.0.tgz')
+  const path = join(home, 'dsh-endeavour-0.2.0.tgz')
   writeFileSync(path, 'fake tarball for lifecycle tests\n')
   return path
 }
@@ -145,6 +145,59 @@ describe('installer lifecycle', () => {
     expect(readFileSync(join(preset, 'preset.yml'), 'utf8')).toContain('Endeavour')
   })
 
+  it('migrates a live-like old deployment in one isolated temp home', () => {
+    const home = tempHome()
+    const profile = seedProfile(home)
+    const profileBefore = readFileSync(join(profile, 'cordis.patch.yml'))
+    // 1. Old single-preset deployment: the owned `endeavour` preset exists.
+    const presuppose = join(home, '.dsh', '.agent-presets', 'endeavour')
+    mkdirSync(presuppose, { recursive: true })
+    writeFileSync(join(presuppose, 'preset.yml'), 'name: endeavour\nversion: 0.1.0\n')
+    // Ownership marker written by the PREVIOUS version of this installer, so the
+    // migration recognises the preset as ours instead of a user-authored one.
+    writeFileSync(join(presuppose, '.dsh-endeavour-owned'), 'dsh-endeavour\n')
+    // 2. Retired settings namespace next to unrelated keys.
+    writeFileSync(join(home, '.dsh', 'settings.yaml'), 'theme: dark\nendeavour-builder:\n  mode: custom\nprovider: keep\n')
+    // 3. Real-looking session logs: a TERMINAL legacy plan (allowed), an
+    //    unmarked peer checkpoint (needs the repair marker) and a corrupt file.
+    const dir = join(home, '.dsh', 'sessions', '--workspace--')
+    mkdirSync(dir, { recursive: true })
+    const terminalPlan = { seq: 1, type: 'endeavour/plan', data: { kind: 'plan-created', at: 1, plan: { planId: 'p-old', rootSessionId: 'root-old', childId: 'child-old', sequence: 2, terminal: { outcome: 'completed', at: 9 } } } }
+    const peerEvent = { seq: 2, type: 'endeavour/peer', data: { kind: 'peer-created', at: 2, state: { version: 1, pairId: 'pair', endeavourSessionId: 'root-old', challengerSessionId: 'challenger-old', createdAt: 1, updatedAt: 1, sequence: 1 } } }
+    const sessionFile = join(dir, 'session.old.jsonl')
+    writeFileSync(sessionFile, `${JSON.stringify(terminalPlan)}\n${JSON.stringify(peerEvent)}\n`)
+    writeFileSync(join(dir, 'session.corrupt.jsonl.zstd'), 'not zstd')
+
+    const installed = installer(home, '--tarball', tarball())
+    expect(installed.status).toBe(0)
+    expect(installed.stdout).toContain('terminal legacy plan')
+    expect(installed.stdout).toContain('skipped unreadable session log')
+    // Both owned presets installed and linked; the challenger row is present.
+    for (const preset of ['endeavour', 'challenger']) {
+      const dirPath = join(home, '.dsh', '.agent-presets', preset)
+      expect(existsSync(join(dirPath, 'preset.yml'))).toBe(true)
+      expect(existsSync(join(dirPath, 'node_modules', 'dsh-endeavour'))).toBe(true)
+      expect(readFileSync(join(dirPath, 'agent.cordis.yml'), 'utf8')).toContain('dsh-endeavour')
+    }
+    // Repair markers landed on BOTH admitted event types, file stays readable.
+    const repaired = readFileSync(sessionFile, 'utf8')
+    expect(repaired.split('\n').filter((line) => line.includes('"ignorable":true'))).toHaveLength(2)
+    expect(JSON.parse(repaired.split('\n')[0]!).data.plan.planId).toBe('p-old')
+    expect(existsSync(join(home, '.dsh', 'backups', 'endeavour'))).toBe(true)
+    // Settings: only the owned namespace removed.
+    const settings = readFileSync(join(home, '.dsh', 'settings.yaml'), 'utf8')
+    expect(settings).toContain('theme: dark')
+    expect(settings).not.toContain('endeavour-builder')
+    // Rollback restores the profile file byte-exactly.
+    const stamps = readdirSync(join(home, '.dsh', 'backups', 'endeavour')).filter((name) => /^\d{4}-/.test(name))
+    expect(stamps.length).toBeGreaterThan(0)
+    expect(installer(home, '--rollback', stamps[stamps.length - 1]!).status).toBe(0)
+    expect(readFileSync(join(profile, 'cordis.patch.yml'))).toEqual(profileBefore)
+    // Uninstall removes only presets this package owns.
+    expect(installer(home, '--uninstall').status).toBe(0)
+    expect(existsSync(join(home, '.dsh', '.agent-presets', 'challenger'))).toBe(false)
+  })
+
   it('retired Builder-route flags fail clearly without touching the profile', () => {
     const home = tempHome()
     seedProfile(home)
@@ -176,7 +229,7 @@ describe('installer lifecycle', () => {
     const home = tempHome()
     seedProfile(home)
     const bin = fakePnpmDir(home)
-    const file = join(home, 'dsh-endeavour-0.1.0.tgz')
+    const file = join(home, 'dsh-endeavour-0.2.0.tgz')
     const installed = join(home, '.dsh', 'profiles', 'desktop', 'node_modules', 'dsh-endeavour', 'lib', 'client.js')
     writeFileSync(file, 'OLD ARTIFACT')
     expect(installerWithPath(home, bin, '--tarball', file).status).toBe(0)

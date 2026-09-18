@@ -217,15 +217,26 @@ export function repairSessionEvents(options = {}) {
   if (write && !force && isRunning()) {
     throw new Error('repair-session-events: DSH Desktop is running; quit it before --write (or pass --force)')
   }
-  const results = sessionFiles(sessionsRoot).map((file) => processFile(file, { write, backupDir, sessionsRoot }))
+  // Per-file isolation: one unreadable/corrupt log must not abort the repair of
+  // every other session log. Skipped files are reported and left byte-exact.
+  const results = []
+  const skipped = []
+  for (const file of sessionFiles(sessionsRoot)) {
+    try {
+      results.push(processFile(file, { write, backupDir, sessionsRoot }))
+    } catch (error) {
+      skipped.push({ file, error: String(error?.message ?? error) })
+    }
+  }
   const totals = {
-    files: results.length,
+    files: results.length + skipped.length,
     repairedFiles: results.filter((r) => r.changed > 0).length,
     repairedRows: results.reduce((sum, r) => sum + r.changed, 0),
     written: write,
     backupDir: results.some((r) => r.changed > 0) ? backupDir : null,
+    skippedFiles: skipped.length,
   }
-  return { results, totals }
+  return { results, skipped, totals }
 }
 
 const invokedDirectly = process.argv[1] !== undefined && import.meta.url.endsWith(process.argv[1].split('/').pop() ?? '')

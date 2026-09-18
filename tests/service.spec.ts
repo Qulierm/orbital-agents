@@ -169,6 +169,10 @@ describe('peer plan creation', () => {
     expect(h.service.getActivePlan('session-root')).toBeUndefined()
     const second = await h.service.createPlan(rootAgent() as never, planInput())
     expect(second.challengerSessionId).toBe(h.pair.challengerSessionId)
+    // Exactly ONE plan-ready was delivered per plan: two plans, two briefs, and
+    // the same persistent session id both times.
+    const briefs = h.inbox.get(h.pair.challengerSessionId) ?? []
+    expect(briefs).toHaveLength(2)
     // The provisioner ensure ran per plan, but the pair never changed.
     expect(h.ensureCalls).toEqual([{ sessionId: 'session-root' }, { sessionId: 'session-root' }])
     const plans = [...(h.service as unknown as { plans: Map<string, unknown> }).plans.values()]

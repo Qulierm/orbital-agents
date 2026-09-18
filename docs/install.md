@@ -13,7 +13,7 @@ from anywhere; the installer resolves its own assets relative to itself.
 cd /Users/nikita/Documents/Coding/dsh-endeavour
 pnpm install --frozen-lockfile
 pnpm run typecheck && pnpm test && pnpm run build
-pnpm pack                     # dsh-endeavour-0.1.0.tgz
+pnpm pack                     # dsh-endeavour-0.2.0.tgz
 node scripts/pack-check.mjs   # tarball contents, no secrets/sources
 node scripts/preset-check.ts  # preset contract + persona drift
 ```
@@ -22,7 +22,7 @@ node scripts/preset-check.ts  # preset contract + persona drift
 
 ```sh
 node /Users/nikita/Documents/Coding/dsh-endeavour/scripts/install-local.mjs \
-  --tarball /Users/nikita/Documents/Coding/dsh-endeavour/dsh-endeavour-0.1.0.tgz
+  --tarball /Users/nikita/Documents/Coding/dsh-endeavour/dsh-endeavour-0.2.0.tgz
 ```
 
 What happens, in order:

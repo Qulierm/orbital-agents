@@ -1,9 +1,10 @@
 /**
  * Durable Endeavour orchestration service.
  *
- * One active plan per root session, one continuable Builder child, sequential
- * tasks. Every mutation appends a whole-value checkpoint event to the root
- * session log, flushes durability, and is serialized per root.
+ * One active plan per Endeavour session, executed by its persistent ordinary
+ * Challenger peer (historical childId-only plans stay readable). Every mutation
+ * appends a whole-value checkpoint event to the owning session log, flushes
+ * durability, and is serialized per Endeavour session.
  */
 
 import { randomUUID } from 'node:crypto'
@@ -184,7 +185,7 @@ export class EndeavourService extends Service {
     return plan !== undefined && plan.terminal === undefined ? plan : undefined
   }
 
-  /** The plan whose Builder child is this session, if any. */
+  /** Historical lookup: the legacy plan whose childId matches this session. */
   getPlanByChild(childId: string): PlanState | undefined {
     for (const plan of this.plans.values()) if (plan.childId === childId) return plan
     return undefined

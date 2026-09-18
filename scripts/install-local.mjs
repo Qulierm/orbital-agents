@@ -276,8 +276,11 @@ function install(tarball, { force }) {
     throw error
   }
   try {
-    const { totals } = repairSessionEvents(repairPaths())
+    const { totals, skipped } = repairSessionEvents(repairPaths())
     console.log(`install-local: session events repaired (${String(totals.repairedRows)} row(s) in ${String(totals.repairedFiles)} file(s))`)
+    for (const entry of skipped) {
+      console.log(`install-local: skipped unreadable session log ${entry.file} (${entry.error})`)
+    }
   } catch (error) {
     console.log(`install-local: session repair skipped (${String(error.message ?? error)})`)
   }
