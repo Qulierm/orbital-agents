@@ -263,6 +263,26 @@ export class EndeavourService extends Service {
     this.lifecycle = undefined
   }
 
+  /**
+   * Guarantee the persistent Challenger runs with full host access before any
+   * plan-ready relay may be delivered. Official PermissionPresetService only
+   * (current/set) through the host seam; throws a typed error when the
+   * guarantee cannot be made, so callers fail closed and keep the outbox
+   * pending instead of starting execution under a downgraded mode.
+   */
+  private async assertChallengerFullAccess(pair: PeerState): Promise<void> {
+    const seam = this.peerRuntime().seam
+    if (seam.ensurePermissionPreset === undefined) return
+    try {
+      await seam.ensurePermissionPreset(pair.challengerSessionId, 'danger-full-access')
+    } catch (error) {
+      throw new EndeavourError(
+        'peer-provision-failed',
+        `the Challenger cannot be guaranteed Full access, so plan delivery is withheld: ${error instanceof Error ? error.message : String(error)}`,
+      )
+    }
+  }
+
   /** Full peer runtime: seam, provisioner, FIFO queue and delivery ledger. */
   private peerRuntime(): PeerRuntimeDeps {
     if (this.peerRuntimeDeps !== undefined) return this.peerRuntimeDeps
@@ -539,6 +559,9 @@ export class EndeavourService extends Service {
       await this.append(rootSessionId, 'delivery-pending', this.plans.get(rootSessionId), plan, at)
       const fact = deliveryFact(plan, deliveryKey(relay.pairId, plan.planId, relay.messageKind))
       if (fact !== undefined) {
+        // Fail closed: execution may not start unless the Challenger is
+        // guaranteed Full access. The relay stays pending when this throws.
+        if (relay.messageKind === 'plan-ready') await this.assertChallengerFullAccess(ensured)
         try {
           const outcome = await deliverOutboxFact(this.outboxRuntime(), plan, relay, fact)
           plan = outcome.plan
@@ -664,6 +687,14 @@ export class EndeavourService extends Service {
           const relay = currentFact.kind === 'plan-ready'
             ? planReadyRelay(pair, current, planReadyBodyFromPlan(current))
             : reviewReadyRelay(pair, current, reviewReadyBody(current, firstBlockedReport(current) !== undefined))
+          if (currentFact.kind === 'plan-ready') {
+            try {
+              await this.assertChallengerFullAccess(pair)
+            } catch {
+              // Keep the fact PENDING: reconcileOutbox retries after repair.
+              return false
+            }
+          }
           const outcome = await deliverOutboxFact(this.outboxRuntime(), current, relay, currentFact)
           if (!outcome.delivered) return false
           await this.append(outcome.plan.rootSessionId, 'delivery-settled', current, outcome.plan, Date.now())

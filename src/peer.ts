@@ -214,3 +214,58 @@ export function peerReceiptId(): string {
   if (typeof crypto?.randomUUID === 'function') return crypto.randomUUID()
   return `receipt-${Date.now().toString(36)}-${Math.floor(Math.random() * 0xffffffff).toString(36)}`
 }
+
+
+/**
+ * Unambiguous pair-code alphabet: no I, O, 0 or 1, so a code can be read aloud
+ * or typed without confusion.
+ */
+export const PAIR_CODE_ALPHABET = '23456789ABCDEFGHJKMNPQRSTVWXYZ'
+
+/** Fixed code length (32^6 ≈ 1.07e9 values). */
+export const PAIR_CODE_LENGTH = 6
+
+/** One `[CODE]` prefix at the start of a title. */
+export const PAIR_CODE_PATTERN = /^\[([2-9A-HJKMNP-TV-Z]{6})\]/
+
+/**
+ * Deterministic short code for one durable pair. Derived from the pair id with
+ * SHA-256 (never random), so it is stable across restarts, HMR and every
+ * process, and two members of a pair always compute the SAME code.
+ * @param pairId - durable pair identity.
+ * @returns six unambiguous uppercase alphanumerics.
+ */
+export function pairCodeFor(pairId: string): string {
+  const digest = sha256Hex(`dsh-endeavour-pair-code:${pairId}`)
+  let code = ''
+  for (let index = 0; index < PAIR_CODE_LENGTH; index += 1) {
+    const byte = Number.parseInt(digest.slice(index * 2, index * 2 + 2), 16)
+    code += PAIR_CODE_ALPHABET[byte % PAIR_CODE_ALPHABET.length]
+  }
+  return code
+}
+
+/** Canonical title for one role: `[CODE] Endeavour` / `[CODE] Challenger`. */
+export function pairTitleFor(role: 'endeavour' | 'challenger', code: string): string {
+  return `[${code}] ${role === 'endeavour' ? 'Endeavour' : 'Challenger'}`
+}
+
+/** The `[CODE]` currently carried by a title, when it has one. */
+export function pairCodeOfTitle(title: string | undefined): string | undefined {
+  if (typeof title !== 'string') return undefined
+  return PAIR_CODE_PATTERN.exec(title.trim())?.[1]
+}
+
+/**
+ * Title for the ENDEAVOUR side: a meaningful existing title is preserved and
+ * merely prefixed with the pair code; an existing (possibly different) code is
+ * replaced rather than nested; a blank title becomes the canonical role title.
+ * @param code - this pair's code.
+ * @param existing - the session's current title, when any.
+ * @returns the exact title to apply.
+ */
+export function pairRootTitleTarget(code: string, existing: string | undefined): string {
+  const trimmed = typeof existing === 'string' ? existing.trim() : ''
+  const stripped = trimmed.replace(PAIR_CODE_PATTERN, '').trim()
+  return stripped === '' ? pairTitleFor('endeavour', code) : `[${code}] ${stripped}`
+}

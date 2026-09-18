@@ -92,6 +92,7 @@ export class PeerProvisioner {
         // attachments so a recomposed member is restored on every restart.
         await this.repairMemberPreset(this.deps.seam.sessionMeta(challengerSessionId) ?? { id: challengerSessionId })
         await this.repairAttachments(endeavourSessionId, challengerSessionId, meta.cwd)
+        await this.repairPairPolicy(existing)
         // A challenger that is merely NOT LIVE in this process (cold persisted
         // session) is not a lost pair: the ROOT's durable checkpoint is
         // authoritative. Only a root that truly lost its checkpoint is repaired,
@@ -115,6 +116,7 @@ export class PeerProvisioner {
       // route ONCE when it has no durable selection of its own. Both steps are
       // idempotent, request-free and never touch an existing selection.
       await this.repairAttachments(endeavourSessionId, challengerSessionId, meta.cwd)
+      await this.repairPairPolicy(existing)
       // Reciprocal repair: a crash that committed only one side is healed by
       // re-appending the same validated checkpoint to both logs.
       if (!this.deps.hasCheckpoint(endeavourSessionId) || !this.deps.hasCheckpoint(challengerSessionId)) {
@@ -136,6 +138,7 @@ export class PeerProvisioner {
         : { workspaceId }),
     })
     const state = createPeerState({ endeavourSessionId, at })
+    await this.repairPairPolicy(state)
     // Creator-only initial checkpoint: concurrent mounts can all adopt the same
     // deterministic session, and each of them writing `peer-created` would grow
     // the log (observed live: 16 identical checkpoints in one launch). The
@@ -173,6 +176,30 @@ export class PeerProvisioner {
       this.deps.diagnose?.(`peer preset repaired on ${peerMeta.id}: ${selected} -> challenger`)
     } catch (error) {
       this.deps.diagnose?.(`peer preset repair failed on ${peerMeta.id}: ${String(error)}`)
+    }
+  }
+
+  /**
+   * Pair policy: the Challenger ALWAYS runs with full host access, and both
+   * members carry the pair's `[CODE]` titles. Both operations are idempotent and
+   * request-free; failures are diagnosed and retried on the next ensure, so a
+   * cosmetic title problem can never destroy a valid pair. The Endeavour side is
+   * never given a different permission preset.
+   */
+  private async repairPairPolicy(pair: PeerState): Promise<void> {
+    try {
+      await this.deps.seam.ensurePermissionPreset?.(pair.challengerSessionId, 'danger-full-access')
+    } catch (error) {
+      this.deps.diagnose?.(`challenger permission repair failed on ${pair.challengerSessionId}: ${String(error)}`)
+    }
+    try {
+      await this.deps.seam.ensurePairTitles?.({
+        pairId: pair.pairId,
+        endeavourSessionId: pair.endeavourSessionId,
+        challengerSessionId: pair.challengerSessionId,
+      })
+    } catch (error) {
+      this.deps.diagnose?.(`pair title repair failed on ${pair.pairId}: ${String(error)}`)
     }
   }
 

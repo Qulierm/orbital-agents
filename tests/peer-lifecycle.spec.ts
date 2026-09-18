@@ -103,6 +103,8 @@ function lifecycleHarness(initial: FakeSession[]) {
     }),
     workspaceIdFor: () => 'ws-1',
     attachToWorkspace: async (id: string) => { attaches.push(id) },
+    ensurePermissionPreset: async (id: string, preset: string) => { permissions.push({ id, preset }) },
+    ensurePairTitles: async (pair: { pairId: string }) => { titles.push(pair.pairId) },
     selectionOf: () => undefined,
     selectModel: async () => undefined,
     copyModelSelection: async (from: string, to: string) => {
@@ -111,6 +113,8 @@ function lifecycleHarness(initial: FakeSession[]) {
     },
   }
   const attaches: string[] = []
+  const permissions: { id: string; preset: string }[] = []
+  const titles: string[] = []
   const copies: { from: string; to: string }[] = []
   const pairs = new Map<string, PeerState>()
   /** Durable read emulation: the latest checkpoint recorded in the log itself. */
@@ -159,7 +163,7 @@ function lifecycleHarness(initial: FakeSession[]) {
   const emit = (name: string, ...args: unknown[]): void => {
     for (const listener of listeners.get(name) ?? []) (listener as (...a: unknown[]) => void)(...args)
   }
-  return { service, sessions, creates, messages, attaches, copies, announce, emit, disposers }
+  return { service, sessions, creates, messages, attaches, permissions, titles, copies, announce, emit, disposers }
 }
 
 async function settle(): Promise<void> {
@@ -266,6 +270,30 @@ describe('peer session lifecycle', () => {
     await settle()
     expect(h.creates).toHaveLength(1)
     expect(h.creates.some((call) => call.id === 'session-standard' || call.id === 'session-child')).toBe(false)
+  })
+
+  it('guarantees Full access on the Challenger only and applies both titles', async () => {
+    const pair = pairOf('session-root')
+    const payload = peerEventPayload('peer-created', undefined, pair, 1)
+    const root = fakeSession('session-root', { agentPreset: 'standard', cwd: '/proj' }, [
+      { type: 'agent-preset/selected', data: { agentPreset: 'endeavour' } },
+      { type: 'endeavour/peer', data: payload },
+    ])
+    const peer = fakeSession(pair.challengerSessionId, { agentPreset: 'challenger', cwd: '/proj' }, [
+      { type: 'endeavour/peer', data: payload },
+    ])
+    const h = lifecycleHarness([root, peer])
+    h.service.observeSessionLifecycle()
+    await settle()
+    // Exactly one Full-access guarantee, for the CHALLENGER, and both titles.
+    expect(h.permissions).toEqual([{ id: pair.challengerSessionId, preset: 'danger-full-access' }])
+    expect(h.titles).toEqual([pair.pairId])
+    // The Endeavour side is never given a different permission preset.
+    expect(h.permissions.some((call) => call.id === 'session-root')).toBe(false)
+    // A repeated observation (restart) re-runs the idempotent repairs once.
+    h.announce('session-root')
+    await settle()
+    expect(h.permissions).toHaveLength(1)
   })
 
   it('repairs an existing pair exactly once after an upgrade, with no new session', async () => {

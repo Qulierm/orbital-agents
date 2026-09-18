@@ -12,7 +12,6 @@ import { endeavourPeerNodeDefinition, endeavourPeerViewDefinition, PEER_ACTIVITY
 import { PlanCard, type EndeavourInjected, type PlanCardProps } from './PlanCard.js'
 import { registerPlanDock } from './PlanDock.js'
 import { EndeavourRoleLabel } from './EndeavourRoleLabel.js'
-import type { ModelCatalog } from '@deepseek-ai/dsh-api-session-controller/types'
 import type { ISessions } from '@deepseek-ai/dsh-api-session-controller/client'
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 import { ChallengerModelControl, type ChallengerModelController, type ChallengerSelection } from './ChallengerModelControl.js'
@@ -87,7 +86,6 @@ interface ClientServices {
     }
   }
   readonly uiWorkspace?: { openSession?: (id: SessionId) => void }
-  readonly remote?: { readonly session?: { modelCatalog(): Promise<unknown> } }
   readonly [serviceName: string]: unknown
   readonly locale: { register(ns: string, dictionaries: { zh: Record<string, string>; en: Record<string, string> }): () => void }
   effect(callback: () => (() => void) | void, label?: string): void
@@ -233,20 +231,6 @@ export function apply(ctx: ClientContext): void {
     transientActivation: hasTransientUserActivation(),
   })
 
-  /** Live model catalog (no model request; the controller owns caching). */
-  const loadCatalog = async (): Promise<ModelCatalog> => {
-    const dotted = (client as { 'remote.session'?: { modelCatalog?: () => Promise<unknown> } })['remote.session']
-    const session = client.remote?.session ?? (typeof dotted?.modelCatalog === 'function' ? dotted : undefined)
-    if (session === undefined || typeof session.modelCatalog !== 'function') {
-      throw new Error('model catalog is unavailable')
-    }
-    const raw = await session.modelCatalog() as { ok?: boolean; value?: ModelCatalog; error?: unknown } | ModelCatalog
-    if ((raw as { ok?: boolean }).ok === false) throw new Error(String((raw as { error?: unknown }).error ?? 'model catalog failed'))
-    const unwrapped = ((raw as { value?: ModelCatalog }).value ?? raw) as { value?: ModelCatalog }
-    const catalog = (unwrapped.value ?? unwrapped) as ModelCatalog
-    if (!Array.isArray(catalog.groups)) throw new Error('model catalog response had no groups')
-    return catalog
-  }
 
   /**
    * Peer model bridge: the paired Challenger owns its ordinary-session model

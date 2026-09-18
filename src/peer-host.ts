@@ -9,7 +9,7 @@
  * sidebar row (documented fallback) rather than being faked into a group.
  */
 
-import type { PeerRole } from './peer.js'
+import { pairCodeFor, pairRootTitleTarget, pairTitleFor, type PeerRole } from './peer.js'
 
 /** Ordinary session creation result. */
 export interface PeerCreateResult {
@@ -109,6 +109,26 @@ export interface PeerHostSeam {
   repairPreset?(sessionId: string, preset: string): Promise<void>
   /** The deployment's default route, when the Host exposes it. */
   defaultSelection?(): PeerModelSelection | undefined
+  /**
+   * Guarantee one session runs under a permission preset through the OFFICIAL
+   * PermissionPresetService (current/set). Idempotent: an already-effective
+   * preset appends nothing. Throws when the preset cannot be guaranteed, so
+   * callers can fail closed instead of starting execution under a downgraded
+   * mode.
+   */
+  ensurePermissionPreset?(sessionId: string, preset: string): Promise<void>
+  /**
+   * Apply the pair's canonical titles through the OFFICIAL SessionTitleService
+   * (get/rename): the root keeps a meaningful existing title and merely gains
+   * the `[CODE]` prefix, the Challenger is canonically `[CODE] Challenger`, and
+   * an older/different code is replaced rather than nested. Cosmetic by
+   * contract: callers treat failures as retryable.
+   */
+  ensurePairTitles?(pair: {
+    readonly pairId: string
+    readonly endeavourSessionId: string
+    readonly challengerSessionId: string
+  }): Promise<void>
 }
 
 /** Minimal cordis-shaped surface the adapter reads. */
@@ -289,6 +309,17 @@ export function createCordisPeerSeam(ctx: unknown): PeerHostSeam {
     return durableSelection(session)
   }
 
+  /**
+   * Resolve a session object officially: the live store entry first, then the
+   * controller's agent resolution (which resumes a cold persisted session).
+   */
+  const resolveSessionObject = async (id: string): Promise<unknown | undefined> => {
+    const live = sessions?.get?.(id) as RawSession | undefined
+    if (live !== undefined) return live
+    const resolved = await controller.resolveAgent?.(id) as { readonly agent?: { readonly session?: unknown } } | undefined
+    return resolved?.agent?.session
+  }
+
   return {
     listSessionIds: () => (sessions?.list?.() ?? []).map((session) => session.id),
     sessionMeta: (id) => rawMeta(sessions?.get?.(id) as RawSession | undefined),
@@ -328,6 +359,41 @@ export function createCordisPeerSeam(ctx: unknown): PeerHostSeam {
         model: selection.model,
         ...(selection.reasoningEffort === undefined ? {} : { reasoningEffort: selection.reasoningEffort }),
       })
+    },
+    ensurePermissionPreset: async (sessionId, preset) => {
+      const service = get?.('permissionPresets') as {
+        current?(session: unknown): string
+        set?(session: unknown, name: string): void
+      } | undefined
+      if (typeof service?.current !== 'function' || typeof service.set !== 'function') return
+      const session = await resolveSessionObject(sessionId)
+      if (session === undefined) {
+        throw new Error(`cannot guarantee the permission preset of ${sessionId}: the session is unavailable`)
+      }
+      // Idempotent: the official setter appends nothing when the effective
+      // preset already matches.
+      if (service.current(session) === preset) return
+      service.set(session, preset)
+    },
+    ensurePairTitles: async (pair) => {
+      const titles = get?.('sessionTitle') as {
+        get?(session: unknown): { readonly title?: string } | undefined
+        rename?(session: unknown, title: string): unknown
+      } | undefined
+      if (typeof titles?.get !== 'function' || typeof titles.rename !== 'function') return
+      const code = pairCodeFor(pair.pairId)
+      const apply = (session: unknown, target: string): void => {
+        if (titles.get?.(session)?.title === target) return
+        titles.rename?.(session, target)
+      }
+      const root = await resolveSessionObject(pair.endeavourSessionId)
+      if (root !== undefined) {
+        apply(root, pairRootTitleTarget(code, titles.get?.(root)?.title))
+      }
+      const challenger = await resolveSessionObject(pair.challengerSessionId)
+      if (challenger !== undefined) {
+        apply(challenger, pairTitleFor('challenger', code))
+      }
     },
     defaultSelection: () => {
       const defaults = get?.('agentDefaultModel') as { currentSelection?(): unknown } | undefined

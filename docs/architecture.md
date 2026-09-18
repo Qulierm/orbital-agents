@@ -98,6 +98,19 @@ Once the Challenger carries protocol content (a plan, a report or any turn), the
 native View ring renders normally and its `Endeavour` tab is the primary return
 path; the fallback then stays hidden.
 
+## Pair identity and policy
+
+- `pairCodeFor(pairId)` derives six unambiguous uppercase characters with
+  SHA-256, so the code is stable across restarts/HMR and both members compute the
+  same value; `[CODE] Endeavour` / `[CODE] Challenger` titles are applied through
+  the official session-title service (root titles preserved and prefixed, older
+  codes replaced).
+- The Challenger always runs `danger-full-access` (unrestricted host filesystem
+  and process access, no approvals), enforced through the official
+  permission-preset service on create/adopt/repair and re-asserted before every
+  `plan-ready` delivery; failure keeps the outbox pending and returns a typed
+  error instead of starting execution. The Endeavour side keeps its own preset.
+
 ## Legacy Builder child lifecycle (historical plans only)
 
 > Historical note: plans created before the peer runtime used a continuable

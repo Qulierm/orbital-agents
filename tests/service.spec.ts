@@ -158,6 +158,21 @@ describe('peer plan creation', () => {
     await expect(h.service.createPlan(rootAgent() as never, planInput())).rejects.toBeInstanceOf(EndeavourError)
   })
 
+  it('fails closed and keeps the outbox pending when Full access cannot be guaranteed', async () => {
+    const h = harness()
+    const seam = (h.service as unknown as { peerRuntimeDeps?: { seam: Record<string, unknown> } }).peerRuntimeDeps?.seam
+    expect(seam).toBeDefined()
+    seam!.ensurePermissionPreset = async () => { throw new Error('policy service unavailable') }
+    await expect(h.service.createPlan(rootAgent() as never, planInput())).rejects.toBeInstanceOf(EndeavourError)
+    // The durable plan exists with a PENDING plan-ready fact and nothing was
+    // delivered to the Challenger.
+    const internal = h.service as unknown as { plans: Map<string, { deliveries?: readonly { kind: string; status: string }[] }> }
+    const plan = [...internal.plans.values()][0]
+    const deliveries = plan?.deliveries ?? []
+    expect(deliveries.some((fact) => fact.kind === 'plan-ready' && fact.status === 'pending')).toBe(true)
+    expect(h.inbox.get(h.pair.challengerSessionId)).toEqual([])
+  })
+
   it('self-heals a genuine Endeavour session before authorizing the first plan', async () => {
     const h = harness()
     // Simulate the race: the durable pair exists in the log but was never
