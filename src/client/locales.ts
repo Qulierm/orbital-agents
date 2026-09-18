@@ -31,6 +31,7 @@ export const en = {
   'builder.effort': 'Effort',
   'builder.default': 'Default',
   'builder.notAvailable': 'Not available',
+  'builder.unset': 'Not set',
   'builder.loading': 'Loading models...',
   'builder.retry': 'Retry',
   'builder.error': 'Could not load models',

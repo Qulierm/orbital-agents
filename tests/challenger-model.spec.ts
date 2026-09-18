@@ -59,14 +59,14 @@ interface View {
 function props(options: {
   preset?: string | undefined
   peer?: unknown
-  selection?: ChallengerSelection
+  selection?: ChallengerSelection | undefined
   fail?: boolean
   challengerId?: string | undefined
   noChallenger?: boolean
   sessionId?: string
 }): { props: Record<string, unknown>; calls: View['calls'] } {
   const calls: View['calls'] = []
-  const selection = options.selection ?? { provider: 'p1', model: 'm1', reasoningEffort: 'low' }
+  const selection = 'selection' in options ? options.selection : { provider: 'p1', model: 'm1', reasoningEffort: 'low' }
   const controller: ChallengerModelController = {
     challengerId: () => (options.noChallenger === true ? undefined : (options.challengerId ?? 'session-challenger')),
     readSelection: () => selection,
@@ -127,6 +127,13 @@ describe('visibility', () => {
     expect(render({ peer: null }).container.textContent).toBe('')
     expect(render({ peer: { ...pair(), challengerSessionId: 'forged' } }).container.textContent).toBe('')
     expect(render({ noChallenger: true }).container.textContent).toBe('')
+  })
+
+  it('reports a peer without any stored selection honestly', () => {
+    const view = render({ selection: undefined })
+    expect(view.container.textContent).toContain('Challenger')
+    expect(view.container.textContent).toContain('Not set')
+    expect(view.container.textContent).not.toMatch(/inherit|automatic/i)
   })
 
   it('renders no inherit/Automatic/next-child wording anywhere', () => {

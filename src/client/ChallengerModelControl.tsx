@@ -166,7 +166,9 @@ export function ChallengerModelControl(props: ChallengerModelControlProps): Reac
       ? (effortName ?? copy('builder.default'))
       : copy('builder.notAvailable')
   const triggerLabel = modelLabel === undefined
-    ? ''
+    // A peer that never picked a route yet is honestly reported as unset
+    // instead of rendering a dangling separator.
+    ? copy('builder.unset')
     : selection?.reasoningEffort === undefined && !modelHasThinking(selectedModel)
       ? modelLabel
       : `${modelLabel} · ${effortName ?? copy('builder.default')}`
@@ -307,7 +309,7 @@ export function ChallengerModelControl(props: ChallengerModelControlProps): Reac
         title={disabledReason ?? triggerLabel}
         onClick={() => { setOpen((value) => !value); setPane('root'); setMenuPos(null) }}
       >
-        <span className={CLASS.builderModel}>{modelLabel ?? ''}</span>
+        <span className={CLASS.builderModel}>{modelLabel ?? triggerLabel}</span>
         {selection?.reasoningEffort === undefined ? null : <span className={CLASS.builderEffort}>{effortName ?? copy('builder.default')}</span>}
         {busy ? <span className={CLASS.builderSaving}>{copy('builder.saving')}</span> : null}
         <svg width={12} height={12} viewBox="0 0 12 12" fill="none" aria-hidden="true" className={CLASS.builderChevron}>
