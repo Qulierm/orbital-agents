@@ -51,6 +51,14 @@ export function admitEndeavourEvents(
 export function apply(ctx: Context, config: EndeavourConfig = {}): void {
   admitEndeavourEvents()
   const service = new EndeavourService(ctx, config)
+  // Additive peer lifecycle: observe only the CURRENT session so startup never
+  // mass-creates companions for cold history. The plan service is unchanged and
+  // does not depend on this yet.
+  try {
+    service.observeCurrentSession()
+  } catch {
+    // Peer provisioning is additive; a missing host seam must not break plans.
+  }
   // The Builder route preference is an official Host Settings section owned by
   // this plugin; deployments without a settings provider keep the composition
   // base (or inherit) unchanged, so service tests need no settings mount.

@@ -25,9 +25,12 @@ import {
   PEER_EVENT_TYPE,
   PeerRegistry,
   foldPeerEvents,
+  peerEventPayload,
   type PeerEventPayload,
   type PeerState,
 } from './peer.js'
+import { createCordisPeerSeam } from './peer-host.js'
+import { PeerLifecycle, PeerProvisioner } from './peer-service.js'
 import {
   assertChildRole,
   assertRootRole,
@@ -144,6 +147,8 @@ export class EndeavourService extends Service {
   private readonly plans = new Map<string, PlanState>()
   /** Durable peer pairs indexed from both ordinary sides. */
   private readonly peers = new PeerRegistry()
+  private provisioner: PeerProvisioner | undefined
+  private lifecycle: PeerLifecycle | undefined
   private readonly queues = new Map<string, Promise<unknown>>()
   private readonly serviceConfig: EndeavourConfig
   private builderSettings: () => BuilderRouteSettings
@@ -292,21 +297,77 @@ export class EndeavourService extends Service {
     return this.peers.peerOf(sessionId)
   }
 
-  /** All recovered/indexed pairs (provisioning is not implemented yet). */
+  /** All recovered/indexed pairs. */
   peerPairs(): readonly PeerState[] {
     return this.peers.pairs()
   }
 
+  /** Lazily built provisioner over the official host seam (additive). */
+  private peerProvisioner(): PeerProvisioner {
+    if (this.provisioner === undefined) {
+      const seam = createCordisPeerSeam(this.ctx)
+      this.provisioner = new PeerProvisioner({
+        seam,
+        readPair: (sessionId) => this.peers.get(sessionId),
+        appendPair: async (rootSessionId, state, kind, at) => {
+          await this.appendEvent(rootSessionId, PEER_EVENT_TYPE, peerEventPayload(kind, undefined, state, at))
+          this.peers.set(state)
+        },
+        now: () => Date.now(),
+      })
+      this.lifecycle = new PeerLifecycle(this.provisioner, { readPair: (sessionId) => this.peers.get(sessionId) })
+    }
+    return this.provisioner
+  }
+
+  /**
+   * Ensure the persistent Challenger companion for one ordinary Endeavour
+   * session. Idempotent and serialized; never prompts or calls a model.
+   */
+  async ensurePeer(sessionId: string): Promise<PeerState> {
+    return this.peerProvisioner().ensure(sessionId)
+  }
+
+  /**
+   * Additive lifecycle hook: observe only the CURRENT session so startup
+   * recovery never mass-creates peers for cold history. Challenger, Standard
+   * and subagent sessions are rejected by the provisioner and swallowed.
+   */
+  observeCurrentSession(): void {
+    const host = this.sessionHost() as unknown as { list?: () => readonly { id: string }[]; current?: () => string | undefined }
+    const current = host?.current?.()
+    if (typeof current !== 'string' || current === '') return
+    this.peerProvisioner()
+    this.lifecycle?.observe(current)
+  }
+
   /** Append one checkpoint to its owning root session and flush durability. */
+  /**
+   * Append + flush one informational checkpoint of any admitted type. Shared
+   * by plan checkpoints and (additively) peer checkpoints.
+   */
+  private async appendEvent(rootSessionId: string, type: string, payload: unknown): Promise<void> {
+    const sessions = this.sessionHost()
+    const session = sessions?.get(rootSessionId)
+    if (session === undefined) {
+      throw new EndeavourError('role-forbidden', `root session ${rootSessionId} is not loaded`)
+    }
+    // Structural append: the admitted type/payload pair is validated by the
+    // event-map augmentation, not by the generic overload here.
+    const loose = session as unknown as { append(eventType: string, eventData: unknown): void }
+    loose.append(type, payload)
+    await sessions?.flush(session)
+  }
+
   private async append(rootSessionId: string, kind: PlanEventPayload['kind'], previous: PlanState | undefined, plan: PlanState, at: number): Promise<void> {
     const sessions = this.sessionHost()
     const session = sessions?.get(rootSessionId)
     if (session === undefined) {
       throw new EndeavourError('role-forbidden', `root session ${rootSessionId} is not loaded`)
     }
+    void session
     const payload = planEventPayload(kind, previous, plan, at)
-    session.append(ENDEAVOUR_EVENT_TYPE, payload)
-    await sessions?.flush(session)
+    await this.appendEvent(rootSessionId, ENDEAVOUR_EVENT_TYPE, payload)
     this.plans.set(rootSessionId, payload.plan)
   }
 
