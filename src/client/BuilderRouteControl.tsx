@@ -72,7 +72,8 @@ interface MenuRow {
   readonly id: string
   readonly kind: 'cell' | 'option' | 'group' | 'note'
   readonly label: string
-  readonly description?: string
+  /** Tooltip-only copy; never rendered as a visible second line. */
+  readonly hint?: string
   readonly value?: string
   readonly selected?: boolean
   readonly disabled?: boolean
@@ -181,7 +182,7 @@ export function BuilderRouteControl(props: BuilderRouteControlProps): React.Reac
     setSaving(true)
     setSaveError(undefined)
     void props.builderRoute.writeSettings(next).then(
-      () => { setSaving(false) },
+      () => { setSaving(false); close() },
       (error: unknown) => {
         setSaving(false)
         setSaveError(String((error as Error).message ?? error))
@@ -190,7 +191,9 @@ export function BuilderRouteControl(props: BuilderRouteControlProps): React.Reac
     )
   }
 
-  const chooseAutomatic = (): void => { save({ mode: 'inherit' }); setPane('root') }
+  // Successful writes close the menu in save(); a failed write keeps the
+  // pane open with the error surfaced, matching native selection settlement.
+  const chooseAutomatic = (): void => { save({ mode: 'inherit' }) }
   const chooseModel = (provider: string, modelId: string): void => {
     const model = findCatalogModel(catalogValue, provider, modelId)
     const effort = resetEffortForModel(model)
@@ -201,7 +204,6 @@ export function BuilderRouteControl(props: BuilderRouteControlProps): React.Reac
       ...(effort === undefined ? {} : { reasoningEffort: effort }),
       ...(settings.maxTokens === undefined ? {} : { maxTokens: settings.maxTokens }),
     })
-    setPane('root')
   }
   /** Pins an effort on the CURRENT route (inherited provider/model included). */
   const chooseEffort = (effort: string | undefined): void => {
@@ -213,7 +215,6 @@ export function BuilderRouteControl(props: BuilderRouteControlProps): React.Reac
       ...(effort === undefined ? {} : { reasoningEffort: effort }),
       ...(settings.maxTokens === undefined ? {} : { maxTokens: settings.maxTokens }),
     })
-    setPane('root')
   }
 
   // --- pane contents -------------------------------------------------------
@@ -233,31 +234,26 @@ export function BuilderRouteControl(props: BuilderRouteControlProps): React.Reac
       ]
     }
     if (pane === 'effort') {
-      // Native parity: the option marked selected is the EFFECTIVE effort
-      // (explicit selection, else the model's declared default).
+      // Native parity: only 38px options with the trailing check; the option
+      // marked selected is the EFFECTIVE effort (explicit, else the default).
       const options = thinkingOptions(activeModel, effortId)
-      return [
-        { id: 'back', kind: 'option', label: copy('builder.back'), action: () => { setPane('root') } },
-        ...options.map<MenuRow>((option) => ({
-          id: `effort:${option.effort ?? 'default'}`,
-          kind: 'option',
-          label: option.effort === undefined ? copy('builder.default') : option.label,
-          ...(option.description === undefined ? {} : { description: option.description }),
-          selected: option.selected,
-          action: () => { chooseEffort(option.effort) },
-        })),
-      ]
+      return options.map<MenuRow>((option) => ({
+        id: `effort:${option.effort ?? 'default'}`,
+        kind: 'option',
+        label: option.effort === undefined ? copy('builder.default') : option.label,
+        selected: option.selected,
+        action: () => { chooseEffort(option.effort) },
+      }))
     }
     const list: MenuRow[] = [
-      { id: 'back', kind: 'option', label: copy('builder.back'), action: () => { setPane('root') } },
       {
         id: 'automatic', kind: 'option', label: copy('builder.automatic'),
-        description: copy('builder.automaticHint'), selected: !customSelected,
+        hint: copy('builder.automaticHint'), selected: !customSelected,
         action: chooseAutomatic,
       },
     ]
     if (catalog.kind === 'loading') list.push({ id: 'loading', kind: 'note', label: copy('builder.loading') })
-    if (catalog.kind === 'error') list.push({ id: 'error', kind: 'note', label: copy('builder.error'), description: catalog.message })
+    if (catalog.kind === 'error') list.push({ id: 'error', kind: 'note', label: copy('builder.error'), hint: catalog.message })
     if (catalogValue !== undefined) {
       for (const group of catalogValue.groups) {
         list.push({ id: `group:${group.id}`, kind: 'group', label: group.name })
@@ -266,7 +262,9 @@ export function BuilderRouteControl(props: BuilderRouteControlProps): React.Reac
             id: `model:${group.id}:${model.id}`,
             kind: 'option',
             label: model.name,
-            ...(model.description === undefined ? {} : { description: model.description }),
+            // Native parity: no second line; the full description stays in the
+            // hover title only, never in the option DOM.
+            ...(model.description === undefined ? {} : { hint: model.description }),
             selected: customSelected && settings.provider === group.id && settings.model === model.id,
             action: () => { chooseModel(group.id, model.id) },
           })
@@ -404,7 +402,7 @@ export function BuilderRouteControl(props: BuilderRouteControlProps): React.Reac
             }
             if (row.kind === 'note') {
               return (
-                <div key={row.id} className={CLASS.menuNote} title={row.description}>
+                <div key={row.id} className={CLASS.menuNote} title={row.hint}>
                   <span>{row.label}</span>
                   {row.id === 'error' ? (
                     <button type="button" className={CLASS.menuRetry} onClick={loadCatalog}>{copy('builder.retry')}</button>
@@ -440,13 +438,14 @@ export function BuilderRouteControl(props: BuilderRouteControlProps): React.Reac
                 role="menuitemradio"
                 aria-checked={row.selected === true}
                 disabled={row.disabled === true}
+                title={row.hint}
+                aria-description={row.hint}
                 onMouseEnter={() => { setActiveIndex(enabledRows.indexOf(row)) }}
                 onClick={() => { row.action?.() }}
                 className={active ? CLASS.menuOptionActive : CLASS.menuOption}
               >
                 <span className={CLASS.menuOptionCopy}>
                   <span className={CLASS.menuOptionName}>{row.label}</span>
-                  {row.description === undefined ? null : <span className={CLASS.menuOptionDetail}>{row.description}</span>}
                 </span>
                 <span className={CLASS.menuCheck}>
                   {row.selected === true ? (

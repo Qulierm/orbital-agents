@@ -37,7 +37,6 @@ export const CLASS = {
   menuOptionActive: 'dsh-endeavour-menu-option dsh-endeavour-menu-option--active',
   menuOptionCopy: 'dsh-endeavour-menu-option-copy',
   menuOptionName: 'dsh-endeavour-menu-option-name',
-  menuOptionDetail: 'dsh-endeavour-menu-option-detail',
   menuCheck: 'dsh-endeavour-menu-check',
   menuGroup: 'dsh-endeavour-menu-group',
   menuNote: 'dsh-endeavour-menu-note',
@@ -351,7 +350,6 @@ export const STYLE_TEXT = `
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.dsh-endeavour-menu-option-detail { color: var(--dsw-alias-label-tertiary); font-size: 12px; line-height: 18px; }
 .dsh-endeavour-menu-check { display: grid; place-items: center; flex: 0 0 18px; color: var(--dsw-alias-label-primary); }
 .dsh-endeavour-menu-group {
   position: sticky;
