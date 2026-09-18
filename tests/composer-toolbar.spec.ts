@@ -63,14 +63,14 @@ describe('Endeavour role label', () => {
   })
 })
 
-describe('Builder group', () => {
+describe('Challenger group', () => {
   it('renders a static Builder segment plus a route-only trigger', () => {
     const html = renderToStaticMarkup(createElement(BuilderRouteControl, {
       ...seatProps('endeavour'),
       builderRoute: controller(),
     } as never))
     expect(html).toContain('data-endeavour-role="builder"')
-    expect(html).toContain('>Builder</span>')
+    expect(html).toContain('>Challenger</span>')
     expect(html).toContain('class="dsh-endeavour-builder-trigger"')
     expect(html).not.toMatch(/Inherit Endeavour|Inherit Planner|>Inherited</)
   })

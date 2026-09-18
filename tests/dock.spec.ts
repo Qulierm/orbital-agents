@@ -8,7 +8,7 @@ import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import { en, formatEnglish } from '../src/client/locales.js'
-import { builderAddress, copyFrom } from '../src/client/PlanCard.js'
+import { cardExecutorId, copyFrom } from '../src/client/PlanCard.js'
 import { PLAN_DOCK_ID, PLAN_DOCK_ORDER, PlanDock, registerPlanDock } from '../src/client/PlanDock.js'
 import { initialCollapsed, PlanView, shouldAutoCollapse } from '../src/client/PlanView.js'
 import { CLASS, ensurePlanStyles, STYLE_ELEMENT_ID, STYLE_TEXT } from '../src/client/styles.js'
@@ -35,7 +35,7 @@ function renderDock(data: EndeavourCardData | null | undefined): string {
   return renderToStaticMarkup(createElement(PlanDock, {
     useProjection: (key: string) => (key === 'endeavourPlan' ? (data ?? null) : undefined),
     t: undefined,
-    openBuilder: () => undefined,
+    openCounterpart: () => undefined,
   } as never))
 }
 
@@ -45,7 +45,7 @@ describe('composer plan dock', () => {
     registerPlanDock({
       inject(name, callback) { calls.injected = name; callback() },
       register(options) { calls.options = options as unknown as Record<string, unknown> },
-    }, () => ({ openBuilder: () => { calls.props = 'openBuilder' } }))
+    }, () => ({ openCounterpart: () => { calls.props = 'openCounterpart' } }))
     expect(calls.injected).toBe('conversation.input.dock')
     expect(calls.options?.name).toBe('conversation.input.dock')
     expect(calls.options?.id).toBe(PLAN_DOCK_ID)
@@ -56,7 +56,7 @@ describe('composer plan dock', () => {
     expect(PLAN_DOCK_ORDER).toBeGreaterThan(0)
     expect(Number.isFinite(PLAN_DOCK_ORDER)).toBe(true)
     expect(typeof calls.options?.inject).toBe('function')
-    expect((calls.options?.inject as () => unknown)()).toEqual({ openBuilder: expect.any(Function) })
+    expect((calls.options?.inject as () => unknown)()).toMatchObject({ openCounterpart: expect.any(Function) })
   })
 
   it('renders only from the projected durable plan and nothing without it', () => {
@@ -76,7 +76,7 @@ describe('composer plan dock', () => {
     expect(html).toContain(CLASS.glyphFinished)
     expect(html).toContain(`${CLASS.row} ${CLASS.rowRunning}`)
     expect(html).toContain(CLASS.ghost)
-    expect(html).toContain('Open Builder')
+    expect(html).toContain('Open Challenger')
     expect(html).not.toContain('Plan completed')
     expect(html).not.toContain('●')
     expect(html).not.toContain('instructions')
@@ -104,13 +104,14 @@ describe('composer plan dock', () => {
     expect(html).not.toContain('Plan failed')
   })
 
-  it('builds the exact continuable address and stays safe when identity is missing', () => {
-    expect(builderAddress(planData)).toEqual({
-      parentSessionId: 'root-session', childSessionId: 'child-session', mode: 'continuable',
-    })
-    expect(builderAddress({ ...planData, rootSessionId: '' })).toBeUndefined()
-    expect(builderAddress({ ...planData, childId: '' })).toBeUndefined()
-    expect(builderAddress({ ...planData, rootSessionId: undefined as never })).toBeUndefined()
+  it('derives the executor session and stays safe when identity is missing', () => {
+    // Peer plans resolve to the persistent Challenger; legacy cards fall back
+    // to the historical child id; malformed identity is a no-op.
+    expect(cardExecutorId(planData)).toBe(planData.challengerSessionId ?? planData.childId)
+    expect(cardExecutorId({ ...planData, challengerSessionId: undefined, childId: 'child-session' })).toBe('child-session')
+    expect(cardExecutorId({ ...planData, challengerSessionId: undefined, childId: '' })).toBeUndefined()
+    expect(cardExecutorId({ ...planData, rootSessionId: '' })).toBeUndefined()
+    expect(cardExecutorId({ ...planData, rootSessionId: undefined as never })).toBeUndefined()
   })
 })
 

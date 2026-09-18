@@ -19,6 +19,8 @@ import { BuilderRouteControl, type BuilderRouteController } from './BuilderRoute
 import { BUILDER_SETTINGS_NAMESPACE, type BuilderRouteSettings } from '../builder-settings-shared.js'
 import { en, NS, type EndeavourKey } from './locales.js'
 import { ensurePlanStyles } from './styles.js'
+import { peerView } from '../peer-projection.js'
+import type { PeerState } from '../peer.js'
 import {
   hasTransientUserActivation,
   openPeerTab,
@@ -89,23 +91,39 @@ export function apply(ctx: ClientContext): void {
    */
   const sessionsService = (ctx as unknown as { get?: (name: string) => unknown }).get?.('sessions') as ISessions | undefined
 
-  /** Native addressed-subagent navigation, with a workspace fallback. */
-  const openBuilder = (address: SubagentAddress): void => {
+  /** Open one ordinary session by id (peer navigation; no subagent path). */
+  const openSession = (sessionId: string): void => {
     if (sessionsService !== undefined) {
-      sessionsService.openSubagent(address)
+      sessionsService.open(sessionId as SessionId)
       return
     }
-    const sessions = client.sessions
-    if (typeof sessions?.openSubagent === 'function') {
-      sessions.openSubagent(address)
-      return
-    }
-    if (typeof client.uiWorkspace?.openSession === 'function') {
-      client.uiWorkspace.openSession(address.childSessionId)
-      return
+    const sessions = client.sessions as unknown as { open?: (id: SessionId) => void } | undefined
+    if (typeof sessions?.open === 'function') sessions.open(sessionId as SessionId)
+  }
+
+  /**
+   * Plan source for the current session: its own `endeavourPlan` projection, or
+   * the paired Endeavour root's face when the current session is the
+   * Challenger. Both peers render the same canonical card data.
+   */
+  const planSource = (sessionId: string): EndeavourInjected['planSource'] => {
+    const own = faceOf(sessionId, 'endeavourPlan')
+    const peer = faceOf(sessionId, 'endeavourPeer')?.getSnapshot() as PeerState | null | undefined
+    const view = peerView(peer ?? null, sessionId)
+    const rootId = view?.role === 'challenger' ? view.counterpartId : undefined
+    const rootFace = rootId === undefined ? undefined : faceOf(rootId, 'endeavourPlan')
+    const preferred = (own?.getSnapshot() ?? null) === null ? rootFace : own
+    const face = preferred ?? own ?? rootFace
+    return {
+      getSnapshot: () => face?.getSnapshot() ?? null,
+      subscribe: (listener: () => void) => face?.subscribe(listener) ?? (() => undefined),
     }
   }
-  const injected = (): EndeavourInjected => ({ openBuilder })
+
+  const injected = (sessionId?: string): EndeavourInjected => ({
+    openCounterpart: (id) => { openSession(id) },
+    ...(sessionId === undefined ? {} : { planSource: planSource(sessionId) }),
+  })
 
   /** Official projection face for one session, when its binding exists. */
   const faceOf = (sessionId: string, key: string): PeerProjectionFace | undefined => {

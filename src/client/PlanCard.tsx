@@ -2,14 +2,22 @@
 
 import type { PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type { ChatConversationViewNode } from '@deepseek-ai/dsh-client-ui-chat/client'
-import type { SubagentAddress } from '@deepseek-ai/dsh-subagent/client'
 import type { EndeavourCardData } from '../plan-projection.js'
 import { formatEnglish, type EndeavourKey } from './locales.js'
 import { PlanView } from './PlanView.js'
 
-/** Addressed continuation navigation injected from the plugin's own services. */
+/** Peer navigation injected from the plugin's own services. */
 export interface EndeavourInjected {
-  readonly openBuilder: (address: SubagentAddress) => void
+  /** Open the plan's executor session (the persistent Challenger). */
+  readonly openCounterpart: (sessionId: string) => void
+  /**
+   * Official cross-session plan source: the current session's projection, or
+   * the paired Endeavour root's when the current session is the Challenger.
+   */
+  readonly planSource?: {
+    getSnapshot(): unknown
+    subscribe(listener: () => void): () => void
+  } | undefined
 }
 
 /** Complete keyed Chat renderer props. */
@@ -30,13 +38,16 @@ export function copyFrom(props: { readonly t?: unknown }): (key: EndeavourKey, p
 }
 
 /**
- * Exact continuable address for the plan's Builder child. Returns undefined for
- * malformed data so navigation is a no-op instead of opening a wrong session.
+ * Executor session id for the plan: the persistent Challenger for peer plans,
+ * or the legacy child id for historical cards. Returns undefined for malformed
+ * data so navigation is a no-op instead of opening a wrong session.
  */
-export function builderAddress(data: EndeavourCardData): SubagentAddress | undefined {
+export function cardExecutorId(data: EndeavourCardData): string | undefined {
   if (typeof data.rootSessionId !== 'string' || data.rootSessionId === '') return undefined
-  if (typeof data.childId !== 'string' || data.childId === '') return undefined
-  return { parentSessionId: data.rootSessionId as never, childSessionId: data.childId as never, mode: 'continuable' }
+  const executor = typeof data.challengerSessionId === 'string' && data.challengerSessionId !== ''
+    ? data.challengerSessionId
+    : data.childId
+  return typeof executor === 'string' && executor !== '' ? executor : undefined
 }
 
 /** One plan card in the transcript; shares its presentation with the dock. */
@@ -49,8 +60,8 @@ export function PlanCard(props: PlanCardProps): React.ReactElement | null {
       data={data}
       copy={copyFrom(props)}
       onOpenBuilder={() => {
-        const address = builderAddress(data)
-        if (address !== undefined) props.openBuilder(address)
+        const executor = cardExecutorId(data)
+        if (executor !== undefined) props.openCounterpart(executor)
       }}
       variant="card"
     />

@@ -103,7 +103,7 @@ describe('control rendering', () => {
 
   it('renders the ring in an Endeavour root session and nothing in Standard/child', () => {
     const html = renderToStaticMarkup(createElement(BuilderRouteControl, props({ preset: 'endeavour', plan: null })))
-    expect(html).toContain('>Builder</span>')
+    expect(html).toContain('>Challenger</span>')
     expect(html).toContain('data-endeavour-builder=')
     expect(html).toContain('aria-haspopup="menu"')
     expect(html).not.toMatch(/Inherit Endeavour|Inherit Planner|>Inherited</)

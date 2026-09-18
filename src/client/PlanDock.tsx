@@ -9,10 +9,11 @@
  * nothing. The transcript ConversationNode stays event-based.
  */
 
+import { useSyncExternalStore } from 'react'
 import type { PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type { EndeavourCardData } from '../plan-projection.js'
 import { NS, type EndeavourKey } from './locales.js'
-import { builderAddress, copyFrom, type EndeavourInjected } from './PlanCard.js'
+import { cardExecutorId, copyFrom, type EndeavourInjected } from './PlanCard.js'
 import { PlanView } from './PlanView.js'
 
 /** Complete dock renderer props (session scope supplies `useProjection`). */
@@ -24,19 +25,32 @@ export type PlanDockProps =
 /** Selector hook shape for the session projection seat. */
 type UseProjection = (key: string) => unknown
 
+const noopSubscribe = (): (() => void) => () => undefined
+const noopSnapshot = (): null => null
+
 /** Dock body; renders nothing without a projected plan. */
 export function PlanDock(props: PlanDockProps): React.ReactElement | null {
   const useProjection = (props as { readonly useProjection?: UseProjection }).useProjection
+  // Cross-session source: on the paired Challenger this subscribes to the
+  // Endeavour root's official `endeavourPlan` face, so both peers render the
+  // SAME canonical plan data without duplicating any durable events.
+  const source = props.planSource
+  const external = useSyncExternalStore(
+    source?.subscribe ?? noopSubscribe,
+    source?.getSnapshot ?? noopSnapshot,
+    source?.getSnapshot ?? noopSnapshot,
+  )
   const projected = typeof useProjection === 'function' ? useProjection('endeavourPlan') : undefined
-  const data = projected as EndeavourCardData | null | undefined
-  if (data === undefined || data === null) return null
+  const own = projected as EndeavourCardData | null | undefined
+  const data = (own ?? (external as EndeavourCardData | null | undefined)) ?? null
+  if (data === null) return null
   return (
     <PlanView
       data={data}
       copy={copyFrom(props)}
       onOpenBuilder={() => {
-        const address = builderAddress(data)
-        if (address !== undefined) props.openBuilder(address)
+        const executor = cardExecutorId(data)
+        if (executor !== undefined) props.openCounterpart(executor)
       }}
       variant="dock"
     />

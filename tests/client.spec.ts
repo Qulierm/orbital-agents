@@ -32,7 +32,7 @@ describe('English-only copy surface', () => {
 
   it('interpolates concise confirmed progress and never falls back to another language', () => {
     expect(formatEnglish('plan.progress', { confirmed: 2, total: 3 })).toBe('2 / 3 confirmed')
-    expect(formatEnglish('plan.openBuilder')).toBe('Open Builder')
+    expect(formatEnglish('plan.openBuilder')).toBe('Open Challenger')
   })
 
   it('formats the elapsed timer as mm:ss', () => {
