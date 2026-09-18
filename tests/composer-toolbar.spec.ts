@@ -132,15 +132,24 @@ describe('injected stylesheet', () => {
   it('pins the 28px segmented surface and the shrink-priority breakpoints', () => {
     const heightRule = STYLE_TEXT.match(/\.dsh-endeavour-builder-control \{[^}]*\}/)?.[0] ?? ''
     expect(heightRule).toContain('height: 28px')
-    expect(STYLE_TEXT).toContain('@media (max-width: 1280px)')
+    expect(STYLE_TEXT).toContain('@media (max-width: 1440px)')
     expect(STYLE_TEXT).toContain('span:nth-of-type(2) { display: none; }')
+    expect(STYLE_TEXT).toContain('@media (max-width: 1360px)')
+    expect(STYLE_TEXT).toContain("@media (max-width: 1360px) {\n  .dsh-endeavour-role-label, .dsh-endeavour-endeavour-role { font-size: 0;")
     expect(STYLE_TEXT).toContain('@media (max-width: 1024px)')
-    expect(STYLE_TEXT).toContain("@media (max-width: 1024px) {\n  .dsh-endeavour-role-label, .dsh-endeavour-endeavour-role { font-size: 0;")
+    expect(STYLE_TEXT).toContain('max-width: 132px')
+  })
+
+  it('disables native wrapping through stable anchors and shrinks only designated items', () => {
+    expect(STYLE_TEXT).toContain('[data-composer-card] [data-input-scroll] + div {')
+    expect(STYLE_TEXT).toContain('flex-wrap: nowrap;')
+    expect(STYLE_TEXT).toContain('[data-slot="conversation.input.model"] > div {')
   })
 
   it('documents the shrink priority in the source stylesheet', () => {
     const source = readFileSync('src/client/styles.ts', 'utf8')
     expect(source).toMatch(/Shrink priority 1: effort captions/)
-    expect(source).toMatch(/Shrink priority 2 \+ 3/)
+    expect(source).toMatch(/Shrink priority 2: long model names/)
+    expect(source).toMatch(/Shrink priority 3: role labels/)
   })
 })

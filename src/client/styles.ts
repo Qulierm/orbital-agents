@@ -137,7 +137,7 @@ export const STYLE_TEXT = `
   display: inline-flex;
   align-items: center;
   height: 28px;
-  padding: 0 8px;
+  padding: 0 6px;
   border-radius: 8px 0 0 8px;
   background: var(--dsw-alias-interactive-bg-hover);
   color: var(--dsw-alias-label-secondary);
@@ -164,14 +164,14 @@ export const STYLE_TEXT = `
 .dsh-endeavour-builder-trigger:hover:not(:disabled) { background: var(--dsw-alias-interactive-bg-hover); }
 .dsh-endeavour-builder-trigger:disabled { opacity: .55; cursor: default; }
 .dsh-endeavour-builder-trigger:focus-visible { outline: 2px solid var(--dsw-alias-border-focus, #4c8dff); outline-offset: 1px; }
-.dsh-endeavour-builder-value { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dsh-endeavour-builder-value { min-width: 0; max-width: 132px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dsh-endeavour-builder-saving { flex: none; color: var(--dsw-alias-label-tertiary); font-size: 11px; }
 /* Endeavour role: last right-side entry, joined to the native model trigger. */
 .dsh-endeavour-endeavour-role {
   display: inline-flex;
   align-items: center;
   height: 28px;
-  padding: 0 8px;
+  padding: 0 6px;
   border-radius: 8px 0 0 8px;
   background: var(--dsw-alias-interactive-bg-hover);
   color: var(--dsw-alias-label-secondary);
@@ -194,15 +194,40 @@ export const STYLE_TEXT = `
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* One toolbar line: disable native wrapping and let the designated items
+   shrink instead (stable anchors: data-input-scroll marks the input area, so
+   its next sibling is the native tools/trailing row). */
+[data-composer-card] [data-input-scroll] + div {
+  flex-wrap: nowrap;
+  gap: 8px;
+  min-width: 0;
+}
+[data-composer-card] [data-input-scroll] + div > :last-child {
+  flex-shrink: 1;
+  min-width: 0;
+}
+[data-composer-card] :has(> [data-slot="conversation.input.left"]) > div {
+  min-width: 0;
+  overflow: hidden;
+}
+[data-composer-card] [data-slot="conversation.input.model"] > div {
+  min-width: 0;
+  flex-shrink: 1;
+  margin-right: 2px;
+}
 /* Tighter gaps only when both role groups are present. */
 [data-composer-card]:has([data-endeavour-role]) :has(> [data-slot="conversation.input.left"]) { gap: 8px; min-width: 0; }
 [data-composer-card]:has([data-endeavour-role]) :has(> [data-slot="conversation.input.right"]) { gap: 8px; min-width: 0; }
 /* Shrink priority 1: effort captions collapse below the normal card width. */
-@media (max-width: 1280px) {
+@media (max-width: 1440px) {
   [data-composer-card]:has([data-endeavour-role="endeavour"]) [data-slot="conversation.input.model"] button span:nth-of-type(2) { display: none; }
 }
-/* Shrink priority 2 + 3: model names ellipsize, then role labels shorten to B/E. */
+/* Shrink priority 2: long model names ellipsize hard at the narrow breakpoint. */
 @media (max-width: 1024px) {
+  [data-composer-card]:has([data-endeavour-role="endeavour"]) [data-slot="conversation.input.model"] button { max-width: 120px; }
+}
+/* Shrink priority 3: role labels shorten to B/E at the documented narrow breakpoint. */
+@media (max-width: 1360px) {
   .dsh-endeavour-role-label, .dsh-endeavour-endeavour-role { font-size: 0; padding: 0 6px; }
   .dsh-endeavour-role-label::after { content: 'B'; font-size: 12px; }
   .dsh-endeavour-endeavour-role::after { content: 'E'; font-size: 12px; }
