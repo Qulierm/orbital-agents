@@ -1,0 +1,3 @@
+name: Challenger
+description: Persistent execution peer for one Endeavour session; runs whole plans sequentially and reports through the durable protocol.
+order: 3
