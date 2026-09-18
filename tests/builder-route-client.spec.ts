@@ -5,11 +5,14 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import { BuilderRouteControl, type BuilderRouteControlProps, type BuilderRouteController } from '../src/client/BuilderRouteControl.js'
 import {
-  builderChipLabel,
   builderControlDisabled,
   builderControlVisible,
+  effectiveEffortId,
+  effectiveSelection,
+  effortLabelFor,
   findCatalogModel,
   modelHasThinking,
+  modelLabelFor,
   resetEffortForModel,
   thinkingOptions,
   type BuilderRouteVisibility,
@@ -48,10 +51,16 @@ describe('builder control visibility', () => {
     expect(builderControlDisabled(visibility({ agentPreset: 'standard' }))).toMatch(/only available in Endeavour chats/)
   })
 
-  it('formats the chip label for inherit and custom routes', () => {
-    expect(builderChipLabel({ mode: 'inherit' })).toBe('Builder · Inherit')
-    expect(builderChipLabel({ mode: 'custom', provider: 'p', model: 'm' }, 'Model One')).toBe('Builder · Model One')
-    expect(builderChipLabel({ mode: 'custom', provider: 'p', model: 'm', reasoningEffort: 'low' }, 'Model One')).toBe('Builder · Model One · low')
+  it('resolves the effective inherited selection and effort labels', () => {
+    const selection = effectiveSelection({ next: { provider: 'p1', model: 'm1', reasoningEffort: 'high' } }, catalog)
+    expect(selection).toEqual({ provider: 'p1', model: 'm1', reasoningEffort: 'high' })
+    expect(effectiveSelection(undefined, catalog)).toEqual({ provider: 'p1', model: 'm1' })
+    expect(effectiveSelection({ next: undefined }, undefined)).toBeUndefined()
+    expect(modelLabelFor({ provider: 'p1', model: 'm1' }, findCatalogModel(catalog, 'p1', 'm1'))).toBe('Model One')
+    expect(modelLabelFor({ provider: 'p1', model: 'raw-id' }, undefined)).toBe('raw-id')
+    expect(effortLabelFor(findCatalogModel(catalog, 'p1', 'm1'), undefined)).toBe('Low')
+    expect(effortLabelFor(findCatalogModel(catalog, 'p1', 'm2'), 'low')).toBeUndefined()
+    expect(effectiveEffortId(findCatalogModel(catalog, 'p1', 'm1'), undefined)).toBe('low')
   })
 })
 
@@ -92,11 +101,12 @@ describe('control rendering', () => {
     } as never
   }
 
-  it('renders the inherit chip in an Endeavour root session and nothing in Standard/child', () => {
+  it('renders the ring in an Endeavour root session and nothing in Standard/child', () => {
     const html = renderToStaticMarkup(createElement(BuilderRouteControl, props({ preset: 'endeavour', plan: null })))
-    expect(html).toContain('Inherit Endeavour')
     expect(html).toContain('>Builder</span>')
+    expect(html).toContain('data-endeavour-builder=')
     expect(html).toContain('aria-haspopup="menu"')
+    expect(html).not.toMatch(/Inherit Endeavour|Inherit Planner|>Inherited</)
     expect(renderToStaticMarkup(createElement(BuilderRouteControl, props({ preset: 'standard', plan: null })))).toBe('')
     expect(renderToStaticMarkup(createElement(BuilderRouteControl, props({ preset: 'endeavour', subagent: { mode: 'continuable' } })))).toBe('')
   })

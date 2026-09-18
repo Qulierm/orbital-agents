@@ -58,6 +58,7 @@ const requested = []
 const exports = registration.factory((id) => {
   requested.push(id)
   if (id === 'react' || id === 'react/jsx-runtime') return { useState: () => [], useEffect: () => undefined, createElement: () => null, jsx: () => null, jsxs: () => null, Fragment: null }
+  if (id === 'react-dom') return { createPortal: (node) => node }
   throw new Error(`unexpected loader require "${id}"`)
 })
 if (typeof exports.apply !== 'function') throw new Error('factory exports missing apply')

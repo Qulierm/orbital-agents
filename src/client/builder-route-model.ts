@@ -33,14 +33,53 @@ export function builderControlDisabled(input: BuilderRouteVisibility): string | 
 }
 
 /** Compact chip label: `Builder · Inherit` or `Builder · <model> · <effort>`. */
-export function builderChipLabel(settings: BuilderRouteSettings, modelName?: string): string {
-  if (settings.mode !== 'custom' || settings.provider === undefined || settings.model === undefined) {
-    return 'Builder · Inherit'
-  }
-  const name = modelName ?? settings.model
-  return settings.reasoningEffort === undefined
-    ? `Builder · ${name}`
-    : `Builder · ${name} · ${settings.reasoningEffort}`
+/** The session's projected model selection (ui-model-selection contract). */
+export interface ModelSelectionLike {
+  readonly provider: string
+  readonly model: string
+  readonly reasoningEffort?: string
+}
+
+/** Projection face: `next` is the effective/pending session selection. */
+export interface ModelSelectionProjectionLike {
+  readonly next?: ModelSelectionLike
+}
+
+/**
+ * The route the Builder inherits right now: the session's projected selection
+ * when available, otherwise the catalog default (before the first request).
+ */
+export function effectiveSelection(
+  projection: unknown,
+  catalog: { readonly default?: ModelSelectionLike } | undefined,
+): ModelSelectionLike | undefined {
+  const next = (projection as ModelSelectionProjectionLike | undefined)?.next
+  return next ?? catalog?.default
+}
+
+/** Display name for a selection: the catalog name, else the raw model id. */
+export function modelLabelFor(
+  selection: ModelSelectionLike | undefined,
+  model: ModelCatalogModel | undefined,
+): string | undefined {
+  if (selection === undefined) return undefined
+  return model?.name ?? selection.model
+}
+
+/** The effective effort id: the explicit one, else the model's default. */
+export function effectiveEffortId(
+  model: ModelCatalogModel | undefined,
+  effort: string | undefined,
+): string | undefined {
+  return effort ?? model?.reasoning?.defaultEffort
+}
+
+/** Effort display name; `undefined` when the model has no reasoning at all. */
+export function effortLabelFor(model: ModelCatalogModel | undefined, effort: string | undefined): string | undefined {
+  if (!modelHasThinking(model)) return undefined
+  const effective = effectiveEffortId(model, effort)
+  if (effective === undefined) return undefined
+  return model?.reasoning?.efforts.find((level) => level.id === effective)?.name ?? effective
 }
 
 /** The selected model metadata from a catalog, when present. */

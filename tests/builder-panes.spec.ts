@@ -1,11 +1,7 @@
 // @vitest-environment happy-dom
 /**
- * Builder route menu pane structure and mouse/keyboard navigation.
- *
- * The menu mirrors upstream ModelSelect: the root pane holds exactly two drill
- * rows (Model, Thinking), so a large catalog can never bury the thinking
- * options; drills push a pane, Back/Escape pops one level, and the selected row
- * receives focus on entry.
+ * Builder route control: effective inherited presentation, native-parity
+ * Model/Effort panes, and portal placement/navigation regressions.
  */
 
 import { createElement } from 'react'
@@ -14,16 +10,14 @@ import { act } from 'react-dom/test-utils'
 import { afterEach, describe, expect, it } from 'vitest'
 import { BuilderRouteControl, type BuilderRouteController } from '../src/client/BuilderRouteControl.js'
 import type { BuilderRouteSettings } from '../src/builder-settings.js'
-import { STYLE_TEXT } from '../src/client/styles.js'
 import type { ModelCatalog } from '@deepseek-ai/dsh-api-session-controller/types'
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
-/** 40-model catalog: heavy enough that thinking would be buried if flat. */
 function bigCatalog(): ModelCatalog {
   const filler = Array.from({ length: 37 }, (_, index) => ({ id: `f${index + 1}`, name: `Filler ${index + 1}` }))
   return {
-    default: { provider: 'g1', model: 'f1' },
+    default: { provider: 'g1', model: 'ma' },
     routableProviders: ['g1', 'g2'],
     groups: [
       { id: 'g1', name: 'Group One', models: [
@@ -31,7 +25,7 @@ function bigCatalog(): ModelCatalog {
         { id: 'mb', name: 'Model B' },
         ...filler,
       ] },
-      { id: 'g2', name: 'Group Two', models: [{ id: 'mc', name: 'Model C', reasoning: { efforts: [{ id: 'x', name: 'Extra' }], defaultEffort: 'x' } }] },
+      { id: 'g2', name: 'Group Two', models: [{ id: 'mc', name: 'Model C', reasoning: { efforts: [{ id: 'x', name: 'Extra' }] } }] },
     ],
     failures: [],
   }
@@ -45,9 +39,14 @@ afterEach(() => {
   for (const container of containers.splice(0)) container.remove()
 })
 
-function render(settings: BuilderRouteSettings = { mode: 'inherit' }) {
+interface Options {
+  readonly settings?: BuilderRouteSettings
+  readonly next?: { provider: string; model: string; reasoningEffort?: string } | undefined
+}
+
+function render(options: Options = {}) {
   const writes: BuilderRouteSettings[] = []
-  let current = settings
+  let current = options.settings ?? { mode: 'inherit' }
   const controller: BuilderRouteController = {
     readSettings: () => current,
     writeSettings: async (next) => { writes.push(next); current = next },
@@ -56,9 +55,14 @@ function render(settings: BuilderRouteSettings = { mode: 'inherit' }) {
   const container = document.createElement('div')
   document.body.appendChild(container)
   const root = createRoot(container)
+  const projection = options.next === undefined ? undefined : { next: options.next }
   act(() => {
     root.render(createElement(BuilderRouteControl, {
-      useProjection: (key: string) => (key === 'agentPreset' ? 'endeavour' : null),
+      useProjection: (key: string) => {
+        if (key === 'agentPreset') return 'endeavour'
+        if (key === 'modelSelection') return projection
+        return null
+      },
       useSession: (selector: (state: unknown) => unknown) => selector({ running: false }),
       builderRoute: controller,
       t: undefined,
@@ -74,7 +78,8 @@ function chip(container: HTMLElement): HTMLButtonElement {
 }
 
 function menu(container: HTMLElement): HTMLElement {
-  return container.querySelector('[role="menu"]') as HTMLElement
+  void container
+  return document.body.querySelector('[role="menu"]') as HTMLElement
 }
 
 function paneName(container: HTMLElement): string | null {
@@ -82,7 +87,7 @@ function paneName(container: HTMLElement): string | null {
 }
 
 function rows(container: HTMLElement): HTMLElement[] {
-  return [...container.querySelectorAll('[role="menu"] [role="menuitem"], [role="menu"] [role="menuitemradio"]')] as HTMLElement[]
+  return [...menu(container).querySelectorAll('[role="menuitem"], [role="menuitemradio"]')] as HTMLElement[]
 }
 
 function labels(container: HTMLElement): string[] {
@@ -96,13 +101,11 @@ function rowByText(container: HTMLElement, text: string): HTMLElement {
 }
 
 function activeRow(container: HTMLElement): HTMLElement | undefined {
-  return container.querySelector('[class*="menu-row--active"]') as HTMLElement | undefined
+  return menu(container).querySelector('[class*="menu-option--active"], [class*="menu-cell--active"]') as HTMLElement | undefined
 }
 
 async function click(element: Element | undefined | null): Promise<void> {
-  await act(async () => {
-    element?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
-  })
+  await act(async () => { element?.dispatchEvent(new MouseEvent('click', { bubbles: true })) })
 }
 
 async function open(container: HTMLElement): Promise<void> {
@@ -116,170 +119,162 @@ async function key(container: HTMLElement, value: string): Promise<void> {
   })
 }
 
-describe('root pane', () => {
-  it('shows exactly the two drill rows even with a 40-model catalog', async () => {
-    const view = render()
+describe('effective inherited presentation', () => {
+  it('shows the actual projected model and effort, never an inheritance word', async () => {
+    const view = render({ next: { provider: 'g1', model: 'ma', reasoningEffort: 'high' } })
     await open(view.container)
     expect(paneName(view.container)).toBe('root')
-    expect(rows(view.container)).toHaveLength(2)
-    expect(labels(view.container)[0]).toContain('Model')
-    expect(labels(view.container)[0]).toContain('Inherit Endeavour')
-    expect(labels(view.container)[1]).toContain('Thinking')
-    expect(labels(view.container)[1]).toContain('Inherited')
-    expect(labels(view.container).join(' ')).not.toContain('Filler')
+    expect(labels(view.container)).toEqual(['ModelModel A', 'EffortHigh'])
+    expect(chip(view.container).textContent).toContain('Model A')
+    expect(chip(view.container).textContent).toContain('High')
+    expect(document.body.textContent).not.toMatch(/Inherit Endeavour|Inherit Planner|Inherited/)
   })
 
-  it('marks Thinking non-drillable in inherit mode and when the model has no reasoning', async () => {
-    const inherit = render({ mode: 'inherit' })
-    await open(inherit.container)
-    expect((rows(inherit.container)[1] as HTMLButtonElement).disabled).toBe(true)
-    await click(rows(inherit.container)[1])
-    expect(paneName(inherit.container)).toBe('root')
+  it('falls back to the catalog default and resolves the declared default effort', async () => {
+    const view = render({ next: undefined })
+    await open(view.container)
+    expect(labels(view.container)).toEqual(['ModelModel A', 'EffortMedium'])
+  })
 
-    const plain = render({ mode: 'custom', provider: 'g1', model: 'mb' })
-    await open(plain.container)
-    expect(labels(plain.container)[1]).toContain('Not available')
-    expect((rows(plain.container)[1] as HTMLButtonElement).disabled).toBe(true)
-    expect((rows(plain.container)[0] as HTMLButtonElement).textContent).toContain('Model B')
+  it('reacts to a pending projection change without flickering an inheritance word', async () => {
+    const view = render({ next: { provider: 'g2', model: 'mc', reasoningEffort: 'x' } })
+    await open(view.container)
+    expect(labels(view.container)).toEqual(['ModelModel C', 'EffortExtra'])
+    expect(document.body.textContent).not.toMatch(/Inherit Endeavour|Inherited/)
+  })
+
+  it('disables the Effort cell with Not available when the model has no reasoning', async () => {
+    const view = render({ next: { provider: 'g1', model: 'mb' } })
+    await open(view.container)
+    expect(labels(view.container)[1]).toContain('Not available')
+    expect((rows(view.container)[1] as HTMLButtonElement).disabled).toBe(true)
+    await click(rows(view.container)[1])
+    expect(paneName(view.container)).toBe('root')
   })
 })
 
-describe('model and thinking panes', () => {
-  it('keeps model rows in the model pane and effort rows only in the thinking pane', async () => {
-    const view = render({ mode: 'custom', provider: 'g1', model: 'ma', reasoningEffort: 'medium' })
+describe('Model pane', () => {
+  it('offers Automatic first with the secondary description, then provider groups', async () => {
+    const view = render({ next: { provider: 'g1', model: 'ma', reasoningEffort: 'high' } })
     await open(view.container)
     await click(rowByText(view.container, 'Model'))
     expect(paneName(view.container)).toBe('model')
-    const modelLabels = labels(view.container)
-    expect(modelLabels[0]).toContain('Back')
-    expect(modelLabels[1]).toContain('Inherit Endeavour')
-    const headers = [...view.container.querySelectorAll('[class*="menu-header"]')].map((node) => node.textContent)
-    expect(headers).toEqual(['Group One', 'Group Two'])
-    expect(modelLabels.filter((label) => label.includes('Filler')).length).toBeGreaterThan(30)
-    expect(modelLabels.some((label) => label.includes('Provider default'))).toBe(false)
-
-    await click(rowByText(view.container, 'Back'))
-    expect(paneName(view.container)).toBe('root')
-    expect(labels(view.container)[1]).toContain('Medium')
-    await click(rows(view.container)[1])
-    expect(paneName(view.container)).toBe('thinking')
-    const effortLabels = labels(view.container)
-    expect(effortLabels[0]).toContain('Back')
-    expect(effortLabels).toEqual(expect.arrayContaining(['✓ Medium', 'Low', 'High']))
-    expect(effortLabels.some((label) => label.includes('Filler') || label.includes('Model A'))).toBe(false)
+    const texts = labels(view.container)
+    expect(texts[0]).toContain('Back')
+    expect(texts[1]).toContain('Automatic')
+    expect(texts[1]).toContain('Follows the current Endeavour model and effort.')
+    expect((rows(view.container)[1] as HTMLElement).getAttribute('aria-checked')).toBe('true')
+    expect(menu(view.container).querySelectorAll('[class*="menu-group"]').length).toBe(2)
+    expect(texts.filter((label) => label.includes('Filler')).length).toBeGreaterThan(30)
+    expect(texts.some((label) => /Inherit/.test(label))).toBe(false)
   })
 
-  it('returns to root after a model switch, showing the model default effort', async () => {
-    const view = render({ mode: 'inherit' })
+  it('selects a model, returns to root, and shows the model default effort', async () => {
+    const view = render({ next: { provider: 'g1', model: 'ma' } })
     await open(view.container)
     await click(rowByText(view.container, 'Model'))
-    await click(rowByText(view.container, 'Model A'))
+    await click(rowByText(view.container, 'Model C'))
     expect(paneName(view.container)).toBe('root')
-    expect(chip(view.container).textContent).toContain('Model A')
-    expect(chip(view.container).textContent).toContain('medium')
-    expect(labels(view.container)[1]).toContain('Medium')
-    expect((rows(view.container)[1] as HTMLButtonElement).disabled).toBe(false)
-    expect(view.writes.at(-1)).toEqual({ mode: 'custom', provider: 'g1', model: 'ma', reasoningEffort: 'medium' })
+    expect(labels(view.container)).toEqual(['ModelModel C', 'EffortDefault'])
+    expect(view.writes.at(-1)).toEqual({ mode: 'custom', provider: 'g2', model: 'mc' })
+    await click(rows(view.container)[1])
+    expect(rowByText(view.container, 'Default').getAttribute('aria-checked')).toBe('true')
+    expect(rowByText(view.container, 'Extra').getAttribute('aria-checked')).toBe('false')
   })
 
-  it('persists an explicit effort and Provider default from the thinking pane', async () => {
-    const view = render({ mode: 'custom', provider: 'g1', model: 'ma', reasoningEffort: 'medium' })
-    await open(view.container)
-    await click(rows(view.container)[1])
-    await click(rowByText(view.container, 'High'))
-    expect(paneName(view.container)).toBe('root')
-    expect(chip(view.container).textContent).toContain('high')
-    expect(view.writes.at(-1)).toEqual({ mode: 'custom', provider: 'g1', model: 'ma', reasoningEffort: 'high' })
-
-    await click(rows(view.container)[1])
-    await click(rowByText(view.container, 'Provider default'))
-    expect(view.writes.at(-1)).toEqual({ mode: 'custom', provider: 'g1', model: 'ma' })
-    expect(labels(view.container)[1]).toContain('Provider default')
-  })
-
-  it('selects Inherit from the model pane and returns to root', async () => {
-    const view = render({ mode: 'custom', provider: 'g1', model: 'ma', reasoningEffort: 'high' })
+  it('returns to following Endeavour through Automatic', async () => {
+    const view = render({ settings: { mode: 'custom', provider: 'g1', model: 'ma', reasoningEffort: 'low' } })
     await open(view.container)
     await click(rowByText(view.container, 'Model'))
-    await click(rowByText(view.container, 'Inherit Endeavour'))
+    await click(rowByText(view.container, 'Automatic'))
     expect(paneName(view.container)).toBe('root')
-    expect(chip(view.container).textContent).toContain('Inherit Endeavour')
     expect(view.writes.at(-1)).toEqual({ mode: 'inherit' })
   })
 })
 
-describe('keyboard and focus', () => {
-  it('drills with Enter/Space, wraps arrows, and lands focus on the selected row', async () => {
-    const view = render({ mode: 'custom', provider: 'g1', model: 'ma', reasoningEffort: 'medium' })
+describe('Effort pane', () => {
+  it('pins an effort on the inherited provider/model without reselecting the model', async () => {
+    const view = render({ next: { provider: 'g1', model: 'ma' } })
     await open(view.container)
-    await key(view.container, 'ArrowUp') // wrap to last root row (Thinking)
-    expect(activeRow(view.container)?.textContent).toContain('Thinking')
-    await key(view.container, 'ArrowDown') // wrap back to Model
-    expect(activeRow(view.container)?.textContent).toContain('Model')
-    await key(view.container, 'Enter')
-    expect(paneName(view.container)).toBe('model')
-    expect(activeRow(view.container)?.textContent).toContain('Model A')
-
-    await key(view.container, 'ArrowDown')
-    await key(view.container, 'ArrowUp')
-    expect(activeRow(view.container)?.textContent).toContain('Model A')
-    await key(view.container, ' ')
-    expect(paneName(view.container)).toBe('root')
-
-    await key(view.container, 'ArrowDown')
-    expect(activeRow(view.container)?.textContent).toContain('Thinking')
-    await key(view.container, 'ArrowDown')
-    expect(activeRow(view.container)?.textContent).toContain('Model')
-  })
-
-  it('Escape backs out of a drill pane and closes the root, restoring chip focus', async () => {
-    const view = render({ mode: 'custom', provider: 'g1', model: 'ma', reasoningEffort: 'medium' })
-    await open(view.container)
-    await click(rowByText(view.container, 'Model'))
-    expect(paneName(view.container)).toBe('model')
-    await key(view.container, 'Escape')
-    expect(paneName(view.container)).toBe('root')
-    expect(menu(view.container)).toBeTruthy()
-    await key(view.container, 'Escape')
-    expect(view.container.querySelector('[role="menu"]')).toBeNull()
-    expect(document.activeElement).toBe(chip(view.container))
-  })
-
-  it('closes on Tab and returns focus to the chip', async () => {
-    const view = render()
-    await open(view.container)
-    await key(view.container, 'Tab')
-    expect(view.container.querySelector('[role="menu"]')).toBeNull()
-    expect(document.activeElement).toBe(chip(view.container))
-  })
-
-  it('drills into Thinking without any model rows, choosing an effort with the keyboard', async () => {
-    const view = render({ mode: 'custom', provider: 'g1', model: 'ma', reasoningEffort: 'medium' })
-    await open(view.container)
-    await key(view.container, 'ArrowDown')
-    await key(view.container, 'Enter')
-    expect(paneName(view.container)).toBe('thinking')
-    expect(activeRow(view.container)?.textContent).toContain('Medium')
-    await key(view.container, 'ArrowDown')
-    await key(view.container, 'Enter')
+    expect(labels(view.container)[1]).toContain('Medium')
+    await click(rows(view.container)[1])
+    expect(paneName(view.container)).toBe('effort')
+    const texts = labels(view.container)
+    expect(texts[0]).toContain('Back')
+    expect(texts).toEqual(expect.arrayContaining(['Medium', 'Low', 'High', 'Default']))
+    expect(rowByText(view.container, 'Medium').getAttribute('aria-checked')).toBe('true')
+    await click(rowByText(view.container, 'High'))
     expect(paneName(view.container)).toBe('root')
     expect(view.writes.at(-1)).toEqual({ mode: 'custom', provider: 'g1', model: 'ma', reasoningEffort: 'high' })
+    expect(chip(view.container).textContent).toContain('High')
   })
 
-  it('offers a single effort for a one-effort model and keeps large groups scrollable', async () => {
-    const view = render({ mode: 'custom', provider: 'g2', model: 'mc', reasoningEffort: 'x' })
+  it('can select the provider default explicitly', async () => {
+    const view = render({ next: { provider: 'g1', model: 'ma', reasoningEffort: 'high' } })
     await open(view.container)
     await click(rows(view.container)[1])
-    expect(labels(view.container)).toEqual(['Back', 'Provider default', '✓ Extra'])
-    expect(menu(view.container).className).toContain('menu')
+    await click(rowByText(view.container, 'Default'))
+    expect(view.writes.at(-1)).toEqual({ mode: 'custom', provider: 'g1', model: 'ma' })
+  })
+})
 
-    const big = render({ mode: 'custom', provider: 'g1', model: 'ma', reasoningEffort: 'medium' })
-    await open(big.container)
-    await click(rowByText(big.container, 'Model'))
-    expect(menu(big.container).className).toContain('dsh-endeavour-menu')
-    const menuCss = STYLE_TEXT.slice(STYLE_TEXT.indexOf('.dsh-endeavour-menu '), STYLE_TEXT.indexOf('.dsh-endeavour-menu-row {'))
-    expect(menuCss).toContain('max-height: 320px')
-    expect(menuCss).toContain('overflow-y: auto')
-    expect(menuCss).toContain('max-width: min(360px, calc(100vw - 24px))')
+describe('portal, placement, and keyboard', () => {
+  it('portals the card to body and places it fixed from the trigger rect', async () => {
+    const view = render({ next: { provider: 'g1', model: 'ma' } })
+    const trigger = chip(view.container)
+    trigger.getBoundingClientRect = () => ({ right: 500, top: 300, bottom: 328, left: 340, width: 160, height: 28, x: 340, y: 300, toJSON: () => ({}) }) as DOMRect
+    await open(view.container)
+    const card = menu(view.container)
+    expect(card.parentElement).toBe(document.body)
+    expect(card.style.position).toBe('fixed')
+    expect(card.style.left).toBe('500px')
+    expect(card.style.top).toBe('292px')
+  })
+
+  it('re-places on scroll and closes on outside pointer down', async () => {
+    const view = render({ next: { provider: 'g1', model: 'ma' } })
+    const trigger = chip(view.container)
+    let top = 300
+    trigger.getBoundingClientRect = () => ({ right: 500, top, bottom: top + 28, left: 340, width: 160, height: 28, x: 340, y: top, toJSON: () => ({}) }) as DOMRect
+    await open(view.container)
+    expect(menu(view.container).style.top).toBe('292px')
+    top = 200
+    await act(async () => { window.dispatchEvent(new Event('scroll')) })
+    expect(menu(view.container).style.top).toBe('192px')
+    await act(async () => {
+      document.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }))
+    })
+    expect(document.body.querySelector('[role="menu"]')).toBeNull()
+  })
+
+  it('drills with Enter/Space, wraps arrows, backs out with Escape, and closes on Tab', async () => {
+    const view = render({ next: { provider: 'g1', model: 'ma' } })
+    await open(view.container)
+    await key(view.container, 'ArrowDown')
+    expect(activeRow(view.container)?.textContent).toContain('Effort')
+    await key(view.container, 'ArrowDown') // wrap to Model
+    expect(activeRow(view.container)?.textContent).toContain('Model')
+    await key(view.container, 'Enter')
+    expect(paneName(view.container)).toBe('model')
+    expect(activeRow(view.container)?.textContent).toContain('Automatic')
+    await key(view.container, 'Escape')
+    expect(paneName(view.container)).toBe('root')
+    await key(view.container, 'ArrowDown')
+    await key(view.container, ' ')
+    expect(paneName(view.container)).toBe('effort')
+    await key(view.container, 'Escape')
+    expect(paneName(view.container)).toBe('root')
+    await key(view.container, 'Tab')
+    expect(document.body.querySelector('[role="menu"]')).toBeNull()
+    expect(document.activeElement).toBe(chip(view.container))
+  })
+
+  it('keeps a 40-model catalog from burying the effort cell', async () => {
+    const view = render({ next: { provider: 'g1', model: 'ma' } })
+    await open(view.container)
+    expect(rows(view.container)).toHaveLength(2)
+    await click(rows(view.container)[1])
+    expect(paneName(view.container)).toBe('effort')
+    expect(rows(view.container).some((row) => (row.textContent ?? '').includes('Filler'))).toBe(false)
   })
 })

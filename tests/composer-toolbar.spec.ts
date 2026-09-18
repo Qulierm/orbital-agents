@@ -72,16 +72,15 @@ describe('Builder group', () => {
     expect(html).toContain('data-endeavour-role="builder"')
     expect(html).toContain('>Builder</span>')
     expect(html).toContain('class="dsh-endeavour-builder-trigger"')
-    expect(html).toContain('>Inherit Endeavour</span>')
-    expect(html).not.toMatch(/Builder \u00b7/)
+    expect(html).not.toMatch(/Inherit Endeavour|Inherit Planner|>Inherited</)
   })
   it('keeps the route value and full accessible name on the trigger', () => {
     const html = renderToStaticMarkup(createElement(BuilderRouteControl, {
       ...seatProps('endeavour'),
       builderRoute: controller(),
     } as never))
-    expect(html).toContain('aria-label="Builder: Inherit Endeavour"')
-    expect(html).toContain('title="Builder: Inherit Endeavour"')
+    expect(html).toContain('aria-label="Builder model"')
+    expect(html).toContain('title="Builder model"')
   })
 })
 
@@ -129,15 +128,70 @@ describe('injected stylesheet', () => {
     expect(STYLE_TEXT).toContain('.dsh-endeavour-role-label')
   })
 
-  it('pins the 28px segmented surface and the shrink-priority breakpoints', () => {
-    const heightRule = STYLE_TEXT.match(/\.dsh-endeavour-builder-control \{[^}]*\}/)?.[0] ?? ''
-    expect(heightRule).toContain('height: 28px')
+  it('pins the native trigger contract and the shrink-priority breakpoints', () => {
+    const control = STYLE_TEXT.match(/\.dsh-endeavour-builder-control \{[^}]*\}/)?.[0] ?? ''
+    expect(control).toContain('height: 28px')
+    const trigger = STYLE_TEXT.match(/\.dsh-endeavour-builder-trigger \{[^}]*\}/)?.[0] ?? ''
+    expect(trigger).toContain('height: 28px')
+    expect(trigger).toContain('font-size: 13px')
+    expect(trigger).toContain('line-height: 20px')
+    expect(trigger).toContain('font-weight: 500')
+    expect(trigger).toContain('color: var(--dsw-alias-label-secondary)')
+    expect(trigger).toContain('border-radius: 0 8px 8px 0')
+    const effort = STYLE_TEXT.match(/\.dsh-endeavour-builder-effort \{[^}]*\}/)?.[0] ?? ''
+    expect(effort).toContain('color: var(--dsw-alias-label-caption)')
     expect(STYLE_TEXT).toContain('@media (max-width: 1440px)')
     expect(STYLE_TEXT).toContain('span:nth-of-type(2) { display: none; }')
     expect(STYLE_TEXT).toContain('@media (max-width: 1360px)')
-    expect(STYLE_TEXT).toContain("@media (max-width: 1360px) {\n  .dsh-endeavour-role-label, .dsh-endeavour-endeavour-role { font-size: 0;")
+    expect(STYLE_TEXT).toContain('font-size: 13px; line-height: 20px; font-weight: 500;')
     expect(STYLE_TEXT).toContain('@media (max-width: 1024px)')
-    expect(STYLE_TEXT).toContain('max-width: 132px')
+    expect(STYLE_TEXT).toContain('max-width: 120px')
+  })
+
+  it('copies the native ModelSelect menu tokens exactly', () => {
+    const menu = STYLE_TEXT.match(/\.dsh-endeavour-menu \{[^}]*\}/)?.[0] ?? ''
+    expect(menu).toContain('position: fixed')
+    expect(menu).toContain('z-index: 1100')
+    expect(menu).toContain('width: max-content')
+    expect(menu).toContain('min-width: min(240px, calc(100vw - 32px))')
+    expect(menu).toContain('max-width: min(420px, calc(100vw - 32px))')
+    expect(menu).toContain('max-height: min(360px, calc(100vh - 96px))')
+    expect(menu).toContain('padding: 4px')
+    expect(menu).toContain('border: 0')
+    expect(menu).toContain('border-radius: 20px')
+    expect(menu).toContain('background: var(--dsw-specific-menu)')
+    expect(menu).toContain('--dsw-elevation-stroke-color: var(--dsw-alias-border-l1)')
+    expect(menu).toContain('box-shadow: var(--dsw-elevation-prominent)')
+    expect(menu).toContain('--dsh-scrollbar-thumb: var(--dsw-alias-scrollbar-bg-l2)')
+    const cell = STYLE_TEXT.match(/\.dsh-endeavour-menu-cell \{[^}]*\}/)?.[0] ?? ''
+    expect(cell).toContain('height: 40px')
+    expect(cell).toContain('padding: 0 10px')
+    expect(cell).toContain('border-radius: 10px')
+    expect(cell).toContain('font-size: 14px')
+    expect(cell).toContain('line-height: 22px')
+    const value = STYLE_TEXT.match(/\.dsh-endeavour-menu-cell-value \{[^}]*\}/)?.[0] ?? ''
+    expect(value).toContain('color: var(--dsw-alias-label-tertiary)')
+    const option = STYLE_TEXT.match(/\.dsh-endeavour-menu-option \{[^}]*\}/)?.[0] ?? ''
+    expect(option).toContain('min-height: 38px')
+    expect(option).toContain('border-radius: 10px')
+    const name = STYLE_TEXT.match(/\.dsh-endeavour-menu-option-name \{[^}]*\}/)?.[0] ?? ''
+    expect(name).toContain('font-size: 14px')
+    expect(name).toContain('line-height: 20px')
+    expect(name).toContain('font-weight: 500')
+  })
+
+  it('portals the menu and places it from the trigger rect with scroll/resize tracking', () => {
+    const source = readFileSync('src/client/BuilderRouteControl.tsx', 'utf8')
+    expect(source).toContain("createPortal(")
+    expect(source).toContain('document.body')
+    expect(source).toContain('getBoundingClientRect()')
+    expect(source).toContain("window.addEventListener('scroll', place, true)")
+    expect(source).toContain("window.addEventListener('resize', place)")
+    expect(source).toContain('visibility: \'hidden\'')
+    expect(source).toContain("'builder.model'")
+    expect(source).toContain("'builder.effort'")
+    expect(source).toContain("'builder.automatic'")
+    expect(source).not.toMatch(/Inherit Endeavour|Inherit Planner/)
   })
 
   it('disables native wrapping through stable anchors and shrinks only designated items', () => {

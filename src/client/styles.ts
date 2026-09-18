@@ -22,17 +22,26 @@ export const CLASS = {
   routeHint: 'dsh-endeavour-route',
   roleLabel: 'dsh-endeavour-role-label',
   builderTrigger: 'dsh-endeavour-builder-trigger',
-  builderValue: 'dsh-endeavour-builder-value',
+  builderModel: 'dsh-endeavour-builder-model',
+  builderEffort: 'dsh-endeavour-builder-effort',
   builderSaving: 'dsh-endeavour-builder-saving',
+  builderChevron: 'dsh-endeavour-builder-chevron',
   endeavourRole: 'dsh-endeavour-endeavour-role',
   menu: 'dsh-endeavour-menu',
-  menuRow: 'dsh-endeavour-menu-row',
-  menuRowActive: 'dsh-endeavour-menu-row dsh-endeavour-menu-row--active',
-  menuRowLabel: 'dsh-endeavour-menu-label',
-  menuRowValue: 'dsh-endeavour-menu-value',
-  menuRowDescription: 'dsh-endeavour-menu-description',
-  menuHeader: 'dsh-endeavour-menu-header',
+  menuCell: 'dsh-endeavour-menu-cell',
+  menuCellActive: 'dsh-endeavour-menu-cell dsh-endeavour-menu-cell--active',
+  menuCellLabel: 'dsh-endeavour-menu-cell-label',
+  menuCellValue: 'dsh-endeavour-menu-cell-value',
+  menuCellChevron: 'dsh-endeavour-menu-cell-chevron',
+  menuOption: 'dsh-endeavour-menu-option',
+  menuOptionActive: 'dsh-endeavour-menu-option dsh-endeavour-menu-option--active',
+  menuOptionCopy: 'dsh-endeavour-menu-option-copy',
+  menuOptionName: 'dsh-endeavour-menu-option-name',
+  menuOptionDetail: 'dsh-endeavour-menu-option-detail',
+  menuCheck: 'dsh-endeavour-menu-check',
+  menuGroup: 'dsh-endeavour-menu-group',
   menuNote: 'dsh-endeavour-menu-note',
+  menuRetry: 'dsh-endeavour-menu-retry',
   menuError: 'dsh-endeavour-menu-error',
   ghost: 'dsh-endeavour-ghost',
   chevron: 'dsh-endeavour-chevron',
@@ -124,6 +133,8 @@ export const STYLE_TEXT = `
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* Native ModelSelect trigger contract: 28px chip, 13/20 medium secondary
+   label, 4px gap, caption effort. The role label shares the same 28px row. */
 .dsh-endeavour-builder-control {
   position: relative;
   display: inline-flex;
@@ -141,31 +152,49 @@ export const STYLE_TEXT = `
   border-radius: 8px 0 0 8px;
   background: var(--dsw-alias-interactive-bg-hover);
   color: var(--dsw-alias-label-secondary);
-  font-size: 12px;
+  font-size: 13px;
+  line-height: 20px;
   font-weight: 500;
   flex: none;
 }
 .dsh-endeavour-builder-trigger {
-  display: inline-flex;
+  display: flex;
   align-items: center;
   gap: 4px;
-  height: 28px;
   min-width: 0;
-  max-width: 200px;
-  padding: 0 6px 0 8px;
+  max-width: min(300px, 45cqw);
+  height: 28px;
+  padding: 0 4px 0 8px;
   border: none;
   border-radius: 0 8px 8px 0;
-  background: color-mix(in srgb, var(--dsw-alias-interactive-bg-hover) 60%, transparent);
-  color: var(--dsw-alias-label-primary);
-  font-size: 12px;
+  outline: none;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 13px;
+  line-height: 20px;
+  font-weight: 500;
   cursor: pointer;
   flex: 0 1 auto;
 }
 .dsh-endeavour-builder-trigger:hover:not(:disabled) { background: var(--dsw-alias-interactive-bg-hover); }
-.dsh-endeavour-builder-trigger:disabled { opacity: .55; cursor: default; }
-.dsh-endeavour-builder-trigger:focus-visible { outline: 2px solid var(--dsw-alias-border-focus, #4c8dff); outline-offset: 1px; }
-.dsh-endeavour-builder-value { min-width: 0; max-width: 132px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.dsh-endeavour-builder-saving { flex: none; color: var(--dsw-alias-label-tertiary); font-size: 11px; }
+.dsh-endeavour-builder-trigger:focus-visible { box-shadow: 0 0 0 2px var(--dsw-alias-border-l3); }
+.dsh-endeavour-builder-trigger:disabled { color: var(--dsw-alias-label-dimmed); cursor: default; }
+.dsh-endeavour-builder-model {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dsh-endeavour-builder-effort {
+  flex-shrink: 1000;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--dsw-alias-label-caption);
+}
+.dsh-endeavour-builder-saving { flex: none; color: var(--dsw-alias-label-caption); font-size: 12px; }
+.dsh-endeavour-builder-chevron { flex: 0 0 auto; color: var(--dsw-alias-label-caption); }
 /* Endeavour role: last right-side entry, joined to the native model trigger. */
 .dsh-endeavour-endeavour-role {
   display: inline-flex;
@@ -175,7 +204,8 @@ export const STYLE_TEXT = `
   border-radius: 8px 0 0 8px;
   background: var(--dsw-alias-interactive-bg-hover);
   color: var(--dsw-alias-label-secondary);
-  font-size: 12px;
+  font-size: 13px;
+  line-height: 20px;
   font-weight: 500;
   white-space: nowrap;
   flex: none;
@@ -226,54 +256,112 @@ export const STYLE_TEXT = `
 @media (max-width: 1024px) {
   [data-composer-card]:has([data-endeavour-role="endeavour"]) [data-slot="conversation.input.model"] button { max-width: 120px; }
 }
-/* Shrink priority 3: role labels shorten to B/E at the documented narrow breakpoint. */
+/* Shrink priority 3: role labels shorten to B/E at the documented narrow
+   breakpoint, keeping the exact 13/20/500 role typography. */
 @media (max-width: 1360px) {
   .dsh-endeavour-role-label, .dsh-endeavour-endeavour-role { font-size: 0; padding: 0 6px; }
-  .dsh-endeavour-role-label::after { content: 'B'; font-size: 12px; }
-  .dsh-endeavour-endeavour-role::after { content: 'E'; font-size: 12px; }
+  .dsh-endeavour-role-label::after, .dsh-endeavour-endeavour-role::after { font-size: 13px; line-height: 20px; font-weight: 500; }
+  .dsh-endeavour-role-label::after { content: 'B'; }
+  .dsh-endeavour-endeavour-role::after { content: 'E'; }
 }
+/* Native ModelSelect menu card: portaled, radius 20, specific-menu surface,
+   prominent elevation, 40px root cells, 14/22 typography. */
 .dsh-endeavour-menu {
-  position: absolute;
-  bottom: 100%;
-  left: 0;
-  z-index: 30;
-  margin-bottom: 6px;
-  min-width: 240px;
-  max-width: min(360px, calc(100vw - 24px));
-  max-height: 320px;
-  overflow-y: auto;
-  border: 1px solid var(--dsw-alias-border-l1);
-  border-radius: 10px;
-  background: var(--dsw-specific-tip);
-  color: var(--dsw-alias-label-primary);
-  padding: 4px;
+  position: fixed;
+  z-index: 1100;
   display: flex;
   flex-direction: column;
-  gap: 1px;
-  box-shadow: var(--dsw-elevation-soft);
+  width: max-content;
+  min-width: min(240px, calc(100vw - 32px));
+  max-width: min(420px, calc(100vw - 32px));
+  max-height: min(360px, calc(100vh - 96px));
+  overflow-y: auto;
+  padding: 4px;
+  border: 0;
+  border-radius: 20px;
+  background: var(--dsw-specific-menu);
+  --dsw-elevation-stroke-color: var(--dsw-alias-border-l1);
+  box-shadow: var(--dsw-elevation-prominent);
+  color: var(--dsw-alias-label-primary);
+  --dsh-scrollbar-thumb: var(--dsw-alias-scrollbar-bg-l2);
+  --dsh-scrollbar-thumb-hover: var(--dsw-alias-scrollbar-hover-l2);
 }
-.dsh-endeavour-menu-row {
+.dsh-endeavour-menu-cell {
+  box-sizing: border-box;
   display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 1px 6px;
+  align-items: center;
+  gap: 8px;
+  width: auto;
+  min-width: 100%;
+  height: 40px;
+  padding: 0 10px;
   border: none;
-  text-align: left;
-  cursor: pointer;
+  border-radius: 10px;
   background: transparent;
   color: var(--dsw-alias-label-primary);
-  border-radius: 6px;
-  padding: 5px 8px;
-  font-size: 13px;
+  font-size: 14px;
+  line-height: 22px;
+  cursor: pointer;
+  text-align: left;
 }
-.dsh-endeavour-menu-row--active { background: var(--dsw-alias-interactive-bg-hover); }
-.dsh-endeavour-menu-row:disabled { cursor: default; color: var(--dsw-alias-label-tertiary); }
-.dsh-endeavour-menu-label { flex: 1 1 auto; }
-.dsh-endeavour-menu-value { flex: 0 1 auto; max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--dsw-alias-label-caption); font-size: 11px; }
-.dsh-endeavour-menu-description { flex: 1 1 100%; color: var(--dsw-alias-label-tertiary); font-size: 11px; }
-.dsh-endeavour-menu-header { padding: 4px 8px; font-size: 11px; color: var(--dsw-alias-label-tertiary); }
-.dsh-endeavour-menu-note { display: flex; gap: 8px; align-items: center; padding: 6px 8px; font-size: 12px; }
-.dsh-endeavour-menu-error { padding: 4px 8px; font-size: 11px; color: var(--dsw-alias-state-error-primary); }
+.dsh-endeavour-menu-cell:hover:not(:disabled), .dsh-endeavour-menu-cell--active { background: var(--dsw-alias-interactive-bg-hover); }
+.dsh-endeavour-menu-cell:disabled { color: var(--dsw-alias-label-dimmed); cursor: default; }
+.dsh-endeavour-menu-cell-label { flex: 0 0 auto; white-space: nowrap; }
+.dsh-endeavour-menu-cell-value {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: right;
+  color: var(--dsw-alias-label-tertiary);
+}
+.dsh-endeavour-menu-cell-chevron { flex: 0 0 auto; color: var(--dsw-alias-label-tertiary); }
+.dsh-endeavour-menu-option {
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: auto;
+  min-width: 100%;
+  min-height: 38px;
+  padding: 6px 8px;
+  border: none;
+  border-radius: 10px;
+  outline: none;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.dsh-endeavour-menu-option:hover:not(:disabled), .dsh-endeavour-menu-option--active { background: var(--dsw-alias-interactive-bg-hover); }
+.dsh-endeavour-menu-option:disabled { color: var(--dsw-alias-label-dimmed); cursor: default; }
+.dsh-endeavour-menu-option-copy { display: flex; flex: 1; flex-direction: column; min-width: 0; }
+.dsh-endeavour-menu-option-name {
+  overflow: hidden;
+  color: inherit;
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dsh-endeavour-menu-option-detail { color: var(--dsw-alias-label-tertiary); font-size: 12px; line-height: 18px; }
+.dsh-endeavour-menu-check { display: grid; place-items: center; flex: 0 0 18px; color: var(--dsw-alias-label-primary); }
+.dsh-endeavour-menu-group {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 5px 8px 3px;
+  background: var(--dsw-specific-menu);
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 12px;
+  line-height: 18px;
+  font-weight: 500;
+}
+.dsh-endeavour-menu-note { display: flex; gap: 8px; align-items: center; padding: 10px; color: var(--dsw-alias-label-tertiary); font-size: 13px; line-height: 20px; }
+.dsh-endeavour-menu-retry { flex: 0 0 auto; padding: 0; border: none; background: transparent; color: inherit; font: inherit; font-weight: 600; cursor: pointer; }
+.dsh-endeavour-menu-error { padding: 7px 8px; color: var(--dsw-alias-state-error-primary); font-size: 12px; line-height: 18px; }
 .dsh-endeavour-route {
   flex: none;
   color: var(--dsw-alias-label-caption);

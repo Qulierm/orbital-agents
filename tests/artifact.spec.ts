@@ -68,13 +68,14 @@ describe('client artifact (ModuleLoader contract)', () => {
       requested.push(id)
       if (id === 'react') return react
       if (id === 'react/jsx-runtime') return jsxRuntime
+      if (id === 'react-dom') return { createPortal: (node: unknown) => node }
       throw new Error(`unexpected loader require "${id}"`)
     })
     expect(typeof exports.apply).toBe('function')
     expect(Array.isArray(exports.inject)).toBe(true)
     expect(exports.inject).toContain('uiConversation')
     // Only loader-provided runtime externals; no duplicate React implementation.
-    expect(new Set(requested)).toEqual(new Set(['react', 'react/jsx-runtime']))
+    expect(new Set(requested)).toEqual(new Set(['react', 'react/jsx-runtime', 'react-dom']))
     expect(code).not.toContain('ReactCurrentDispatcher')
     expect(code).not.toContain('__vite')
   })
