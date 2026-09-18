@@ -1,26 +1,38 @@
-# Challenger model configuration
+# Model configuration
 
-The persistent Challenger owns the model selection of its own ordinary session.
-There is no "next child" route preference any more: the retired
-`endeavour-builder` settings namespace is removed by the installer (with a
-per-run backup) and the old Builder-route CLI flags are gone.
+Each ordinary session of the pair owns the model selection of its own route. There
+is no "next child" route preference: the retired `endeavour-builder` settings
+namespace is removed by the installer (with a per-run backup) and the old
+Builder-route CLI flags are gone.
 
-## Composer control
+## Unified composer control
 
-The root Endeavour composer shows a `Challenger | model · effort` control next
-to the Endeavour model selector. It mirrors the paired Challenger session's
-`modelSelection` projection and writes through the official
-`remote.session.selectModel` for that session, so:
+The paired Endeavour composer carries ONE unified model control: a single icon-only
+button (slot id `endeuvre-models`, order 1000) that opens a menu with two
+sections — **Endeavour** and **Challenger** — each with its own **Model** and
+**Thinking** rows.
 
-- selecting a model or an effort changes the CHALLENGER session only;
-- the Challenger's own native ModelSelect updates reactively, and this mirror
-  follows changes made there;
-- the Endeavour route is never touched and no session is ever recreated.
-
-The control is visible only on the paired Endeavour side of a valid pair, is
-disabled while a plan is active or the turn is running, and hides itself in
-Standard chats, in the Challenger session and outside the pair. The Challenger
-session keeps its own native selector as the single local control.
+- Every read, subscription, catalog load and write goes through the official
+  model directory of the target session: the Endeavour session the control is
+  rendered in, and its paired Challenger. The two roles never share mutable
+  selection state and no session is ever created or recreated.
+- Choosing a model writes through that role's directory and resets only that
+  role's thinking effort to the model's catalog default; choosing an effort
+  preserves the model of that role.
+- Menu rows always show the full catalog names; a failure to load or write is
+  reported inside the menu and leaves the displayed selection untouched.
+- The control is visible only on the paired Endeavour side of a valid pair; the
+  host's native Endeavour selector is hidden by CSS only while this control is
+  rendered, so Standard chats, unpaired sessions and the Challenger side keep
+  their ordinary selector.
+- While a plan is active the whole control is disabled, which freezes every
+  route for that run. A running turn disables it the same way instead of hiding
+  it.
+- The control is admitted once the pair is first seen and then latched: a
+  temporary gap in the `endeavourPeer` projection cannot unmount it, and the
+  validated Challenger identity is retained, so the native selector never
+  becomes a fallback. A role whose directory is briefly unavailable shows a
+  local unavailable/retry state inside the menu.
 
 ## Peer presets
 

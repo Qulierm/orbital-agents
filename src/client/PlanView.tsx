@@ -72,7 +72,7 @@ function WaitingGlyph() {
   )
 }
 
-/** Working: business-blue partial ring with a subtle pulsing core. */
+/** Working: partial ring with a subtle pulsing core, tinted by the status token. */
 function WorkingGlyph() {
   return (
     <span className={CLASS.pulse} style={{ display: 'grid', placeItems: 'center' }}>
@@ -84,24 +84,29 @@ function WorkingGlyph() {
   )
 }
 
-/** Finished: Builder completed the work — restrained neutral check-ring. */
-function FinishedGlyph() {
-  return (
-    <svg width={14} height={14} viewBox="0 0 14 14" fill="none" aria-hidden="true">
-      <circle cx="7" cy="7" r="6.4" stroke="currentColor" strokeWidth="1.2" opacity="0.7" />
-      <path d="M4.6 7.1 6.2 8.7l3.2-3.4" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" opacity="0.85" />
-    </svg>
-  )
-}
-
-/** Confirmed: success check-ring (only after Endeavour verification). */
-function ConfirmedGlyph() {
+/**
+ * Check-ring geometry shared by the two positive stages: Finished (the
+ * Challenger reported the task) and Confirmed (Endeavour accepted it). The
+ * durable stage decides which one a task is in — and therefore its colour —
+ * never the geometry.
+ */
+function CheckRingGlyph() {
   return (
     <svg width={14} height={14} viewBox="0 0 14 14" fill="none" aria-hidden="true">
       <circle cx="7" cy="7" r="6.4" stroke="currentColor" strokeWidth="1.2" />
       <path d="M4.4 7.2 6.2 9l3.6-3.8" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   )
+}
+
+/** Finished: the Builder reported the task — the blue check-ring. */
+function FinishedGlyph() {
+  return <CheckRingGlyph />
+}
+
+/** Confirmed: success check-ring (only after Endeavour verification). */
+function ConfirmedGlyph() {
+  return <CheckRingGlyph />
 }
 
 /** Failed: failure mark. */
@@ -144,6 +149,18 @@ export function PlanView(props: PlanViewProps): React.ReactElement | null {
   const [collapsed, setCollapsed] = useState(() => initialCollapsed(terminalCompleted))
   const previousTerminal = useRef(terminalCompleted)
   const autoCollapsed = useRef(terminalCompleted)
+  const previousPlanId = useRef(data.planId)
+  useEffect(() => {
+    if (previousPlanId.current === data.planId) return
+    // A different plan replaced this one while the view stayed mounted: the new
+    // plan always opens, and its terminal baseline restarts with it. A manual
+    // collapse inside one plan is untouched because that plan's id never
+    // changes.
+    previousPlanId.current = data.planId
+    previousTerminal.current = terminalCompleted
+    autoCollapsed.current = terminalCompleted
+    setCollapsed(false)
+  }, [data.planId, terminalCompleted])
   useEffect(() => {
     if (shouldAutoCollapse(previousTerminal.current, terminalCompleted, autoCollapsed.current)) {
       autoCollapsed.current = true
@@ -211,7 +228,9 @@ export function PlanView(props: PlanViewProps): React.ReactElement | null {
               <span className={CLASS.rowStatus}>
                 {copy(`stage.${task.stage}` as EndeavourKey)}
                 {task.stage === 'working' && data.checking ? ` · ${copy('plan.checking')}` : ''}
-                {task.stage === 'failed' && task.note !== undefined ? ` · ${task.note}` : ''}
+                {/* The failure reason stays in the transcript card, where it is
+                    history; the composer dock shows only the Failed status. */}
+                {!dock && task.stage === 'failed' && task.note !== undefined ? ` · ${task.note}` : ''}
               </span>
               {taskElapsed(task, now) !== undefined ? (
                 <span className={CLASS.rowTimer} aria-label={`${task.title} elapsed`}>{taskElapsed(task, now)}</span>

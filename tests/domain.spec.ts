@@ -128,6 +128,57 @@ describe('plan state machine', () => {
     expect(stale?.sequence).toBe(2)
   })
 
+  it('folds the live plan of a replayed root log, not an earlier longer plan', () => {
+    // A root session log keeps every plan it ran, and each plan numbers its own
+    // transitions from 1: the completed plan reached sequence 7 while the live
+    // one is only at sequence 2.
+    let older = createPlanState({
+      planId: PlanId('plan-old'),
+      rootSessionId: 'root',
+      childId: 'child',
+      title: 'Old plan',
+      tasks: tasks(),
+      at: 1_000,
+    })
+    const events = [planEventPayload('plan-created', undefined, older, 1_000)]
+    older = startTask(older, TaskId('t1'), 2_000)
+    events.push(planEventPayload('task-started', events.at(-1)!.plan, older, 2_000))
+    older = reportTask(older, TaskId('t1'), { summary: 'one', files: [], validation: 'ok' }, 3_000)
+    events.push(planEventPayload('task-reported', events.at(-1)!.plan, older, 3_000))
+    older = startTask(older, TaskId('t2'), 4_000)
+    events.push(planEventPayload('task-started', events.at(-1)!.plan, older, 4_000))
+    older = reportTask(older, TaskId('t2'), { summary: 'two', files: [], validation: 'ok' }, 5_000)
+    events.push(planEventPayload('task-reported', events.at(-1)!.plan, older, 5_000))
+    older = verifyTask(older, TaskId('t1'), 'succeeded', 'ok', 6_000)
+    events.push(planEventPayload('task-verified', events.at(-1)!.plan, older, 6_000))
+    older = verifyTask(older, TaskId('t2'), 'succeeded', 'ok', 7_000)
+    events.push(planEventPayload('plan-finalized', events.at(-1)!.plan, older, 7_000))
+    // `sequence` lives on the appended checkpoint, not on the pure transition.
+    const completed = events.at(-1)!.plan
+
+    const live = createPlanState({
+      planId: PlanId('plan-live'),
+      rootSessionId: 'root',
+      childId: 'child',
+      title: 'Live plan',
+      tasks: tasks(),
+      at: 8_000,
+    })
+    events.push(planEventPayload('plan-created', undefined, live, 8_000))
+    const running = startTask(live, TaskId('t1'), 9_000)
+    events.push(planEventPayload('task-started', events.at(-1)!.plan, running, 9_000))
+
+    // The completed plan sits at sequence 7 while the live one is only at 2.
+    expect(completed.sequence).toBe(7)
+    expect(completed.terminal?.outcome).toBe('completed')
+    expect(events.at(-1)!.plan.sequence).toBe(2)
+    // Red before the fix: the completed plan won on sequence and hid the live one.
+    expect(foldPlanEvents(events)?.planId).toBe('plan-live')
+    expect(foldPlanEvents(events)?.terminal).toBeUndefined()
+    // A stale replay of the earlier plan still cannot roll the fold back.
+    expect(foldPlanEvents([...events, events[0]!])?.planId).toBe('plan-live')
+  })
+
   it('guards roles and exact child-parent lineage', () => {
     const state = plan()
     expect(() => assertRootRole(state, 'other')).toThrow(EndeavourError)

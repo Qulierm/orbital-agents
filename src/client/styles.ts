@@ -21,14 +21,13 @@ export const CLASS = {
   title: 'dsh-endeavour-title',
   progress: 'dsh-endeavour-progress',
   routeHint: 'dsh-endeavour-route',
-  roleLabel: 'dsh-endeavour-role-label',
-  builderTrigger: 'dsh-endeavour-builder-trigger',
-  builderModel: 'dsh-endeavour-builder-model',
-  builderEffort: 'dsh-endeavour-builder-effort',
-  builderSaving: 'dsh-endeavour-builder-saving',
-  builderChevron: 'dsh-endeavour-builder-chevron',
-  endeavourRole: 'dsh-endeavour-endeavour-role',
+  roleGlyph: 'dsh-endeavour-role-glyph',
+  unifiedControl: 'dsh-endeavour-unified-control',
+  unifiedTrigger: 'dsh-endeavour-unified-trigger',
   menu: 'dsh-endeavour-menu',
+  menuSection: 'dsh-endeavour-menu-section',
+  menuSectionIcon: 'dsh-endeavour-menu-section-icon',
+  menuTitle: 'dsh-endeavour-menu-title',
   menuCell: 'dsh-endeavour-menu-cell',
   menuCellActive: 'dsh-endeavour-menu-cell dsh-endeavour-menu-cell--active',
   menuCellLabel: 'dsh-endeavour-menu-cell-label',
@@ -59,7 +58,6 @@ export const CLASS = {
   glyphFinished: 'dsh-endeavour-glyph--finished',
   glyphPending: 'dsh-endeavour-glyph--pending',
   pulse: 'dsh-endeavour-pulse',
-  builderControl: 'dsh-endeavour-builder-control',
 } as const
 
 /**
@@ -133,97 +131,40 @@ export const STYLE_TEXT = `
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-/* Native ModelSelect trigger contract: 28px chip, 13/20 medium secondary
-   label, 4px gap, caption effort. The role label shares the same 28px row. */
-.dsh-endeavour-builder-control {
+/* One unified composer control: a 28px icon-only sliders button that opens the
+   two-role model menu. It is the only model control on a paired Endeavour chat;
+   the host-owned native seat is hidden only while this control is rendered in
+   the same composer card, so Standard, unpaired and Challenger chats keep it. */
+.dsh-endeavour-role-glyph {
+  display: block;
+  flex: none;
+  color: currentColor;
+}
+.dsh-endeavour-unified-control {
   position: relative;
   display: inline-flex;
   align-items: center;
   height: 28px;
-  min-width: 0;
-  max-width: 100%;
-  flex: 0 1 auto;
-}
-.dsh-endeavour-role-label {
-  display: inline-flex;
-  align-items: center;
-  height: 28px;
-  padding: 0 6px;
-  border-radius: 8px 0 0 8px;
-  background: var(--dsw-alias-interactive-bg-hover);
-  color: var(--dsw-alias-label-secondary);
-  font-size: 13px;
-  line-height: 20px;
-  font-weight: 500;
   flex: none;
 }
-.dsh-endeavour-builder-trigger {
-  display: flex;
+.dsh-endeavour-unified-trigger {
+  display: inline-flex;
   align-items: center;
-  gap: 4px;
-  min-width: 0;
-  max-width: min(300px, 45cqw);
+  justify-content: center;
   height: 28px;
-  padding: 0 4px 0 8px;
+  padding: 0 7px;
   border: none;
-  border-radius: 0 8px 8px 0;
+  border-radius: 8px;
   outline: none;
-  background: transparent;
-  color: var(--dsw-alias-label-secondary);
-  font-size: 13px;
-  line-height: 20px;
-  font-weight: 500;
-  cursor: pointer;
-  flex: 0 1 auto;
-}
-.dsh-endeavour-builder-trigger:hover:not(:disabled) { background: var(--dsw-alias-interactive-bg-hover); }
-.dsh-endeavour-builder-trigger:focus-visible { box-shadow: 0 0 0 2px var(--dsw-alias-border-l3); }
-.dsh-endeavour-builder-trigger:disabled { color: var(--dsw-alias-label-dimmed); cursor: default; }
-.dsh-endeavour-builder-model {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.dsh-endeavour-builder-effort {
-  flex-shrink: 1000;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--dsw-alias-label-caption);
-}
-.dsh-endeavour-builder-saving { flex: none; color: var(--dsw-alias-label-caption); font-size: 12px; }
-.dsh-endeavour-builder-chevron { flex: 0 0 auto; color: var(--dsw-alias-label-caption); }
-/* Endeavour role: last right-side entry, joined to the native model trigger. */
-.dsh-endeavour-endeavour-role {
-  display: inline-flex;
-  align-items: center;
-  height: 28px;
-  padding: 0 6px;
-  border-radius: 8px 0 0 8px;
   background: var(--dsw-alias-interactive-bg-hover);
   color: var(--dsw-alias-label-secondary);
-  font-size: 13px;
-  line-height: 20px;
-  font-weight: 500;
-  white-space: nowrap;
+  cursor: pointer;
   flex: none;
 }
-[data-composer-card]:has([data-endeavour-role="endeavour"]) [data-slot="conversation.input.model"] button {
-  border-top-left-radius: 0;
-  border-bottom-left-radius: 0;
-  padding-left: 6px;
-  min-width: 0;
-  max-width: 220px;
-  overflow: hidden;
-}
-[data-composer-card]:has([data-endeavour-role="endeavour"]) [data-slot="conversation.input.model"] button span {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
+.dsh-endeavour-unified-trigger:hover:not(:disabled) { color: var(--dsw-alias-label-primary); }
+.dsh-endeavour-unified-trigger:focus-visible { box-shadow: 0 0 0 2px var(--dsw-alias-border-l3); }
+.dsh-endeavour-unified-trigger:disabled { color: var(--dsw-alias-label-dimmed); cursor: default; }
+[data-composer-card]:has([data-endeavour-unified-models]) [data-slot="conversation.input.model"] { display: none; }
 /* One toolbar line: disable native wrapping and let the designated items
    shrink instead (stable anchors: data-input-scroll marks the input area, so
    its next sibling is the native tools/trailing row). */
@@ -249,8 +190,7 @@ export const STYLE_TEXT = `
   flex-shrink: 1;
   margin-right: 2px;
 }
-/* Tighter gaps only when both role groups are present. */
-[data-composer-card]:has([data-endeavour-role]) :has(> [data-slot="conversation.input.left"]) { gap: 8px; min-width: 0; }
+/* Tighter right-side gap only while the unified control is present. */
 [data-composer-card] :has(> [data-slot="conversation.input.left"]) [data-slot="conversation.input.left"] > button,
 [data-composer-card] :has(> [data-slot="conversation.input.left"]) [data-slot="conversation.input.left"] > div > button {
   max-width: 220px;
@@ -258,28 +198,9 @@ export const STYLE_TEXT = `
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-[data-composer-card]:has([data-endeavour-role]) :has(> [data-slot="conversation.input.right"]) { gap: 8px; min-width: 0; }
-/* Shrink priority 1: effort captions collapse below the normal card width;
-   the compact Builder trigger sheds its caption a little earlier so it never
-   degrades to a single letter while the native trigger keeps its own. */
-@media (max-width: 1500px) {
-  .dsh-endeavour-builder-effort { display: none; }
-}
-@media (max-width: 1440px) {
-  [data-composer-card]:has([data-endeavour-role="endeavour"]) [data-slot="conversation.input.model"] button span:nth-of-type(2) { display: none; }
-}
-/* Shrink priority 2: long model names ellipsize hard at the narrow breakpoint. */
-@media (max-width: 1024px) {
-  [data-composer-card]:has([data-endeavour-role="endeavour"]) [data-slot="conversation.input.model"] button { max-width: 120px; }
-}
-/* Shrink priority 3: role labels shorten to B/E at the documented narrow
-   breakpoint, keeping the exact 13/20/500 role typography. */
-@media (max-width: 1360px) {
-  .dsh-endeavour-role-label, .dsh-endeavour-endeavour-role { font-size: 0; padding: 0 6px; }
-  .dsh-endeavour-role-label::after, .dsh-endeavour-endeavour-role::after { font-size: 13px; line-height: 20px; font-weight: 500; }
-  .dsh-endeavour-role-label::after { content: 'B'; }
-  .dsh-endeavour-endeavour-role::after { content: 'E'; }
-}
+[data-composer-card]:has([data-endeavour-unified-models]) :has(> [data-slot="conversation.input.right"]) { gap: 8px; min-width: 0; }
+/* The unified control replaced the two role chips, so the shrink-priority
+   breakpoints that only served their trigger text are gone with them. */
 /* Native ModelSelect menu card: portaled, radius 20, specific-menu surface,
    prominent elevation, 40px root cells, 14/22 typography. */
 .dsh-endeavour-menu {
@@ -363,6 +284,25 @@ export const STYLE_TEXT = `
   white-space: nowrap;
 }
 .dsh-endeavour-menu-check { display: grid; place-items: center; flex: 0 0 18px; color: var(--dsw-alias-label-primary); }
+.dsh-endeavour-menu-section {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px 2px;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 12px;
+  line-height: 16px;
+  font-weight: 500;
+  text-transform: none;
+}
+.dsh-endeavour-menu-section-icon { display: grid; flex: none; place-items: center; width: 16px; height: 16px; color: currentColor; }
+.dsh-endeavour-menu-title {
+  padding: 6px 10px 2px;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 12px;
+  line-height: 16px;
+  font-weight: 500;
+}
 .dsh-endeavour-menu-group {
   position: sticky;
   top: 0;
@@ -485,12 +425,14 @@ export const STYLE_TEXT = `
   width: 16px;
   height: 16px;
 }
+/* Status tints: Working is the animated warn ring, Finished is the business
+   blue finish flag, Confirmed keeps success green and Failed error red. */
 .dsh-endeavour-glyph--pending { color: var(--dsw-alias-label-caption); }
 .dsh-endeavour-glyph--running {
-  color: var(--dsw-alias-state-business-primary);
+  color: var(--dsw-alias-state-warn-primary);
   animation: dsh-endeavour-spin 1s linear infinite;
 }
-.dsh-endeavour-glyph--finished { color: var(--dsw-alias-label-secondary); }
+.dsh-endeavour-glyph--finished { color: var(--dsw-alias-state-business-primary); }
 .dsh-endeavour-glyph--succeeded { color: var(--dsw-alias-state-success-primary); }
 .dsh-endeavour-glyph--failed { color: var(--dsw-alias-state-error-primary); }
 .dsh-endeavour-pulse {

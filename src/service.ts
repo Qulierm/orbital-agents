@@ -228,8 +228,34 @@ export class EndeavourService extends Service {
       }
     }
     const plan = foldPlanEvents(events)
-    if (plan !== undefined) this.plans.set(plan.rootSessionId, plan)
+    if (plan !== undefined) {
+      const current = this.plans.get(plan.rootSessionId)
+      // Re-adoption must never move a live plan backwards: a log re-read can
+      // only confirm what the index already holds. The peer registry rejects
+      // stale snapshots for the same reason.
+      if (current === undefined || current.updatedAt <= plan.updatedAt) this.plans.set(plan.rootSessionId, plan)
+    }
     return plan
+  }
+
+  /**
+   * Adopt the durable plan of a session that attached AFTER the plugin mounted.
+   *
+   * Desktop mounts the profile before the renderer restores its chats, so the
+   * constructor's `recoverExistingPlans` snapshot cannot see them. Without this
+   * a restarted Host keeps an in-flight plan unindexed for the rest of the
+   * process lifetime, and neither the Challenger report nor the Endeavour
+   * verdict can resolve it.
+   */
+  private adoptAttachedSession(sessionId: string): void {
+    const session = this.sessionHost()?.get(sessionId)
+    if (session === undefined) return
+    const adopted = this.adoptSession(session)
+    if (adopted !== undefined && pendingDeliveries(adopted).length > 0) {
+      // Same opportunistic reconciliation as mount recovery: a relay that was
+      // checkpointed before a crash is retried, and a failure stays pending.
+      void this.reconcileOutbox().catch(() => undefined)
+    }
   }
 
   /** Durable peer pair seen from either ordinary side, if any. */
@@ -404,58 +430,66 @@ export class EndeavourService extends Service {
   }
 
   /**
-   * Correct Host lifecycle wiring for peer provisioning.
+   * Correct Host lifecycle wiring for plan recovery and peer provisioning.
    *
    * 1. Every session that is ALREADY ATTACHED at mount time (`sessions.list()`,
    *    i.e. live entries only — never cold persisted history) is observed once.
    * 2. `session/created` announcements observe NEWLY created or resumed
-   *    sessions as they attach, so a Challenger exists as soon as its Endeavour
-   *    session exists, without waiting for `endeavour_plan`.
+   *    sessions as they attach, so a restarted Host recovers an in-flight plan
+   *    as soon as the renderer restores its chat, and a Challenger exists as
+   *    soon as its Endeavour session exists, without waiting for
+   *    `endeavour_plan`.
    *
    * Eligibility (ordinary, preset `endeavour`, no subagent origin and no
    * existing pair) lives in `PeerLifecycle`, so Standard chats, subagent
    * sessions and the Challenger's own creation announcement are ignored and can
-   * never recurse. Returns a disposer that unsubscribes for HMR/unmount.
+   * never recurse. Plan adoption runs for every announced session: a session
+   * without `endeavour/plan` events folds to nothing and costs one log read.
+   * Returns a disposer that unsubscribes for HMR/unmount.
    */
   observeSessionLifecycle(): () => void {
-    let runtime: PeerRuntimeDeps
-    try {
-      runtime = this.peerRuntime()
-    } catch {
-      // Peer provisioning is additive; a missing host seam must not break plans.
-      return () => {}
-    }
-    const lifecycle = this.lifecycle ?? new PeerLifecycle(runtime.provisioner, {
-      readPair: (sessionId) => this.peers.get(sessionId) ?? this.latestDurablePair(sessionId),
-      readMeta: (sessionId) => {
-        try {
-          return runtime.seam.sessionMeta(sessionId)
-        } catch {
-          return undefined
-        }
-      },
-      onError: () => {},
-    })
-    this.lifecycle = lifecycle
-    for (const sessionId of runtime.seam.listSessionIds()) lifecycle.observe(sessionId)
     const events = this.ctx as unknown as {
       on?: (name: string, listener: (...args: unknown[]) => void) => (() => void) | undefined
     }
+    const observe = (sessionId: string): void => {
+      this.adoptAttachedSession(sessionId)
+      this.lifecycle?.observe(sessionId)
+    }
     const offCreated = events.on?.('session/created', (session: unknown) => {
       const id = (session as { readonly id?: unknown } | undefined)?.id
-      if (typeof id === 'string' && id !== '') lifecycle.observe(id)
+      if (typeof id === 'string' && id !== '') observe(id)
     })
     // A session created as Standard is announced BEFORE its preset is selected,
-    // so the creation observation is correctly ignored. The official
-    // `agent-preset/selected` event (sessionId, preset) is the moment a session
-    // BECOMES an Endeavour session: observe that exact session then. The durable
-    // selection event has already been appended when this fires, so the
-    // metadata read sees the new preset without relying on the immutable header.
+    // so the creation observation is correctly ignored by the peer lifecycle.
+    // The official `agent-preset/selected` event (sessionId, preset) is the
+    // moment a session BECOMES an Endeavour session: observe that exact session
+    // then. The durable selection event has already been appended when this
+    // fires, so the metadata read sees the new preset without relying on the
+    // immutable header.
     const offSelected = events.on?.('agent-preset/selected', (sessionId: unknown, preset: unknown) => {
       if (preset !== 'endeavour') return
       if (typeof sessionId !== 'string' || sessionId === '') return
-      lifecycle.observe(sessionId)
+      observe(sessionId)
     })
+    try {
+      const runtime = this.peerRuntime()
+      const lifecycle = this.lifecycle ?? new PeerLifecycle(runtime.provisioner, {
+        readPair: (sessionId) => this.peers.get(sessionId) ?? this.latestDurablePair(sessionId),
+        readMeta: (sessionId) => {
+          try {
+            return runtime.seam.sessionMeta(sessionId)
+          } catch {
+            return undefined
+          }
+        },
+        onError: () => {},
+      })
+      this.lifecycle = lifecycle
+      for (const sessionId of runtime.seam.listSessionIds()) observe(sessionId)
+    } catch {
+      // Peer provisioning is additive; a missing host seam must not break plans.
+      // Plan adoption above is independent of it and stays subscribed.
+    }
     return () => {
       if (typeof offCreated === 'function') offCreated()
       if (typeof offSelected === 'function') offSelected()

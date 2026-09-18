@@ -4,13 +4,14 @@ Target: DSH Desktop v2.0.11 (community app, anywhere-labs) bundling DeepSeek
 Harness v0.1.5-rc.2, with the `desktop` profile at `~/.dsh/profiles/desktop`
 and user presets under `~/.dsh/.agent-presets/`.
 
-All commands below use the exact repository path of this checkout. Run them
-from anywhere; the installer resolves its own assets relative to itself.
+All commands below are relative to a clone of this repository. Run them from
+anywhere; the installer resolves its own assets relative to itself.
 
 ## 1. Build, verify, pack
 
 ```sh
-cd /Users/nikita/Documents/Coding/dsh-endeavour
+git clone git@github.com:Qulierm/orbital-agents.git
+cd orbital-agents
 pnpm install --frozen-lockfile
 pnpm run typecheck && pnpm test && pnpm run build
 pnpm pack                     # dsh-endeavour-0.2.0.tgz
@@ -21,8 +22,7 @@ node scripts/preset-check.ts  # preset contract + persona drift
 ## 2. Install the package and the user preset
 
 ```sh
-node /Users/nikita/Documents/Coding/dsh-endeavour/scripts/install-local.mjs \
-  --tarball /Users/nikita/Documents/Coding/dsh-endeavour/dsh-endeavour-0.2.0.tgz
+node scripts/install-local.mjs --tarball ./dsh-endeavour-0.2.0.tgz
 ```
 
 What happens, in order:
@@ -56,7 +56,7 @@ open "/Applications/DSH Desktop.app"
 
 Then, in the app: **New Chat → Endeavour preset → choose the Planner model →
 describe the task in ordinary language → send**. Watch the plan card; use
-**Open Builder** to follow the child. The first message is the only step that
+**Open Challenger** to follow the paired executor chat. The first message is the only step that
 requires provider credentials; no LLM request is made by the installer or the
 verification flow.
 
@@ -78,23 +78,24 @@ owned presets; rollback restores both exact prior states.
 `preset-check` validates both personas, both role mounts, the coding rows, and
 the absence of subagent/delegation mounts.
 
-## 5. Model selection (peer-owned)
+## 5. Model selection
 
-The root composer mirrors the persistent Challenger's own model selection; see
-[configuration.md](configuration.md). The retired Builder-route flags are
+The paired Endeavour composer carries one unified control that configures the
+**Endeavour** and **Challenger** model and thinking routes from a single menu;
+see [configuration.md](configuration.md). The retired Builder-route flags are
 rejected by the installer. Installation first runs a read-only legacy-plan
 preflight: a nonterminal `childId`-only plan aborts the install with the
 affected session ids and remediation (terminal historical plans are allowed).
 
-## 5. Uninstall and rollback
+## 6. Uninstall and rollback
 
 ```sh
 # remove plugin, bundle row, and only the preset this package owns
-node /Users/nikita/Documents/Coding/dsh-endeavour/scripts/install-local.mjs --uninstall
+node scripts/install-local.mjs --uninstall
 
 # list backups, then restore profile files + preset state exactly
-node /Users/nikita/Documents/Coding/dsh-endeavour/scripts/install-local.mjs --list-backups
-node /Users/nikita/Documents/Coding/dsh-endeavour/scripts/install-local.mjs --rollback <timestamp>
+node scripts/install-local.mjs --list-backups
+node scripts/install-local.mjs --rollback <timestamp>
 ```
 
 Ownership rules: uninstall removes `~/.dsh/.agent-presets/endeavour` only when

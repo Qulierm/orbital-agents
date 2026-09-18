@@ -11,10 +11,28 @@ import { endeavourPlanDefinition } from './definition.js'
 import { endeavourPeerNodeDefinition, endeavourPeerViewDefinition, PEER_ACTIVITY_TARGET } from './peer-activity.js'
 import { PlanCard, type EndeavourInjected, type PlanCardProps } from './PlanCard.js'
 import { registerPlanDock } from './PlanDock.js'
-import { EndeavourRoleLabel } from './EndeavourRoleLabel.js'
 import type { ISessions } from '@deepseek-ai/dsh-api-session-controller/client'
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
-import { ChallengerModelControl, type ChallengerModelController, type ChallengerSelection } from './ChallengerModelControl.js'
+import {
+  UnifiedModelControl,
+  type UnifiedModelController,
+  type UnifiedRole,
+  type UnifiedRoleController,
+  type UnifiedSelection,
+} from './UnifiedModelControl.js'
+
+/**
+ * The official ModelDirectory resolver fails loud for a session that has no live
+ * scope or UI binding (`ui-model-selection: session "X" resolved no scope|no
+ * binding`). For a paired peer that state is transient — the session can be
+ * alive without being bound yet — so the bridge reports it as "this role is
+ * unavailable right now" instead of letting a render-time throw unmount the
+ * composer control. Every other failure keeps propagating.
+ */
+export function isUnavailableSessionError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false
+  return /ui-model-selection: session ".*" resolved no (?:scope|binding)/.test(error.message)
+}
 
 /** Structural view of the official ModelDirectory the native selector uses. */
 interface DirectoryLike {
@@ -30,6 +48,7 @@ interface DirectoryLike {
 import { en, NS, type EndeavourKey } from './locales.js'
 import { ensurePlanStyles } from './styles.js'
 import { peerView } from '../peer-projection.js'
+import { validatePeerState } from '../peer.js'
 import type { PeerState } from '../peer.js'
 import {
   hasTransientUserActivation,
@@ -233,62 +252,98 @@ export function apply(ctx: ClientContext): void {
 
 
   /**
-   * Peer model bridge: the paired Challenger owns its ordinary-session model
-   * selection. The root control only mirrors it (projection face) and writes
-   * through the official remote.selectModel for the CHALLENGER session; the
-   * Endeavour route is never touched and the session is never recreated.
+   * Unified model bridge: ONE controller over the official ModelDirectory each
+   * ordinary session of the pair owns — the Endeavour session this control is
+   * rendered in, and its paired Challenger. Every read, subscription, catalog
+   * load and write resolves its own `modelDirectories.directoryFor(id)`, so the
+   * two roles never share mutable selection state, no catalog is mutated, and
+   * no peer session is created or recreated. Identity is memoized per Endeavour
+   * session so renders and HMR never swap the stores out from under the
+   * component.
+   *
+   * `directoryFor` FAILS LOUD for a session without a live scope or UI binding,
+   * and that condition is transient for a paired peer (it can be alive without
+   * being bound yet). The bridge therefore treats exactly those two documented
+   * failures as "this role is unavailable right now" and reports them locally;
+   * every other error still propagates.
    */
-  /**
-   * Per-session controller over the OFFICIAL ModelDirectory (`modelDirectories`)
-   * the native ModelSelect uses. Loading, current-selection resolution (durable
-   * projection, then Host default) and writing all go through that directory, so
-   * the Challenger control behaves exactly like a native selector on the
-   * Challenger session. Identity is memoized per counterpart id so renders and
-   * HMR never swap the store out from under the component.
-   */
-  const challengerControllers = new Map<string, ChallengerModelController>()
-  const challengerModel = (sessionId: string): ChallengerModelController => {
+  const unifiedControllers = new Map<string, UnifiedModelController>()
+  const unifiedModels = (sessionId: string): UnifiedModelController => {
+    const existing = unifiedControllers.get(sessionId)
+    if (existing !== undefined) return existing
+    // The paired Challenger id is RETAINED once a validated Endeavour-side
+    // projection has named it. The projection can publish null, a half-written
+    // snapshot or a forged one at any time (the composer re-renders on its own
+    // state), and re-resolving the target on every directory operation would
+    // drop the peer mid-interaction. Only fully validated data for THIS root may
+    // set or refresh the id — never an arbitrary fallback session.
+    let retainedChallengerId: string | undefined
     const challengerId = (): string | undefined => {
       const peer = faceOf(sessionId, 'endeavourPeer')?.getSnapshot() as PeerState | null | undefined
-      const view = peerView(peer ?? null, sessionId)
-      return view?.role === 'endeavour' ? view.counterpartId : undefined
+      const candidate = peer ?? null
+      if (candidate !== null && validatePeerState(candidate).length === 0) {
+        const view = peerView(candidate, sessionId)
+        // A validated snapshot for the OTHER side (or another root) is ignored.
+        if (view?.role === 'endeavour') retainedChallengerId = view.counterpartId
+      }
+      return retainedChallengerId
     }
-    const directory = (): DirectoryLike | undefined => {
-      const id = challengerId()
+    // The Endeavour side is the session this control belongs to; the Challenger
+    // side is its durable companion. Neither id is ever shared between roles.
+    const targetId = (target: UnifiedRole): string | undefined => target === 'endeavour' ? sessionId : challengerId()
+    const directory = (target: UnifiedRole): DirectoryLike | undefined => {
+      const id = targetId(target)
       if (id === undefined) return undefined
-      const resolver = client.modelDirectories
-      return resolver?.directoryFor?.(id)
+      try {
+        return client.modelDirectories?.directoryFor?.(id)
+      } catch (error) {
+        if (isUnavailableSessionError(error)) return undefined
+        throw error
+      }
     }
-    const readSelection = (): ChallengerSelection | undefined => {
-      const current = directory()?.store?.getSnapshot?.().current
-      if (current === null || current === undefined) return undefined
-      const { provider, model, reasoningEffort } = current
-      if (typeof provider !== 'string' || typeof model !== 'string' || provider === '' || model === '') return undefined
-      return typeof reasoningEffort === 'string' && reasoningEffort !== ''
-        ? { provider, model, reasoningEffort }
-        : { provider, model }
-    }
-    // One stable controller per session: every closure below resolves the
-    // CURRENT directory lazily, so HMR and re-renders keep the same identity
-    // without ever pointing at a stale store.
-    const existing = challengerControllers.get(sessionId)
-    if (existing !== undefined) return existing
-    const controller: ChallengerModelController = {
-      challengerId,
-      readSelection,
-      subscribeSelection: (listener) => directory()?.store?.subscribe?.(listener) ?? (() => undefined),
+    const unavailable = (target: UnifiedRole): Error => new Error(
+      target === 'endeavour'
+        ? 'the Endeavour session is unavailable'
+        : 'the paired Challenger session is unavailable',
+    )
+    const roleController = (target: UnifiedRole): UnifiedRoleController => ({
+      available: () => directory(target) !== undefined,
+      readSelection: (): UnifiedSelection | undefined => {
+        // A selection read must never throw at render time: the directory is
+        // simply absent while its session has no scope or binding.
+        const current = directory(target)?.store?.getSnapshot?.().current
+        if (current === null || current === undefined) return undefined
+        const { provider, model, reasoningEffort } = current
+        if (typeof provider !== 'string' || typeof model !== 'string' || provider === '' || model === '') return undefined
+        return typeof reasoningEffort === 'string' && reasoningEffort !== ''
+          ? { provider, model, reasoningEffort }
+          : { provider, model }
+      },
+      subscribeSelection: (listener) => {
+        const store = directory(target)?.store
+        if (store === undefined || typeof store.subscribe !== 'function') return () => undefined
+        try {
+          return store.subscribe(listener)
+        } catch (error) {
+          if (isUnavailableSessionError(error)) return () => undefined
+          throw error
+        }
+      },
       loadCatalog: async () => {
-        const target = directory()
-        if (target === undefined) throw new Error('the paired Challenger session is unavailable')
-        return target.load?.()
+        const dir = directory(target)
+        if (dir === undefined) throw unavailable(target)
+        return dir.load?.()
       },
       select: async (provider, model, reasoningEffort) => {
-        const target = directory()
-        if (target === undefined) throw new Error('the paired Challenger session is unavailable')
-        await target.select?.({ provider, model, ...(reasoningEffort === undefined ? {} : { reasoningEffort }) })
+        const dir = directory(target)
+        if (dir === undefined) throw unavailable(target)
+        await dir.select?.({ provider, model, ...(reasoningEffort === undefined ? {} : { reasoningEffort }) })
       },
+    })
+    const controller: UnifiedModelController = {
+      roles: { endeavour: roleController('endeavour'), challenger: roleController('challenger') },
     }
-    challengerControllers.set(sessionId, controller)
+    unifiedControllers.set(sessionId, controller)
     return controller
   }
 
@@ -318,25 +373,17 @@ export function apply(ctx: ClientContext): void {
     inject: injected,
   }, PlanCard as unknown as (props: PlanCardProps) => unknown))
   registerPlanDock(client.slots, injected)
-  // The composer toolbar keeps both role groups together on the trailing side:
-  // Speed (openai-codex-fast-mode, order 10) and limits (openai-codex-quota,
-  // order 20) stay ahead, then the Builder group (1000) and the Endeavour role
-  // label (1001); the native conversation.input.model seat renders after the
-  // whole right list, so the visual order is
-  // ... Speed -> limits -> [Builder | route] -> [Endeavour | native model] -> Send.
+  // The composer keeps exactly ONE model control: an icon-only sliders button
+  // that configures both ordinary sessions of the pair. Speed (10) and limits
+  // (20) stay ahead of it, and the host-owned native conversation.input.model
+  // seat is hidden by CSS only while this control is rendered.
   client.slots.inject('conversation.input.right', () => client.slots.register({
     name: 'conversation.input.right',
-    id: 'endeavour-challenger-model',
+    id: 'endeavour-models',
     order: 1000,
     locale: NS,
-    inject: (sessionId: string) => ({ challengerModel: challengerModel(sessionId) }),
-  }, ChallengerModelControl as unknown as (props: unknown) => unknown))
-  client.slots.inject('conversation.input.right', () => client.slots.register({
-    name: 'conversation.input.right',
-    id: 'endeavour-role',
-    order: 1001,
-    locale: NS,
-  }, EndeavourRoleLabel as unknown as (props: unknown) => unknown))
+    inject: (sessionId: string) => ({ unifiedModels: unifiedModels(sessionId) }),
+  }, UnifiedModelControl as unknown as (props: unknown) => unknown))
   // Builder navigation tab: registered only while the current session is an
   // Builder/Challenger tab: registered only while the current session belongs
   // to a valid durable pair; order 20 places it right after Trajectory.

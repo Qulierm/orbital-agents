@@ -22,9 +22,12 @@ import { decompressZstd, parseZstdFrames, sessionFiles } from './repair-session-
 export function decodeSessionLog(path) {
   const bytes = readFileSync(path)
   if (!path.endsWith('.zstd')) return bytes.toString('utf8')
+  // `parseZstdFrames` returns the frame bytes themselves, so each frame is
+  // decoded directly — the same idiom the repair tool uses. Passing a subarray
+  // of nonexistent start/end fields would re-decode the whole log per frame.
   const frames = parseZstdFrames(bytes)
   let text = ''
-  for (const frame of frames) text += decompressZstd(bytes.subarray(frame.start, frame.end))
+  for (const frame of frames) text += decompressZstd(frame)
   return text
 }
 

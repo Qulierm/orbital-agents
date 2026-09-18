@@ -22,7 +22,7 @@ import type { TaskSpec } from '../src/domain.js'
 import type { PeerState } from '../src/peer.js'
 
 const { EndeavourService } = await import('../src/service.js')
-const { EndeavourError, PlanId, TaskId } = await import('../src/domain.js')
+const { EndeavourError, createPlanState, PlanId, planEventPayload, reportTask, startTask, TaskId, verifyTask } = await import('../src/domain.js')
 const { challengerSessionIdFor, peerEventPayload, peerPairIdFor, PeerError } = await import('../src/peer.js')
 const { PeerDeliveryLedger, PeerDeliveryQueue } = await import('../src/peer-transport.js')
 const { PeerProvisioner } = await import('../src/peer-service.js')
@@ -345,5 +345,106 @@ describe('authorization and recovery', () => {
       .rejects.toBeInstanceOf(EndeavourError)
     expect(PeerError).toBeDefined()
     expect(PlanId).toBeDefined()
+  })
+})
+
+describe('plan recovery for a session that attaches after mount', () => {
+  /**
+   * A restored root log in append order: one COMPLETED plan that reached
+   * sequence 7, then the live plan at sequence 2, plus the durable pair.
+   */
+  function restoredRoot(rootId: string, pair: PeerState) {
+    const events: FakeEvent[] = [
+      { type: 'endeavour/peer', data: peerEventPayload('peer-created', undefined, pair, 1) },
+    ]
+    const base = { rootSessionId: rootId, challengerSessionId: pair.challengerSessionId, pairId: pair.pairId }
+    let older = createPlanState({ ...base, planId: PlanId('plan-old'), title: 'Old plan', tasks: [spec('t1'), spec('t2')], at: 1_000 })
+    events.push({ type: 'endeavour/plan', data: planEventPayload('plan-created', undefined, older, 1_000) })
+    older = startTask(older, TaskId('t1'), 2_000)
+    events.push({ type: 'endeavour/plan', data: planEventPayload('task-started', older, older, 2_000) })
+    older = reportTask(older, TaskId('t1'), { summary: 'one', files: [], validation: 'ok' }, 3_000)
+    events.push({ type: 'endeavour/plan', data: planEventPayload('task-reported', older, older, 3_000) })
+    older = startTask(older, TaskId('t2'), 4_000)
+    events.push({ type: 'endeavour/plan', data: planEventPayload('task-started', older, older, 4_000) })
+    older = reportTask(older, TaskId('t2'), { summary: 'two', files: [], validation: 'ok' }, 5_000)
+    events.push({ type: 'endeavour/plan', data: planEventPayload('task-reported', older, older, 5_000) })
+    older = verifyTask(older, TaskId('t1'), 'succeeded', 'ok', 6_000)
+    events.push({ type: 'endeavour/plan', data: planEventPayload('task-verified', older, older, 6_000) })
+    older = verifyTask(older, TaskId('t2'), 'succeeded', 'ok', 7_000)
+    events.push({ type: 'endeavour/plan', data: planEventPayload('plan-finalized', older, older, 7_000) })
+
+    const live = createPlanState({ ...base, planId: PlanId('plan-live'), title: 'Live plan', tasks: [spec('t1'), spec('t2')], at: 8_000 })
+    events.push({ type: 'endeavour/plan', data: planEventPayload('plan-created', undefined, live, 8_000) })
+    const running = startTask(live, TaskId('t1'), 9_000)
+    events.push({ type: 'endeavour/plan', data: planEventPayload('task-started', live, running, 9_000) })
+    return fakeSession(rootId, events)
+  }
+
+  it('indexes the restored live plan and accepts the Challenger report', async () => {
+    const rootId = 'session-restored'
+    const pair = pairState(rootId)
+    // Mount sees NO live session: exactly what a restarted Host has before the
+    // renderer restores its chats.
+    const sessions: ReturnType<typeof fakeSession>[] = []
+    const listeners = new Map<string, ((...args: unknown[]) => void)[]>()
+    const seam = {
+      listSessionIds: () => sessions.map((session) => session.id),
+      sessionMeta: (id: string) => {
+        const found = sessions.find((session) => session.id === id)
+        return found === undefined ? undefined : { id, agentPreset: found.header.agentPreset }
+      },
+      createOrdinarySession: async (input: { id: string }) => ({ sessionId: input.id, adopted: true }),
+      resolveAgent: async () => undefined,
+    }
+    const provisioner = new PeerProvisioner({
+      seam,
+      readPair: () => pair,
+      hasCheckpoint: () => true,
+      appendPair: async () => undefined,
+      now: () => 1,
+    })
+    const ctx = {
+      reflect: { provide: () => () => undefined },
+      sessions: {
+        get: (id: string) => sessions.find((session) => session.id === id),
+        flush: async () => true,
+        list: () => sessions,
+      },
+      sessionProjections: { register: () => () => undefined },
+      on: (name: string, listener: (...args: unknown[]) => void) => {
+        const list = listeners.get(name) ?? []
+        list.push(listener)
+        listeners.set(name, list)
+        return () => undefined
+      },
+    }
+    const service = new EndeavourService(ctx as never, {})
+    service.setPeerRuntime({ seam, provisioner, queue: new PeerDeliveryQueue(), ledger: new PeerDeliveryLedger() })
+    const dispose = service.observeSessionLifecycle()
+
+    // Red before the fix: mount-time recovery saw nothing and the plan stayed
+    // unindexed for the whole process lifetime after a restart.
+    expect(service.getActivePlan(rootId)).toBeUndefined()
+
+    // The renderer restores the chat: the root session attaches and is announced.
+    const root = restoredRoot(rootId, pair)
+    sessions.push(root, fakeSession(pair.challengerSessionId, [], 'challenger'))
+    for (const listener of listeners.get('session/created') ?? []) listener(root)
+
+    // The LIVE plan is indexed, not the completed longer one.
+    const active = service.getActivePlan(rootId)
+    expect(active?.planId).toBe('plan-live')
+    expect(active?.tasks[0]?.status).toBe('running')
+
+    // The durable protocol now accepts the Challenger's report for that plan.
+    const reported = await service.challengerReport(
+      { session: { id: pair.challengerSessionId } } as never,
+      't1',
+      { summary: 'done', files: [], validation: 'checked' },
+    )
+    expect(reported.plan.tasks[0]?.report?.summary).toBe('done')
+    expect(reported.phase).toBe('executing')
+    expect(root.events.filter((event) => event.type === 'endeavour/plan')).toHaveLength(10)
+    dispose()
   })
 })

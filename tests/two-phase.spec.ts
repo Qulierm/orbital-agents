@@ -129,15 +129,28 @@ describe('finished vs confirmed visuals', () => {
   const source = readFileSync('src/client/PlanView.tsx', 'utf8')
   const styles = readFileSync('src/client/styles.ts', 'utf8')
 
-  it('uses a restrained check-ring for Finished and a distinct success check-ring for Confirmed', () => {
+  it('gives Finished and Confirmed the same check-ring with different class and colour', () => {
+    const shared = source.slice(source.indexOf('function CheckRingGlyph'), source.indexOf('function FinishedGlyph'))
     const finished = source.slice(source.indexOf('function FinishedGlyph'), source.indexOf('function ConfirmedGlyph'))
     const confirmed = source.slice(source.indexOf('function ConfirmedGlyph'), source.indexOf('function FailedGlyph'))
-    // Finished is a check-ring (check path) in the restrained neutral class.
-    expect(finished).toContain('strokeLinejoin="round"')
-    expect(finished).toContain('M4.6 7.1 6.2 8.7l3.2-3.4')
-    expect(styles).toContain('.dsh-endeavour-glyph--finished { color: var(--dsw-alias-label-secondary); }')
-    // Confirmed keeps its own success check-ring and class.
-    expect(confirmed).toContain('M4.4 7.2 6.2 9l3.6-3.8')
+    // One geometry: the check-ring, defined once and rendered by both stages.
+    expect(shared).toContain('circle cx="7" cy="7" r="6.4"')
+    expect(shared).toContain('M4.4 7.2 6.2 9l3.6-3.8')
+    expect(finished).toContain('<CheckRingGlyph />')
+    expect(confirmed).toContain('<CheckRingGlyph />')
+    // The finish flag is gone everywhere, and the long-retired neutral check
+    // never comes back.
+    expect(source).not.toContain('M4 1.8v10.4')
+    expect(source).not.toContain('M4 2.6h6.6l-1.6 2.6 1.6 2.6H4z')
+    expect(source).not.toContain('M4.6 7.1 6.2 8.7l3.2-3.4')
+    // Colour and class, not geometry, keep the two durable stages apart.
+    expect(styles).toContain('.dsh-endeavour-glyph--finished { color: var(--dsw-alias-state-business-primary); }')
+    expect(styles).not.toContain('.dsh-endeavour-glyph--finished { color: var(--dsw-alias-label-secondary); }')
     expect(styles).toContain('.dsh-endeavour-glyph--succeeded { color: var(--dsw-alias-state-success-primary); }')
+    expect(styles).toContain('.dsh-endeavour-glyph--failed { color: var(--dsw-alias-state-error-primary); }')
+    // The durable stage mapping is unchanged: finished still selects the
+    // finished class, confirmed still selects the success class.
+    expect(source).toContain('finished: CLASS.glyphFinished')
+    expect(source).toContain('confirmed: CLASS.glyphSucceeded')
   })
 })

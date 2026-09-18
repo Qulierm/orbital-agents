@@ -1,12 +1,16 @@
+// @vitest-environment happy-dom
 /**
  * Composer plan dock, addressed Builder navigation, attached-geometry,
- * five-stage presentation, and English-only regressions.
+ * five-stage presentation, dock/card note split, plan-replacement expansion,
+ * and English-only regressions.
  */
 
 import { readFileSync } from 'node:fs'
 import { createElement } from 'react'
+import { createRoot, type Root } from 'react-dom/client'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { describe, expect, it } from 'vitest'
+import { act } from 'react-dom/test-utils'
+import { afterEach, describe, expect, it } from 'vitest'
 import { en, formatEnglish } from '../src/client/locales.js'
 import { cardExecutorId, copyFrom } from '../src/client/PlanCard.js'
 import { PLAN_DOCK_ID, PLAN_DOCK_ORDER, PlanDock, registerPlanDock } from '../src/client/PlanDock.js'
@@ -14,6 +18,8 @@ import { planAction } from '../src/client/plan-action.js'
 import { initialCollapsed, PlanView, shouldAutoCollapse } from '../src/client/PlanView.js'
 import { CLASS, ensurePlanStyles, STYLE_ELEMENT_ID, STYLE_TEXT } from '../src/client/styles.js'
 import type { EndeavourCardData } from '../src/plan-projection.js'
+
+;(globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
 const planData: EndeavourCardData = {
   planId: 'p1',
@@ -39,6 +45,31 @@ function renderDock(data: EndeavourCardData | null | undefined, currentSessionId
     openCounterpart: () => undefined,
     ...(currentSessionId === undefined ? {} : { currentSessionId }),
   } as never))
+}
+
+/** Transcript-card surface, used to prove the note split against the dock. */
+function renderCard(data: EndeavourCardData): string {
+  return renderToStaticMarkup(createElement(PlanView, {
+    data,
+    copy: copyFrom({}),
+    onOpenBuilder: () => undefined,
+    variant: 'card',
+  } as never))
+}
+
+/** One row per display stage, including a failed task carrying a reason. */
+const allStages: EndeavourCardData = {
+  ...planData,
+  tasks: [
+    { id: 's1', title: 'Waiting task', status: 'waiting', stage: 'waiting' },
+    { id: 's2', title: 'Working task', status: 'running', stage: 'working', startedAt: 1_000 },
+    { id: 's3', title: 'Finished task', status: 'running', stage: 'finished', startedAt: 1_000, reportedAt: 2_000 },
+    { id: 's4', title: 'Confirmed task', status: 'succeeded', stage: 'confirmed', startedAt: 1_000, finishedAt: 2_000 },
+    { id: 's5', title: 'Failed task', status: 'failed', stage: 'failed', startedAt: 1_000, finishedAt: 2_000, note: 'Verification did not pass' },
+  ],
+  completedCount: 1,
+  total: 5,
+  checking: false,
 }
 
 /** Render the fallback with a fixed pair observable and optional plan source. */
@@ -120,19 +151,40 @@ describe('composer plan dock', () => {
     expect(html).toContain('01:00')
   })
 
-  it('renders a failed task with its note and red glyph, without a generic sentence', () => {
-    const failed: EndeavourCardData = {
-      ...planData,
-      tasks: [{ id: 'f1', title: 'Broken task', status: 'failed', stage: 'failed', startedAt: 0, finishedAt: 5_000, note: 'Verification did not pass' }],
-      completedCount: 0,
-      total: 1,
-      checking: false,
-    }
-    const html = renderDock(failed)
-    expect(html).toContain(CLASS.glyphFailed)
-    expect(html).toContain('Failed')
-    expect(html).toContain('Verification did not pass')
-    expect(html).not.toContain('Plan failed')
+  it('paints Finished as the blue check-ring, Working as the yellow ring, and leaves Confirmed and Failed alone', () => {
+    const html = renderDock(allStages)
+    // Finished now shares the Confirmed check-ring geometry, so the same path
+    // appears exactly twice in this fixture (finished + confirmed) and the
+    // retired finish flag is gone entirely.
+    const ring = html.split('M4.4 7.2 6.2 9l3.6-3.8').length - 1
+    expect(ring).toBe(2)
+    expect(html).not.toContain('M4 1.8v10.4')
+    expect(html).not.toContain('M4 2.6h6.6l-1.6 2.6 1.6 2.6H4z')
+    // The long-retired neutral Finished check stays gone.
+    expect(html).not.toContain('M4.6 7.1 6.2 8.7')
+    // The failed cross and the working pulse are untouched.
+    expect(html).toContain('M5 5l4 4M9 5l-4 4')
+    expect(html).toContain(CLASS.pulse)
+    // Colour tokens keep the stages distinct: blue finished, yellow running,
+    // green confirmed, red failed.
+    expect(STYLE_TEXT).toMatch(/\.dsh-endeavour-glyph--finished \{ color: var\(--dsw-alias-state-business-primary\); \}/)
+    expect(STYLE_TEXT).toMatch(/\.dsh-endeavour-glyph--running \{\s*color: var\(--dsw-alias-state-warn-primary\);\s*animation: dsh-endeavour-spin 1s linear infinite;/)
+    expect(STYLE_TEXT).toMatch(/\.dsh-endeavour-glyph--succeeded \{ color: var\(--dsw-alias-state-success-primary\); \}/)
+    expect(STYLE_TEXT).toMatch(/\.dsh-endeavour-glyph--failed \{ color: var\(--dsw-alias-state-error-primary\); \}/)
+    expect(STYLE_TEXT).not.toMatch(/glyph--finished \{ color: var\(--dsw-alias-label-secondary\)/)
+    expect(STYLE_TEXT).not.toMatch(/glyph--running \{\s*color: var\(--dsw-alias-state-business-primary\)/)
+  })
+
+  it('hides the failure reason in the composer dock and keeps it on the transcript card', () => {
+    const dock = renderDock(allStages)
+    expect(dock).toContain(CLASS.glyphFailed)
+    expect(dock).toContain('Failed')
+    expect(dock).not.toContain('Verification did not pass')
+    const card = renderCard(allStages)
+    expect(card).toContain(CLASS.glyphFailed)
+    expect(card).toContain('Failed')
+    expect(card).toContain('Verification did not pass')
+    expect(card).not.toContain('Plan failed')
   })
 
   it('keeps the peer action enabled for canonical peer plans', () => {
@@ -185,6 +237,61 @@ describe('plan collapse lifecycle', () => {
     expect(collapsedHtml).toContain(CLASS.ghost)
     const activeHtml = renderDock(planData)
     expect(activeHtml).toContain(CLASS.rows)
+  })
+})
+
+describe('plan replacement in a mounted dock', () => {
+  const roots: Root[] = []
+  const containers: HTMLElement[] = []
+
+  afterEach(() => {
+    for (const root of roots.splice(0)) act(() => { root.unmount() })
+    for (const container of containers.splice(0)) container.remove()
+  })
+
+  function mountDock(): { container: HTMLElement; show: (data: EndeavourCardData) => void } {
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+    const root = createRoot(container)
+    roots.push(root)
+    containers.push(container)
+    const show = (data: EndeavourCardData): void => {
+      root.render(createElement(PlanDock, {
+        useProjection: (key: string) => (key === 'endeavourPlan' ? data : undefined),
+        t: undefined,
+        openCounterpart: () => undefined,
+      } as never))
+    }
+    return { container, show }
+  }
+
+  const rows = (container: HTMLElement): Element | null => container.querySelector(`.${CLASS.rows}`)
+  const toggle = (container: HTMLElement): void => {
+    const chevron = container.querySelector(`.${CLASS.chevron}`) as HTMLButtonElement
+    act(() => { chevron.dispatchEvent(new MouseEvent('click', { bubbles: true })) })
+  }
+
+  it('opens the dock when a different plan id replaces the current one', () => {
+    const { container, show } = mountDock()
+    act(() => { show({ ...planData, planId: 'plan-a' }) })
+    expect(container.querySelector('[data-endeavour-plan="plan-a"]')).not.toBeNull()
+    expect(rows(container)).not.toBeNull()
+
+    // A manual collapse inside THIS plan is respected by further re-renders.
+    toggle(container)
+    expect(rows(container)).toBeNull()
+    act(() => { show({ ...planData, planId: 'plan-a' }) })
+    expect(rows(container)).toBeNull()
+
+    // A different plan always opens, even though the user had collapsed the
+    // previous one in the same mounted dock.
+    act(() => { show({ ...planData, planId: 'plan-b' }) })
+    expect(container.querySelector('[data-endeavour-plan="plan-b"]')).not.toBeNull()
+    expect(rows(container)).not.toBeNull()
+
+    // And the same-plan manual collapse still works for the new plan.
+    toggle(container)
+    expect(rows(container)).toBeNull()
   })
 })
 

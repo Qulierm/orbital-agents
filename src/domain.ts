@@ -489,11 +489,20 @@ export function publicTaskStatus(task: TaskState): TaskStatus {
   return task.status
 }
 
-/** Rebuild the newest plan snapshot from a replayed event tail. */
+/**
+ * Rebuild the newest plan snapshot from a replayed event tail.
+ *
+ * The newest checkpoint is the one with the latest `updatedAt`, with log order
+ * breaking a tie. `sequence` cannot order the tail: a root session log holds
+ * every plan it ever ran, each plan numbers its own transitions from 1, and an
+ * earlier plan that ran longer would then outrank the live one.
+ */
 export function foldPlanEvents(events: readonly PlanEventPayload[]): PlanState | undefined {
   let newest: PlanState | undefined
   for (const event of events) {
-    if (newest === undefined || event.plan.sequence >= newest.sequence) newest = event.plan
+    const plan = event.plan
+    if (plan === undefined) continue
+    if (newest === undefined || plan.updatedAt >= newest.updatedAt) newest = plan
   }
   return newest
 }
