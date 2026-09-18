@@ -9,6 +9,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { EndeavourCardData, EndeavourCardTask, TaskStage } from '../plan-projection.js'
 import type { EndeavourKey } from './locales.js'
+import { planAction, planActionLabelKey, type PlanAction } from './plan-action.js'
 import { CLASS } from './styles.js'
 
 /** Copy lookup shared by both surfaces. */
@@ -18,7 +19,10 @@ export type PlanCopy = (key: EndeavourKey, params?: Record<string, string | numb
 export interface PlanViewProps {
   readonly data: EndeavourCardData
   readonly copy: PlanCopy
-  readonly onOpenBuilder: () => void
+  /** Invoked with the EXACT counterpart session id the action resolves to. */
+  readonly onOpenBuilder: (target: string) => void
+  /** Role-aware action for this surface (legacy history vs peer navigation). */
+  readonly action?: PlanAction
   /** `dock` attaches above the composer; `card` is the transcript card. */
   readonly variant?: 'card' | 'dock'
 }
@@ -133,7 +137,8 @@ function StageGlyph({ stage }: { stage: TaskStage }) {
 
 /** One plan panel; the timer ticks every second only while a task is working. */
 export function PlanView(props: PlanViewProps): React.ReactElement | null {
-  const { data, copy, onOpenBuilder, variant = 'card' } = props
+  const { data, copy, onOpenBuilder, action, variant = 'card' } = props
+  const resolved = action ?? planAction(data, undefined)
   const [now, setNow] = useState(() => Date.now())
   const terminalCompleted = data.terminal?.outcome === 'completed'
   const [collapsed, setCollapsed] = useState(() => initialCollapsed(terminalCompleted))
@@ -180,13 +185,15 @@ export function PlanView(props: PlanViewProps): React.ReactElement | null {
         <button
           type="button"
           className={CLASS.ghost}
-          onClick={onOpenBuilder}
+          onClick={() => {
+            if (resolved.kind === 'peer') onOpenBuilder(resolved.target)
+          }}
           // Historical childId-only plans have no persistent peer: the action
           // is disabled and history stays reachable through native Subagents.
-          disabled={data.challengerSessionId === undefined}
-          title={data.challengerSessionId === undefined ? copy('plan.openLegacyHint') : undefined}
+          disabled={resolved.kind === 'legacy'}
+          title={resolved.kind === 'legacy' ? copy('plan.openLegacyHint') : undefined}
         >
-          {data.challengerSessionId === undefined ? copy('plan.openLegacyBuilder') : copy('plan.openBuilder')}
+          {copy(planActionLabelKey(resolved))}
           <svg width={12} height={12} viewBox="0 0 12 12" fill="none" aria-hidden="true">
             <path d="M4.5 2.5 8 6l-3.5 3.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
           </svg>

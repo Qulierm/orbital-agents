@@ -13,7 +13,8 @@ import { useSyncExternalStore } from 'react'
 import type { PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type { EndeavourCardData } from '../plan-projection.js'
 import { NS, type EndeavourKey } from './locales.js'
-import { cardExecutorId, copyFrom, type EndeavourInjected } from './PlanCard.js'
+import { copyFrom, type EndeavourInjected } from './PlanCard.js'
+import { planAction } from './plan-action.js'
 import { PlanView } from './PlanView.js'
 
 /** Complete dock renderer props (session scope supplies `useProjection`). */
@@ -48,10 +49,8 @@ export function PlanDock(props: PlanDockProps): React.ReactElement | null {
     <PlanView
       data={data}
       copy={copyFrom(props)}
-      onOpenBuilder={() => {
-        const executor = cardExecutorId(data)
-        if (executor !== undefined) props.openCounterpart(executor)
-      }}
+      action={planAction(data, props.currentSessionId)}
+      onOpenBuilder={(target) => { props.openCounterpart(target) }}
       variant="dock"
     />
   )

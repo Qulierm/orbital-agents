@@ -15,6 +15,7 @@ export const STYLE_ELEMENT_ID = 'dsh-endeavour-styles'
 export const CLASS = {
   dockWrap: 'dsh-endeavour-dock-wrap',
   dockPanel: 'dsh-endeavour-dock-panel',
+  peerReturnRow: 'dsh-endeavour-peer-return',
   card: 'dsh-endeavour-card',
   header: 'dsh-endeavour-header',
   title: 'dsh-endeavour-title',
@@ -401,6 +402,13 @@ export const STYLE_TEXT = `
   outline: 2px solid var(--dsw-alias-label-tertiary);
   outline-offset: -2px;
 }
+.dsh-endeavour-peer-return {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  padding: 2px 2px 0;
+}
+
 .dsh-endeavour-ghost {
   flex: none;
   display: inline-flex;

@@ -10,6 +10,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-workspace/client'
 import { endeavourPlanDefinition } from './definition.js'
 import { PlanCard, type EndeavourInjected, type PlanCardProps } from './PlanCard.js'
 import { registerPlanDock } from './PlanDock.js'
+import { registerPeerReturnDock } from './PeerReturnDock.js'
 import { EndeavourRoleLabel } from './EndeavourRoleLabel.js'
 import type { ModelCatalog } from '@deepseek-ai/dsh-api-session-controller/types'
 import type { ISessions } from '@deepseek-ai/dsh-api-session-controller/client'
@@ -23,7 +24,6 @@ import {
   hasTransientUserActivation,
   openPeerTab,
   peerTabTarget,
-  reconcilePeerActivation,
   reconcilePeerTab,
   registerPeerTabEntry,
   type PeerProjectionFace,
@@ -41,12 +41,7 @@ interface ClientServices {
   readonly uiConversation: {
     readonly events: { register(definition: unknown): void }
     /** Per-session binding used to reset the active conversation view. */
-    readonly binding?: (sessionId: string) => {
-      readonly activate?: (view: string) => void
-      readonly snapshot?: { readonly getSnapshot?: () => unknown }
-      /** Existing publication nudge (client view state only). */
-      readonly rebuild?: () => void
-    } | undefined
+    readonly binding?: (sessionId: string) => { readonly activate?: (view: string) => void } | undefined
   }
   readonly slots: {
     inject(name: string, callback: () => void): void
@@ -116,9 +111,27 @@ export function apply(ctx: ClientContext): void {
     }
   }
 
+  /**
+   * Paired-return observable: `{ counterpartId }` while the session is the
+   * CHALLENGER side of a valid pair, null otherwise. Reactive, so the composer
+   * fallback appears when the pair arrives and disappears when it is broken.
+   */
+  const peerReturn = (sessionId: string): EndeavourInjected['peerReturn'] => {
+    const face = faceOf(sessionId, 'endeavourPeer')
+    return {
+      getSnapshot: () => {
+        const view = peerView((face?.getSnapshot() ?? null) as PeerState | null, sessionId)
+        return view?.role === 'challenger' ? { counterpartId: view.counterpartId } : null
+      },
+      subscribe: (listener: () => void) => face?.subscribe(listener) ?? (() => undefined),
+    }
+  }
+
   const injected = (sessionId?: string): EndeavourInjected => ({
     openCounterpart: (id) => { openSession(id) },
-    ...(sessionId === undefined ? {} : { planSource: planSource(sessionId) }),
+    ...(sessionId === undefined
+      ? {}
+      : { currentSessionId: sessionId, planSource: planSource(sessionId), peerReturn: peerReturn(sessionId) }),
   })
 
   /** Official projection face for one session, when its binding exists. */
@@ -249,6 +262,7 @@ export function apply(ctx: ClientContext): void {
     inject: injected,
   }, PlanCard as unknown as (props: PlanCardProps) => unknown))
   registerPlanDock(client.slots, injected)
+  registerPeerReturnDock(client.slots, injected)
   // The composer toolbar keeps both role groups together on the trailing side:
   // Speed (openai-codex-fast-mode, order 10) and limits (openai-codex-quota,
   // order 20) stay ahead, then the Builder group (1000) and the Endeavour role
@@ -283,37 +297,4 @@ export function apply(ctx: ClientContext): void {
       ),
     }), 'dsh-endeavour: peer navigation tab')
   })
-  // Blank-peer chrome, wired at APPLY scope (no slot dependency): the blank
-  // Challenger session mounts no View ring, so the activation must not wait for
-  // a chat view. Activating its Chat target through the official uiConversation
-  // binding makes conversationPhase active, so the native header and the
-  // Chat/Trajectory/Endeavour ring render and the reciprocal tab is reachable
-  // immediately. Client view state only: no durable event, no prompt, no model
-  // request, and it is idempotent across re-mounts and session switches.
-  client.effect(() => reconcilePeerActivation({
-    currentSession,
-    subscribeCurrent,
-    peerFace: faceOf,
-    activateConversation: (sessionId) => {
-      const binding = client.uiConversation.binding?.(sessionId)
-      if (binding === undefined) return
-      binding.activate?.('chat')
-      // The app publishes a conversation snapshot only when its assembly is
-      // dirty, and a BLANK session has no pending events: the activation is
-      // recorded in the monotonic active set but stays invisible until the next
-      // publication. Nudge the SAME binding to republish (client view state
-      // only — no durable event, no prompt, no model request) so the native
-      // header and the View ring render for a peer with no turns.
-      const snapshot = (binding as { readonly snapshot?: { getSnapshot?: () => unknown } }).snapshot?.getSnapshot?.() as
-        | { readonly activeTargets?: { readonly size?: number } | readonly unknown[] }
-        | undefined
-      const active = snapshot?.activeTargets
-      const size = active === undefined
-        ? 0
-        : Array.isArray(active)
-          ? active.length
-          : ((active as { readonly size?: number }).size ?? 0)
-      if (size === 0) (binding as { rebuild?: () => void }).rebuild?.()
-    },
-  }), 'dsh-endeavour: blank peer chrome')
 }

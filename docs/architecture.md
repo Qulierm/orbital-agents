@@ -72,6 +72,32 @@ last task succeeded -> plan terminal completed
   Confirmed means "Endeavour verified"; a task's duration freezes at its report
   time through confirmation.
 
+## Blank-peer navigation (rc.2 limitation)
+
+A freshly provisioned Challenger has no turns yet, and the native conversation
+chrome renders only once a session has content: rc.2 registers the Chat View
+lazily inside the (hidden) View ring and republishes the conversation snapshot
+only when the assembly is dirty, so activating the Chat target for a
+message-less session cannot surface the native `Chat/Trajectory/Endeavour` strip.
+No synthetic turn, `beginSubmission` misuse or fabricated event is used to work
+around this.
+
+Navigation therefore uses two official surfaces, both `ISessions.open` bridges:
+
+- the **role-aware plan action** (transcript card and composer dock): the
+  Endeavour side opens its persistent Challenger, the Challenger side opens the
+  paired Endeavour root, and a historical `childId`-only card stays a disabled
+  history affordance;
+- the **blank-peer return fallback** in `conversation.input.dock`, rendered only
+  while the current session is the paired Challenger AND no plan is projected,
+  so a blank peer still has a visible `Endeavour` return button. As soon as a
+  plan is projected the shared dock's `Open Endeavour` action takes over and the
+  fallback disappears, keeping exactly one return affordance.
+
+Once the Challenger carries protocol content (a plan, a report or any turn), the
+native View ring renders normally and its `Endeavour` tab is the primary return
+path; the fallback then stays hidden.
+
 ## Legacy Builder child lifecycle (historical plans only)
 
 > Historical note: plans created before the peer runtime used a continuable

@@ -9,11 +9,11 @@ import { StrictMode, createElement } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
 import { afterEach, describe, expect, it } from 'vitest'
+import { PeerReturnDock } from '../src/client/PeerReturnDock.js'
 import {
   openPeerTab,
   PeerTabView,
   peerTabTarget,
-  reconcilePeerActivation,
   reconcilePeerTab,
   registerPeerTabEntry,
   type PeerProjectionFace,
@@ -126,34 +126,6 @@ describe('registration', () => {
     expect(disposed).toBe(3)
   })
 
-  it('activates the blank Challenger chat target exactly once per session', () => {
-    const a = pair('session-root')
-    let current = 'session-root'
-    const currentListeners = new Set<() => void>()
-    const faces = new Map<string, ReturnType<typeof face>>([['session-root', face(a)]])
-    const activated: string[] = []
-    const dispose = reconcilePeerActivation({
-      currentSession: () => current,
-      subscribeCurrent: (listener) => { currentListeners.add(listener); return () => { currentListeners.delete(listener) } },
-      peerFace: (sessionId, key) => (key === 'endeavourPeer' ? faces.get(sessionId) : undefined),
-      activateConversation: (sessionId) => { activated.push(sessionId) },
-    })
-    // The Endeavour side needs no activation.
-    expect(activated).toEqual([])
-    // The paired Challenger side is activated once, even on repeated notices.
-    current = a.challengerSessionId
-    faces.set(a.challengerSessionId, face(a))
-    for (const listener of [...currentListeners]) listener()
-    expect(activated).toEqual([a.challengerSessionId])
-    for (const listener of [...currentListeners]) listener()
-    expect(activated).toEqual([a.challengerSessionId])
-    // Switching back to the root does not activate anything.
-    current = 'session-root'
-    for (const listener of [...currentListeners]) listener()
-    expect(activated).toEqual([a.challengerSessionId])
-    dispose()
-  })
-
   it('registers the official entry options per role', () => {
     const entries: { options: Record<string, unknown> }[] = []
     const slots = { inject: () => undefined, register: (options: unknown) => { entries.push({ options: options as Record<string, unknown> }); return () => undefined } }
@@ -165,6 +137,39 @@ describe('registration', () => {
     expect((entries[1]?.options.label as () => string)()).toBe('Endeavour')
     expect(entries[0]?.options.order).toBe(20)
     expect(entries[0]?.options.name).toBe('conversation.view')
+  })
+
+  it('renders the blank-peer return button and clicks the exact root', () => {
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+    const root = createRoot(container)
+    let peer: { counterpartId: string } | null = { counterpartId: 'session-root' }
+    const listeners = new Set<() => void>()
+    const opens: string[] = []
+    const props = {
+      t: undefined,
+      useProjection: () => null,
+      openCounterpart: (id: string) => { opens.push(id) },
+      peerReturn: {
+        getSnapshot: () => peer,
+        subscribe: (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener) } },
+      },
+      planSource: { getSnapshot: () => null, subscribe: () => () => undefined },
+    }
+    act(() => { root.render(createElement(PeerReturnDock, props as never)) })
+    roots.push(root)
+    containers.push(container)
+    const button = container.querySelector('button')
+    expect(button?.textContent).toContain('Endeavour')
+    expect(button?.getAttribute('aria-label')).toBe('Open the paired Endeavour session')
+    act(() => { button?.click() })
+    expect(opens).toEqual(['session-root'])
+    // Session switch / HMR: losing the pair removes the affordance immediately.
+    act(() => {
+      peer = null
+      for (const listener of [...listeners]) listener()
+    })
+    expect(container.querySelector('button')).toBeNull()
   })
 
   it('is navigation only and selects exactly once under StrictMode', () => {

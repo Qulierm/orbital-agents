@@ -4,6 +4,7 @@ import type { PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots
 import type { ChatConversationViewNode } from '@deepseek-ai/dsh-client-ui-chat/client'
 import type { EndeavourCardData } from '../plan-projection.js'
 import { formatEnglish, type EndeavourKey } from './locales.js'
+import { planAction } from './plan-action.js'
 import { PlanView } from './PlanView.js'
 
 /** Peer navigation injected from the plugin's own services. */
@@ -16,6 +17,17 @@ export interface EndeavourInjected {
    */
   readonly planSource?: {
     getSnapshot(): unknown
+    subscribe(listener: () => void): () => void
+  } | undefined
+  /** Session currently rendering the surface (drives the role-aware action). */
+  readonly currentSessionId?: string | undefined
+  /**
+   * Paired-return observable for the current session: `{ counterpartId }` when
+   * it is the CHALLENGER side of a valid pair, null otherwise. Powers the
+   * composer fallback when no plan is present.
+   */
+  readonly peerReturn?: {
+    getSnapshot(): { readonly counterpartId: string } | null
     subscribe(listener: () => void): () => void
   } | undefined
 }
@@ -59,10 +71,8 @@ export function PlanCard(props: PlanCardProps): React.ReactElement | null {
     <PlanView
       data={data}
       copy={copyFrom(props)}
-      onOpenBuilder={() => {
-        const executor = cardExecutorId(data)
-        if (executor !== undefined) props.openCounterpart(executor)
-      }}
+      action={planAction(data, props.currentSessionId)}
+      onOpenBuilder={(target) => { props.openCounterpart(target) }}
       variant="card"
     />
   )

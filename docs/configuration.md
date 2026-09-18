@@ -35,6 +35,14 @@ A plan reuses the persistent Challenger with its current selection; later plans
 on the same pair do the same. Terminal historical plans recorded before the
 peer runtime stay readable as history.
 
+## Blank peer navigation
+
+A peer with no turns yet has no native View ring in rc.2, so the composer shows
+a role-aware plan action (Open Challenger / Open Endeavour) and, while no plan
+is projected on the Challenger side, a restrained `Endeavour` return button in
+the composer dock. Both open the exact counterpart through the official
+`ISessions.open` bridge; see [architecture.md](architecture.md).
+
 ## Retired flags
 
 `--configure-builder`, `--show-builder` and `--reset-builder` were removed.
