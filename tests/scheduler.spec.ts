@@ -8,7 +8,7 @@
  */
 
 import { execFileSync, spawnSync } from 'node:child_process'
-import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -136,9 +136,10 @@ describe('detached restart scheduler', () => {
 
   it('never executes the real quit or open in hermetic mode', () => {
     const source = readFileSync(SCHEDULER, 'utf8')
-    // The hermetic flag replaces both commands; the real ones run only outside it.
-    expect(source).toMatch(/simulate \? process\.env\.DSH_RESTART_TEST_QUIT_FAIL !== '1' : runTemplate\(quitCommand\)/)
-    expect(source).toMatch(/simulate \? process\.env\.DSH_RESTART_TEST_OPEN_FAIL !== '1' : runTemplate\(openCommand\)/)
+    // The hermetic flag short-circuits BOTH commands; the real argv is only
+    // handed to spawnSync outside it, so a hermetic run executes nothing.
+    expect(source).toMatch(/simulate \? process\.env\.DSH_RESTART_TEST_QUIT_FAIL !== '1' : runCommand\(quitExecutable, quitArgv\)/)
+    expect(source).toMatch(/simulate \? process\.env\.DSH_RESTART_TEST_OPEN_FAIL !== '1' : runCommand\(openExecutable, openArgv\)/)
     // The schedule path must never wait.
     expect(source).not.toMatch(/^\s*(?:await\s+)?(?:sleep|execFileSync\(['"]sleep)/m)
     const scheduled = spawnSync(process.execPath, [SCHEDULER, '--help'], { encoding: 'utf8' })
@@ -150,6 +151,86 @@ describe('detached restart scheduler', () => {
     expect(manifest.files).toContain('scripts/schedule-desktop-restart.mjs')
     const packed = readFileSync(join(REPO, 'scripts', 'pack-check.mjs'), 'utf8')
     expect(packed).toContain('package/scripts/schedule-desktop-restart.mjs')
+  })
+
+  it('builds the production commands as exact executable/argv pairs', async () => {
+    const home = tempHome()
+    // Hermetic worker run: the real commands are NOT executed, but the worker
+    // records exactly what it would have run.
+    spawnSync(process.execPath, [
+      SCHEDULER, '--worker', '--id', 'argv-probe', '--log', join(home, 'argv.log'), '--delay-seconds', '1',
+    ], { encoding: 'utf8', env: { ...process.env, DSH_RESTART_HOME: home, DSH_RESTART_TEST_MODE: '1' } })
+    const entries = readFileSync(join(home, 'argv.log'), 'utf8').split('\n').filter(Boolean)
+      .map((line) => JSON.parse(line) as { readonly phase: string; readonly detail?: { readonly executable?: string; readonly argv?: readonly string[] } })
+    const quit = entries.find((entry) => entry.phase === 'quit')
+    const open = entries.find((entry) => entry.phase === 'open')
+    // One AppleScript expression, passed as a single -e argument.
+    expect(quit?.detail?.executable).toBe('/usr/bin/osascript')
+    expect(quit?.detail?.argv).toEqual(['-e', 'quit app "DSH Desktop"'])
+    // The app bundle is ONE argv item, spaces and all.
+    expect(open?.detail?.executable).toBe('/usr/bin/open')
+    expect(open?.detail?.argv).toEqual(['/Applications/DSH Desktop.app'])
+  })
+
+  it('never splits a command string on whitespace', () => {
+    const source = readFileSync(SCHEDULER, 'utf8')
+    expect(source).not.toMatch(/split\(' '\)/)
+    expect(source).toContain("['-e', 'quit app \"DSH Desktop\"']")
+    expect(source).toContain("fileURLToPath(import.meta.url)")
+  })
+
+  it('rejects invalid numeric arguments before spawning a worker', () => {
+    const home = tempHome()
+    for (const value of ['abc', '-5', 'NaN']) {
+      const result = spawnSync(process.execPath, [SCHEDULER, '--delay-seconds', value], {
+        encoding: 'utf8',
+        env: { ...process.env, DSH_RESTART_HOME: home, DSH_RESTART_TEST_MODE: '1' },
+      })
+      expect(result.status, `delay-seconds=${value}`).toBe(2)
+      expect(result.stderr).toMatch(/delay-seconds/)
+    }
+    // Nothing was scheduled for any of the rejected values.
+    expect(logs(home)).toHaveLength(0)
+  })
+
+  it('records scheduled before the worker starts', () => {
+    const home = tempHome()
+    schedule(home, 1)
+    const logPath = join(restartDir(home), logs(home)[0]!)
+    const first = JSON.parse(readFileSync(logPath, 'utf8').split('\n').filter(Boolean)[0]!) as { readonly phase: string }
+    expect(first.phase).toBe('scheduled')
+  })
+
+  it('runs from an arbitrary cwd through the installed preset path', () => {
+    // The prompt must invoke the package through the owned preset symlink, which
+    // exists regardless of the user's working directory.
+    const prompt = readFileSync(join(REPO, 'src', 'prompts', 'challenger.md'), 'utf8')
+    expect(prompt).toContain('$HOME/.dsh/.agent-presets/challenger/node_modules/dsh-orbital-agents/scripts/schedule-desktop-restart.mjs')
+    const persona = readFileSync(join(REPO, 'preset', 'challenger', 'agent.cordis.yml'), 'utf8')
+    expect(persona).toContain('$HOME/.dsh/.agent-presets/challenger/node_modules/dsh-orbital-agents/scripts/schedule-desktop-restart.mjs')
+    // No bare relative invocation survives anywhere the model reads.
+    expect(prompt).not.toMatch(/node scripts\/schedule-desktop-restart\.mjs/)
+    expect(persona).not.toMatch(/node scripts\/schedule-desktop-restart\.mjs/)
+  })
+
+  it('works when its own path contains spaces', () => {
+    const home = tempHome()
+    const spacedDir = join(home, 'dir with spaces')
+    mkdirSync(spacedDir, { recursive: true })
+    const spacedCopy = join(spacedDir, 'schedule-desktop-restart.mjs')
+    copyFileSync(SCHEDULER, spacedCopy)
+    const result = spawnSync(process.execPath, [spacedCopy, '--delay-seconds', '1'], {
+      encoding: 'utf8',
+      env: { ...process.env, DSH_RESTART_HOME: home, DSH_RESTART_TEST_MODE: '1' },
+    })
+    expect(result.status).toBe(0)
+    const logPath = join(restartDir(home), logs(home)[0]!)
+    const deadline = Date.now() + 15_000
+    while (!phases(logPath).includes('ready') && Date.now() < deadline) {
+      spawnSync('/bin/sleep', ['0.2'])
+    }
+    // The worker ran from the spaced path: the URL-path bug would break it.
+    expect(phases(logPath)).toContain('ready')
   })
 
   it('is dependency-free and exposes no library API', () => {

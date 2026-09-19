@@ -38,7 +38,8 @@
 import { spawn, spawnSync } from 'node:child_process'
 import { appendFileSync, mkdirSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 const APP_BUNDLE = '/Applications/DSH Desktop.app'
 const DEFAULT_DELAY_SECONDS = 45
@@ -47,6 +48,26 @@ const DEFAULT_MAIN_MATCH = `${APP_BUNDLE}/Contents/MacOS/DSH Desktop`
 const DEFAULT_QUIT_TIMEOUT_MS = 60_000
 const DEFAULT_READY_TIMEOUT_MS = 120_000
 const POLL_INTERVAL_MS = 1_000
+
+/**
+ * Production commands as explicit executable/argv pairs. Never a shell string:
+ * splitting one on whitespace would hand `quit app "DSH Desktop"` to osascript
+ * as four arguments and break the app bundle path on its space.
+ */
+const QUIT_EXECUTABLE = '/usr/bin/osascript'
+const QUIT_ARGV = ['-e', 'quit app "DSH Desktop"']
+const OPEN_EXECUTABLE = '/usr/bin/open'
+const OPEN_ARGV = [APP_BUNDLE]
+
+/** Parse a CLI/env numeric value, rejecting NaN, negatives and non-integers. */
+function numericOption(name, raw, { minimum, fallback }) {
+  if (raw === undefined || raw === '') return fallback
+  const value = Number(raw)
+  if (!Number.isFinite(value) || !Number.isInteger(value) || value < minimum) {
+    throw new Error(`schedule-desktop-restart: ${name} must be an integer >= ${String(minimum)}, got ${JSON.stringify(raw)}`)
+  }
+  return value
+}
 
 /** Structured, timestamped progress log; every phase is durable evidence. */
 function createRecorder(logPath) {
@@ -94,21 +115,19 @@ function mainProcessRunning(match) {
   return result.stdout.split('\n').some((line) => line.includes(match) && !line.includes('grep'))
 }
 
-/** Run a command template such as `osascript -e "…"` without a shell. */
-function runTemplate(command) {
-  const parts = command.split(' ').filter((part) => part !== '')
-  const [bin, ...args] = parts
-  return spawnSync(bin, args, { stdio: 'ignore' }).status === 0
+/** Run one executable/argv pair without a shell. */
+function runCommand(executable, argv) {
+  return spawnSync(executable, [...argv], { stdio: 'ignore' }).status === 0
 }
 
 async function worker() {
   const id = flag('--id') ?? String(Date.now())
   const logPath = flag('--log') ?? join(restartRoot(), `${id}.log`)
-  const delaySeconds = Number(flag('--delay-seconds') ?? DEFAULT_DELAY_SECONDS)
-  const port = Number(process.env.DSH_RESTART_PORT ?? DEFAULT_PORT)
+  const delaySeconds = numericOption('--delay-seconds', flag('--delay-seconds'), { minimum: 0, fallback: DEFAULT_DELAY_SECONDS })
+  const port = numericOption('DSH_RESTART_PORT', process.env.DSH_RESTART_PORT, { minimum: 1, fallback: DEFAULT_PORT })
   const mainMatch = process.env.DSH_RESTART_MAIN_MATCH ?? DEFAULT_MAIN_MATCH
-  const quitTimeout = Number(process.env.DSH_RESTART_QUIT_TIMEOUT_MS ?? DEFAULT_QUIT_TIMEOUT_MS)
-  const readyTimeout = Number(process.env.DSH_RESTART_READY_TIMEOUT_MS ?? DEFAULT_READY_TIMEOUT_MS)
+  const quitTimeout = numericOption('DSH_RESTART_QUIT_TIMEOUT_MS', process.env.DSH_RESTART_QUIT_TIMEOUT_MS, { minimum: 1, fallback: DEFAULT_QUIT_TIMEOUT_MS })
+  const readyTimeout = numericOption('DSH_RESTART_READY_TIMEOUT_MS', process.env.DSH_RESTART_READY_TIMEOUT_MS, { minimum: 1, fallback: DEFAULT_READY_TIMEOUT_MS })
   // Hermetic mode: quit/open are simulated and never executed, so tests can
   // prove the protocol without touching a real desktop.
   const simulate = process.env.DSH_RESTART_TEST_MODE !== undefined
@@ -118,9 +137,14 @@ async function worker() {
   await new Promise((resolve) => setTimeout(resolve, delaySeconds * 1_000))
   record('delay-elapsed')
 
-  const quitCommand = process.env.DSH_RESTART_QUIT_CMD ?? `/usr/bin/osascript -e quit app "DSH Desktop"`
-  record('quit')
-  const quitOk = simulate ? process.env.DSH_RESTART_TEST_QUIT_FAIL !== '1' : runTemplate(quitCommand)
+  const quitExecutable = process.env.DSH_RESTART_QUIT_EXECUTABLE ?? QUIT_EXECUTABLE
+  const quitArgv = process.env.DSH_RESTART_QUIT_ARGV === undefined
+    ? QUIT_ARGV
+    : JSON.parse(process.env.DSH_RESTART_QUIT_ARGV)
+  // The durable record always carries the exact production construction, so a
+  // hermetic run proves the argv without executing it.
+  record('quit', { executable: quitExecutable, argv: quitArgv })
+  const quitOk = simulate ? process.env.DSH_RESTART_TEST_QUIT_FAIL !== '1' : runCommand(quitExecutable, quitArgv)
   if (!quitOk) {
     record('failed', { step: 'quit' })
     return 1
@@ -132,9 +156,12 @@ async function worker() {
   }
   record('quit-done')
 
-  const openCommand = process.env.DSH_RESTART_OPEN_CMD ?? `/usr/bin/open ${APP_BUNDLE}`
-  record('open')
-  const openOk = simulate ? process.env.DSH_RESTART_TEST_OPEN_FAIL !== '1' : runTemplate(openCommand)
+  const openExecutable = process.env.DSH_RESTART_OPEN_EXECUTABLE ?? OPEN_EXECUTABLE
+  const openArgv = process.env.DSH_RESTART_OPEN_ARGV === undefined
+    ? OPEN_ARGV
+    : JSON.parse(process.env.DSH_RESTART_OPEN_ARGV)
+  record('open', { executable: openExecutable, argv: openArgv })
+  const openOk = simulate ? process.env.DSH_RESTART_TEST_OPEN_FAIL !== '1' : runCommand(openExecutable, openArgv)
   if (!openOk) {
     record('failed', { step: 'open' })
     return 1
@@ -169,21 +196,31 @@ async function schedule() {
     process.stderr.write(`schedule-desktop-restart: unsupported platform ${platform}; this helper is macOS-only\n`)
     return 2
   }
-  const requestedDelay = Number(flag('--delay-seconds') ?? DEFAULT_DELAY_SECONDS)
-  const delaySeconds = process.env.DSH_RESTART_TEST_MODE !== undefined
-    ? Math.max(requestedDelay, 0)
-    : Math.max(requestedDelay, 30)
+  let delaySeconds
+  try {
+    const requestedDelay = numericOption('--delay-seconds', flag('--delay-seconds'), { minimum: 0, fallback: DEFAULT_DELAY_SECONDS })
+    delaySeconds = process.env.DSH_RESTART_TEST_MODE !== undefined ? requestedDelay : Math.max(requestedDelay, 30)
+  } catch (error) {
+    process.stderr.write(`${String(error.message)}\n`)
+    return 2
+  }
   const root = restartRoot()
   mkdirSync(root, { recursive: true })
   const stamp = new Date().toISOString().replace(/[:.]/g, '-')
   const id = `${stamp}-${process.pid}`
   const logPath = join(root, `${id}.log`)
+  // The schedule record is written BEFORE the spawn so it is deterministically
+  // the first line, and a spawn failure is recorded rather than lost.
+  appendFileSync(logPath, `${JSON.stringify({ at: new Date().toISOString(), phase: 'scheduled', detail: { delaySeconds } })}\n`)
   const workerProcess = spawn(process.execPath, [
-    new URL(import.meta.url).pathname,
+    fileURLToPath(import.meta.url),
     '--worker', '--id', id, '--log', logPath, '--delay-seconds', String(delaySeconds),
   ], { detached: true, stdio: 'ignore' })
+  workerProcess.on('error', (error) => {
+    appendFileSync(logPath, `${JSON.stringify({ at: new Date().toISOString(), phase: 'failed', detail: { step: 'spawn', message: String(error.message) } })}\n`)
+  })
   workerProcess.unref()
-  appendFileSync(logPath, `${JSON.stringify({ at: new Date().toISOString(), phase: 'scheduled', detail: { delaySeconds, workerPid: workerProcess.pid } })}\n`)
+  appendFileSync(logPath, `${JSON.stringify({ at: new Date().toISOString(), phase: 'worker-spawned', detail: { workerPid: workerProcess.pid } })}\n`)
   process.stdout.write(`schedule-desktop-restart: scheduled id=${id} delay=${delaySeconds}s log=${logPath}\n`)
   process.stdout.write('schedule-desktop-restart: report the scheduled restart now; do not wait for it in this call\n')
   return 0

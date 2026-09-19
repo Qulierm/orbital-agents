@@ -41,7 +41,8 @@ const workerSource = `
     setTimeout(() => record('ready'), 300)
   }, ${delayMs})
 `
-const worker = spawn(process.execPath, ['-e', workerSource], { detached: true, stdio: 'ignore', env: { ...process.env } })
+const node = process.env.DSH_TEST_NODE ?? process.execPath
+const worker = spawn(node, ['-e', workerSource], { detached: true, stdio: 'ignore', env: { ...process.env } })
 worker.unref()
 appendFileSync(logPath, `${JSON.stringify({ phase: 'scheduled', at: Date.now() })}\n`)
 

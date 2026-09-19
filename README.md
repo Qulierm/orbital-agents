@@ -52,7 +52,7 @@ cd orbital-agents
 pnpm install --frozen-lockfile
 pnpm run build
 pnpm pack
-node scripts/install-local.mjs --tarball ./dsh-orbital-agents-0.2.2.tgz
+node scripts/install-local.mjs --tarball ./dsh-orbital-agents-0.2.3.tgz
 ```
 
 The installer backs up the desktop profile and any existing user preset first, installs the package
@@ -69,8 +69,8 @@ inspected or fetched by version instead of building it locally:
 
 ```sh
 npm view dsh-orbital-agents version # latest published version
-npm pack dsh-orbital-agents@0.2.2   # download exactly the published tarball
-node scripts/install-local.mjs --tarball ./dsh-orbital-agents-0.2.2.tgz
+npm pack dsh-orbital-agents@0.2.3   # download exactly the published tarball
+node scripts/install-local.mjs --tarball ./dsh-orbital-agents-0.2.3.tgz
 ```
 
 `npm pack` writes the published tarball into the current directory, and the installer is run from a
@@ -146,7 +146,7 @@ must be scheduled before anything is reported.
 - **Manual:** quit and reopen DSH Desktop yourself (`osascript -e 'quit app "DSH Desktop"'`, then
   `open "/Applications/DSH Desktop.app"`), or just use the app's own quit. Nothing else is needed.
 - **Agent-safe scheduling:** the packaged helper
-  `node scripts/schedule-desktop-restart.mjs --delay-seconds 45` validates macOS, writes its log under
+  `node "$HOME/.dsh/.agent-presets/challenger/node_modules/dsh-orbital-agents/scripts/schedule-desktop-restart.mjs" --delay-seconds 45` validates macOS, writes its log under
   `~/.dsh/backups/endeavour/restarts`, spawns a detached worker and returns **immediately** with a
   schedule id and the log path. The worker waits, quits the app, waits for the old process to leave,
   reopens the bundle and records `ready` or `failed` in that log.

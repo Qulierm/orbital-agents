@@ -8,13 +8,19 @@
  * the shipped contract that avoids it (scheduler, personas, documentation).
  */
 
-import { spawn } from 'node:child_process'
+import { execFileSync, spawn } from 'node:child_process'
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 
 const REPO = resolve(import.meta.dirname, '..')
+/**
+ * Real Node binary for the fixture host. `process.execPath` is the DSH Desktop
+ * app binary when the suite runs inside the harness, which would spawn stray
+ * app processes instead of a plain host.
+ */
+const NODE = process.env.DSH_TEST_NODE ?? execFileSync('/usr/bin/which', ['node'], { encoding: 'utf8' }).trim()
 const FIXTURE = join(REPO, 'tests', 'fixtures', 'restart-wait-pattern.mjs')
 const SCHEDULER = join(REPO, 'scripts', 'schedule-desktop-restart.mjs')
 const dirs: string[] = []
@@ -37,10 +43,10 @@ afterEach(() => {
 function fakeHostScript(dir: string): string {
   const path = join(dir, 'fake-host.mjs')
   writeFileSync(path, [
-    "import { spawn } from 'node:child_process'",
+    "import { execFileSync, spawn } from 'node:child_process'",
     '// The host owns the tool call: the call runs in the host process group, so',
     '// quitting the host (as DSH Desktop quit does) kills the active call.',
-    "spawn(process.execPath, [process.env.FIXTURE_CALL], { stdio: 'ignore', env: { ...process.env, FIXTURE_HOST_PID: String(process.pid) } })",
+    `spawn(${JSON.stringify(NODE)}, [process.env.FIXTURE_CALL], { stdio: 'ignore', env: { ...process.env, FIXTURE_HOST_PID: String(process.pid) } })`,
     'setInterval(() => {}, 1000)',
     '',
   ].join('\n'))
@@ -56,7 +62,7 @@ interface Outcome {
 
 async function runCall(dir: string, mode: 'old' | 'safe'): Promise<Outcome> {
   const host = fakeHostScript(dir)
-  const hostProcess = spawn(process.execPath, [host], {
+  const hostProcess = spawn(NODE, [host], {
     detached: true,
     stdio: 'ignore',
     env: {
@@ -133,7 +139,7 @@ describe('restart safety contract', () => {
   it('forbids the wait-after-schedule pattern in the Challenger persona', () => {
     const raw = readFileSync(join(REPO, 'preset', 'challenger', 'agent.cordis.yml'), 'utf8')
     const persona = raw.replace(/\s+/g, ' ')
-    expect(persona).toContain('schedule-desktop-restart.mjs')
+    expect(persona).toContain('$HOME/.dsh/.agent-presets/challenger/node_modules/dsh-orbital-agents/scripts/schedule-desktop-restart.mjs')
     expect(persona).toMatch(/never sleep, tail, poll processes or check ports/i)
     expect(persona).toMatch(/restart scheduled/i)
     expect(persona).toMatch(/final task/i)
@@ -174,7 +180,7 @@ describe('restart safety contract', () => {
   it('documents the manual-versus-scheduled restart distinction', () => {
     const readme = readFileSync(join(REPO, 'README.md'), 'utf8')
     const install = readFileSync(join(REPO, 'docs', 'install.md'), 'utf8')
-    expect(readme).toMatch(/schedule-desktop-restart|restart scheduled/i)
+    expect(readme).toContain('$HOME/.dsh/.agent-presets/challenger/node_modules/dsh-orbital-agents/scripts/schedule-desktop-restart.mjs')
     expect(install).toMatch(/schedule-desktop-restart|restart scheduled/i)
   })
 })

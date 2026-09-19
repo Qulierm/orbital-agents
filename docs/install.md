@@ -14,7 +14,7 @@ git clone git@github.com:Qulierm/orbital-agents.git
 cd orbital-agents
 pnpm install --frozen-lockfile
 pnpm run typecheck && pnpm test && pnpm run build
-pnpm pack                     # dsh-orbital-agents-0.2.2.tgz
+pnpm pack                     # dsh-orbital-agents-0.2.3.tgz
 node scripts/pack-check.mjs   # tarball contents, no secrets/sources
 node scripts/preset-check.ts  # preset contract + persona drift
 ```
@@ -22,7 +22,7 @@ node scripts/preset-check.ts  # preset contract + persona drift
 ## 2. Install the package and the user preset
 
 ```sh
-node scripts/install-local.mjs --tarball ./dsh-orbital-agents-0.2.2.tgz
+node scripts/install-local.mjs --tarball ./dsh-orbital-agents-0.2.3.tgz
 ```
 
 What happens, in order:
@@ -54,7 +54,7 @@ performing it inside the same call, because quitting DSH Desktop kills the host 
 DSH records the call as interrupted with an unknown outcome and any pending report is never delivered.
 
 ```
-node scripts/schedule-desktop-restart.mjs --delay-seconds 45
+node "$HOME/.dsh/.agent-presets/challenger/node_modules/dsh-orbital-agents/scripts/schedule-desktop-restart.mjs" --delay-seconds 45
 # prints: schedule-desktop-restart: scheduled id=<id> delay=45s log=~/.dsh/backups/endeavour/restarts/<id>.log
 ```
 

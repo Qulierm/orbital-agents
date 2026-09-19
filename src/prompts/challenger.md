@@ -48,8 +48,11 @@ Rules:
   first, then schedule it in ONE Bash call that returns immediately:
 
   ```
-  node scripts/schedule-desktop-restart.mjs --delay-seconds 45
+  node "$HOME/.dsh/.agent-presets/challenger/node_modules/dsh-orbital-agents/scripts/schedule-desktop-restart.mjs" --delay-seconds 45
   ```
+
+  The path goes through the owned Challenger preset link, so it works from any
+  working directory.
 
   It prints a schedule id and the durable log path under
   `~/.dsh/backups/endeavour/restarts` and exits without waiting.

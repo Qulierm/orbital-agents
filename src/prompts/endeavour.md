@@ -115,5 +115,7 @@ Rules:
   that is the one being restarted, and a call that waits for it is recorded as
   interrupted with an unknown outcome.
 - The Builder schedules the restart in one call that returns immediately, reports
-  `restart scheduled` with that id and path, and stops. The user performs or waits
+  `restart scheduled` with that id and path, and stops. The command is
+  `node "$HOME/.dsh/.agent-presets/challenger/node_modules/dsh-orbital-agents/scripts/schedule-desktop-restart.mjs" --delay-seconds 45`, i.e. the installed package
+  through the owned Challenger preset link rather than a workspace-relative path. The user performs or waits
   out the restart; you then verify the scheduled evidence rather than a live result.
