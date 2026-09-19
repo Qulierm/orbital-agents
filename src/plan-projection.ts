@@ -93,6 +93,18 @@ export interface EndeavourCardData {
   readonly pairId?: string
   /** Exact route the plan's Builder was spawned with, when recorded. */
   readonly builderRoute?: EndeavourCardRoute
+  /**
+   * Current UNREPORTED execution task id (the row the Challenger is expected to
+   * work on next), or absent once review or a terminal outcome takes over.
+   * Renderer-facing only: derived from the whole-value checkpoint, never
+   * persisted separately.
+   */
+  readonly executionTaskId?: string
+  /**
+   * True once this peer plan's `plan-ready` relay was durably delivered to the
+   * Challenger. A live-activity warning is only meaningful after delivery.
+   */
+  readonly planReadyDelivered?: boolean
 }
 
 function cardRoute(route: PlanBuilderRoute): EndeavourCardRoute {
@@ -129,6 +141,9 @@ export function projectPlanCard(plan: PlanState): EndeavourCardData {
   const current = reviewing ? review : executionCursor(plan)
   const checking = reviewing && review !== undefined
   const currentSpec = current?.spec.display.title
+  const executionTaskId = reviewing ? undefined : executionCursor(plan)?.spec.id
+  const planReadyDelivered = (plan.deliveries ?? [])
+    .some((fact) => fact.kind === 'plan-ready' && fact.status === 'delivered')
   return {
     planId: plan.planId,
     rootSessionId: plan.rootSessionId,
@@ -149,6 +164,8 @@ export function projectPlanCard(plan: PlanState): EndeavourCardData {
           },
         }),
     childId: planChallengerId(plan),
+    ...(executionTaskId === undefined ? {} : { executionTaskId }),
+    planReadyDelivered,
     ...(plan.challengerSessionId === undefined ? {} : { challengerSessionId: plan.challengerSessionId }),
     ...(plan.pairId === undefined ? {} : { pairId: plan.pairId }),
   }

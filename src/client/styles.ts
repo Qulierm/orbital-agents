@@ -57,6 +57,7 @@ export const CLASS = {
   glyphFailed: 'dsh-endeavour-glyph--failed',
   glyphFinished: 'dsh-endeavour-glyph--finished',
   glyphPending: 'dsh-endeavour-glyph--pending',
+  glyphInterrupted: 'dsh-endeavour-glyph--interrupted',
   pulse: 'dsh-endeavour-pulse',
 } as const
 
@@ -425,15 +426,19 @@ export const STYLE_TEXT = `
   width: 16px;
   height: 16px;
 }
-/* Status tints: Working is the animated warn ring, Finished is the business
-   blue finish flag, Confirmed keeps success green and Failed error red. */
+/* Status tints. Working is the animated business-blue ring; Finished is the
+   green check (reported, awaiting review); Confirmed is the same check in the
+   host's violet-400 accent (ContextMeter's --meter-tint precedent, since DSH
+   publishes no purple semantic token); the ephemeral "Challenger stopped" mark
+   is warn orange; Waiting stays gray and Failed stays error red. */
 .dsh-endeavour-glyph--pending { color: var(--dsw-alias-label-caption); }
 .dsh-endeavour-glyph--running {
-  color: var(--dsw-alias-state-warn-primary);
+  color: var(--dsw-alias-state-business-primary);
   animation: dsh-endeavour-spin 1s linear infinite;
 }
-.dsh-endeavour-glyph--finished { color: var(--dsw-alias-state-business-primary); }
-.dsh-endeavour-glyph--succeeded { color: var(--dsw-alias-state-success-primary); }
+.dsh-endeavour-glyph--finished { color: var(--dsw-alias-state-success-primary); }
+.dsh-endeavour-glyph--succeeded { color: rgb(167, 139, 250); }
+.dsh-endeavour-glyph--interrupted { color: var(--dsw-alias-state-warn-primary); }
 .dsh-endeavour-glyph--failed { color: var(--dsw-alias-state-error-primary); }
 .dsh-endeavour-pulse {
   animation: dsh-endeavour-pulse 1.6s ease-in-out infinite;

@@ -8,6 +8,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import type { EndeavourCardData, EndeavourCardTask, TaskStage } from '../plan-projection.js'
+import type { ChallengerActivity } from './challenger-activity.js'
 import type { EndeavourKey } from './locales.js'
 import { planAction, planActionLabelKey, type PlanAction } from './plan-action.js'
 import { CLASS } from './styles.js'
@@ -25,6 +26,12 @@ export interface PlanViewProps {
   readonly action?: PlanAction
   /** `dock` attaches above the composer; `card` is the transcript card. */
   readonly variant?: 'card' | 'dock'
+  /**
+   * Live executor activity from the official session list. `interrupted` adds
+   * the ephemeral stopped mark to the current unreported row; every other value
+   * leaves the durable presentation exactly as it is.
+   */
+  readonly activity?: ChallengerActivity
 }
 
 /**
@@ -109,6 +116,20 @@ function ConfirmedGlyph() {
   return <CheckRingGlyph />
 }
 
+/**
+ * Interrupted: the Challenger is not running while this plan still expects
+ * execution work. Ephemeral session activity, not a durable task status.
+ */
+function InterruptedGlyph() {
+  return (
+    <svg width={14} height={14} viewBox="0 0 14 14" fill="none" aria-hidden="true" data-endeavour-interrupted="">
+      <circle cx="7" cy="7" r="6.4" stroke="currentColor" strokeWidth="1.3" />
+      <path d="M7 3.9v4.3" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+      <circle cx="7" cy="10.4" r="0.95" fill="currentColor" />
+    </svg>
+  )
+}
+
 /** Failed: failure mark. */
 function FailedGlyph() {
   return (
@@ -119,15 +140,19 @@ function FailedGlyph() {
   )
 }
 
-const GLYPH_CLASS: Record<TaskStage, string> = {
+/** Display stages: the durable five plus the ephemeral interruption mark. */
+type VisualStage = TaskStage | 'interrupted'
+
+const GLYPH_CLASS: Record<VisualStage, string> = {
   waiting: CLASS.glyphPending,
   working: CLASS.glyphRunning,
   finished: CLASS.glyphFinished,
   confirmed: CLASS.glyphSucceeded,
   failed: CLASS.glyphFailed,
+  interrupted: CLASS.glyphInterrupted,
 }
 
-function StageGlyph({ stage }: { stage: TaskStage }) {
+function StageGlyph({ stage }: { stage: VisualStage }) {
   const body = stage === 'waiting'
     ? <WaitingGlyph />
     : stage === 'working'
@@ -136,13 +161,15 @@ function StageGlyph({ stage }: { stage: TaskStage }) {
         ? <FinishedGlyph />
         : stage === 'confirmed'
           ? <ConfirmedGlyph />
-          : <FailedGlyph />
+          : stage === 'interrupted'
+            ? <InterruptedGlyph />
+            : <FailedGlyph />
   return <span className={`${CLASS.glyph} ${GLYPH_CLASS[stage]}`} aria-hidden="true">{body}</span>
 }
 
 /** One plan panel; the timer ticks every second only while a task is working. */
 export function PlanView(props: PlanViewProps): React.ReactElement | null {
-  const { data, copy, onOpenBuilder, action, variant = 'card' } = props
+  const { data, copy, onOpenBuilder, action, variant = 'card', activity } = props
   const resolved = action ?? planAction(data, undefined)
   const [now, setNow] = useState(() => Date.now())
   const terminalCompleted = data.terminal?.outcome === 'completed'
@@ -218,15 +245,21 @@ export function PlanView(props: PlanViewProps): React.ReactElement | null {
       </div>
       {!collapsed ? (
         <ul className={CLASS.rows}>
-          {data.tasks.map((task) => (
+          {data.tasks.map((task) => {
+            // Ephemeral override: only the row the plan is currently waiting on,
+            // and only while the official list says the Challenger is stopped.
+            const interrupted = activity === 'interrupted' && data.executionTaskId === task.id
+            const stage: VisualStage = interrupted ? 'interrupted' : task.stage
+            return (
             <li
               key={task.id}
               className={`${CLASS.row}${task.stage === 'working' ? ` ${CLASS.rowRunning}` : ''}`}
+              {...(interrupted ? { 'data-endeavour-interrupted': '' } : {})}
             >
-              <StageGlyph stage={task.stage} />
+              <StageGlyph stage={stage} />
               <span className={CLASS.rowTitle} title={task.title}>{task.title}</span>
               <span className={CLASS.rowStatus}>
-                {copy(`stage.${task.stage}` as EndeavourKey)}
+                {copy(`stage.${stage}` as EndeavourKey)}
                 {task.stage === 'working' && data.checking ? ` · ${copy('plan.checking')}` : ''}
                 {/* The failure reason stays in the transcript card, where it is
                     history; the composer dock shows only the Failed status. */}
@@ -236,7 +269,8 @@ export function PlanView(props: PlanViewProps): React.ReactElement | null {
                 <span className={CLASS.rowTimer} aria-label={`${task.title} elapsed`}>{taskElapsed(task, now)}</span>
               ) : null}
             </li>
-          ))}
+            )
+          })}
         </ul>
       ) : null}
     </>

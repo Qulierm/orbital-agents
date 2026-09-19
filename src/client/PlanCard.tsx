@@ -3,6 +3,7 @@
 import type { PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type { ChatConversationViewNode } from '@deepseek-ai/dsh-client-ui-chat/client'
 import type { EndeavourCardData } from '../plan-projection.js'
+import { challengerActivity, type ChallengerActivity, type SessionActivityLike } from './challenger-activity.js'
 import { formatEnglish, type EndeavourKey } from './locales.js'
 import { planAction } from './plan-action.js'
 import { PlanView } from './PlanView.js'
@@ -31,6 +32,9 @@ export interface EndeavourInjected {
     subscribe(listener: () => void): () => void
   } | undefined
 }
+
+/** The official session-list selector hook, when the slot provides it. */
+type SessionsSelector = <T>(select: (state: SessionActivityLike) => T) => T
 
 /** Complete keyed Chat renderer props. */
 export type PlanCardProps =
@@ -66,6 +70,12 @@ export function cardExecutorId(data: EndeavourCardData): string | undefined {
 export function PlanCard(props: PlanCardProps): React.ReactElement | null {
   const node = (props as { readonly node?: ChatConversationViewNode }).node
   const data = node?.data as EndeavourCardData | undefined
+  // Official standard hook: the session list snapshot is the one source of live
+  // activity. It is read before the early return so the hook order is stable.
+  const useSessions = (props as { readonly useSessions?: SessionsSelector }).useSessions
+  const activity = useSessions === undefined
+    ? undefined
+    : useSessions((state: SessionActivityLike) => (data === undefined ? 'inactive' : challengerActivity(data, state)))
   if (data === undefined) return null
   return (
     <PlanView
@@ -74,6 +84,7 @@ export function PlanCard(props: PlanCardProps): React.ReactElement | null {
       action={planAction(data, props.currentSessionId)}
       onOpenBuilder={(target) => { props.openCounterpart(target) }}
       variant="card"
+      {...(activity === undefined ? {} : { activity })}
     />
   )
 }

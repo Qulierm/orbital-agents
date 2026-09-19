@@ -151,7 +151,7 @@ describe('composer plan dock', () => {
     expect(html).toContain('01:00')
   })
 
-  it('paints Finished as the blue check-ring, Working as the yellow ring, and leaves Confirmed and Failed alone', () => {
+  it('paints Finished green, Working blue, Confirmed violet, and leaves Waiting and Failed alone', () => {
     const html = renderDock(allStages)
     // Finished now shares the Confirmed check-ring geometry, so the same path
     // appears exactly twice in this fixture (finished + confirmed) and the
@@ -165,14 +165,14 @@ describe('composer plan dock', () => {
     // The failed cross and the working pulse are untouched.
     expect(html).toContain('M5 5l4 4M9 5l-4 4')
     expect(html).toContain(CLASS.pulse)
-    // Colour tokens keep the stages distinct: blue finished, yellow running,
-    // green confirmed, red failed.
-    expect(STYLE_TEXT).toMatch(/\.dsh-endeavour-glyph--finished \{ color: var\(--dsw-alias-state-business-primary\); \}/)
-    expect(STYLE_TEXT).toMatch(/\.dsh-endeavour-glyph--running \{\s*color: var\(--dsw-alias-state-warn-primary\);\s*animation: dsh-endeavour-spin 1s linear infinite;/)
-    expect(STYLE_TEXT).toMatch(/\.dsh-endeavour-glyph--succeeded \{ color: var\(--dsw-alias-state-success-primary\); \}/)
+    // Colour tokens keep the stages distinct: green finished, blue running,
+    // violet confirmed, red failed, gray waiting.
+    expect(STYLE_TEXT).toMatch(/\.dsh-endeavour-glyph--running \{\s*color: var\(--dsw-alias-state-business-primary\);\s*animation: dsh-endeavour-spin 1s linear infinite;/)
+    expect(STYLE_TEXT).toMatch(/\.dsh-endeavour-glyph--finished \{ color: var\(--dsw-alias-state-success-primary\); \}/)
+    expect(STYLE_TEXT).toMatch(/\.dsh-endeavour-glyph--succeeded \{ color: rgb\(167, 139, 250\); \}/)
     expect(STYLE_TEXT).toMatch(/\.dsh-endeavour-glyph--failed \{ color: var\(--dsw-alias-state-error-primary\); \}/)
     expect(STYLE_TEXT).not.toMatch(/glyph--finished \{ color: var\(--dsw-alias-label-secondary\)/)
-    expect(STYLE_TEXT).not.toMatch(/glyph--running \{\s*color: var\(--dsw-alias-state-business-primary\)/)
+    expect(STYLE_TEXT).not.toMatch(/glyph--running \{\s*color: var\(--dsw-alias-state-warn-primary\)/)
   })
 
   it('hides the failure reason in the composer dock and keeps it on the transcript card', () => {

@@ -52,7 +52,7 @@ cd orbital-agents
 pnpm install --frozen-lockfile
 pnpm run build
 pnpm pack
-node scripts/install-local.mjs --tarball ./dsh-orbital-agents-0.2.0.tgz
+node scripts/install-local.mjs --tarball ./dsh-orbital-agents-0.2.1.tgz
 ```
 
 The installer backs up the desktop profile and any existing user preset first, installs the package
@@ -69,8 +69,8 @@ inspected or fetched by version instead of building it locally:
 
 ```sh
 npm view dsh-orbital-agents version # latest published version
-npm pack dsh-orbital-agents@0.2.0   # download exactly the published tarball
-node scripts/install-local.mjs --tarball ./dsh-orbital-agents-0.2.0.tgz
+npm pack dsh-orbital-agents@0.2.1   # download exactly the published tarball
+node scripts/install-local.mjs --tarball ./dsh-orbital-agents-0.2.1.tgz
 ```
 
 `npm pack` writes the published tarball into the current directory, and the installer is run from a
@@ -122,9 +122,20 @@ review of the Challenger's evidence — not promised by the pairing.
 transcript) the plan panel shows the run as it happens: how many tasks are confirmed, which task is
 current, a live timer on the working row, and the frozen duration afterwards. Its rows are the durable
 task states, not decoration — `Waiting to start`, `Working`, `Finished` (reported, awaiting review),
-`Confirmed` (accepted after Endeavour's check) and `Failed`. While a review is in progress the panel
-says so, and the same card offers the action that opens the paired session, so you can watch the
-Challenger work without relaying anything by hand.
+`Confirmed` (accepted after Endeavour's check) and `Failed`. The row colours make the stages readable
+at a glance: a gray ring while waiting, a blue animated ring while working, a green check once a task
+has been reported, the same check in violet once Endeavour has accepted it, and a red cross on
+failure.
+
+**When the Challenger stops, the plan says so.** If the paired Challenger session is no longer
+running while the plan still expects execution work — the turn was stopped, it errored, or the
+session went away — the row the plan is waiting on switches to `Challenger stopped` with a static
+orange circled exclamation, on both the panel above the composer and the transcript card. It covers
+stopping before the first task, in the middle of one, and between sequential tasks, and it clears by
+itself as soon as the Challenger runs again. This is deliberately *not* a fifth durable task state:
+it is live session activity read from the official session list, so nothing about the recorded plan,
+its events or the protocol changes. A task that had already started keeps counting its elapsed time
+while it waits to be resumed, and opening the Challenger is still a normal chat away.
 
 ## Model selection
 

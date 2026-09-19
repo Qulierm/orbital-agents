@@ -26,6 +26,7 @@ export const en = {
   'stage.finished': 'Finished',
   'stage.confirmed': 'Confirmed',
   'stage.failed': 'Failed',
+  'stage.interrupted': 'Challenger stopped',
   'builder.title': 'Builder model',
   'role.builder': 'Challenger',
   'role.endeavour': 'Endeavour',

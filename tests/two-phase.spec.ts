@@ -143,10 +143,11 @@ describe('finished vs confirmed visuals', () => {
     expect(source).not.toContain('M4 1.8v10.4')
     expect(source).not.toContain('M4 2.6h6.6l-1.6 2.6 1.6 2.6H4z')
     expect(source).not.toContain('M4.6 7.1 6.2 8.7l3.2-3.4')
-    // Colour and class, not geometry, keep the two durable stages apart.
-    expect(styles).toContain('.dsh-endeavour-glyph--finished { color: var(--dsw-alias-state-business-primary); }')
+    // Colour and class, not geometry, keep the two durable stages apart:
+    // Finished is the green check, Confirmed the same check in violet-400.
+    expect(styles).toContain('.dsh-endeavour-glyph--finished { color: var(--dsw-alias-state-success-primary); }')
     expect(styles).not.toContain('.dsh-endeavour-glyph--finished { color: var(--dsw-alias-label-secondary); }')
-    expect(styles).toContain('.dsh-endeavour-glyph--succeeded { color: var(--dsw-alias-state-success-primary); }')
+    expect(styles).toContain('.dsh-endeavour-glyph--succeeded { color: rgb(167, 139, 250); }')
     expect(styles).toContain('.dsh-endeavour-glyph--failed { color: var(--dsw-alias-state-error-primary); }')
     // The durable stage mapping is unchanged: finished still selects the
     // finished class, confirmed still selects the success class.

@@ -12,6 +12,7 @@
 import { useSyncExternalStore } from 'react'
 import type { PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type { EndeavourCardData } from '../plan-projection.js'
+import { challengerActivity, type SessionActivityLike } from './challenger-activity.js'
 import { NS, type EndeavourKey } from './locales.js'
 import { copyFrom, type EndeavourInjected } from './PlanCard.js'
 import { planAction } from './plan-action.js'
@@ -22,6 +23,9 @@ export type PlanDockProps =
   PropsRuntime<'conversation.input.dock'>
   & PropsLocale<'endeavour'>
   & EndeavourInjected
+
+/** The official session-list selector hook, when the slot provides it. */
+type SessionsSelector = <T>(select: (state: SessionActivityLike) => T) => T
 
 /** Selector hook shape for the session projection seat. */
 type UseProjection = (key: string) => unknown
@@ -44,6 +48,12 @@ export function PlanDock(props: PlanDockProps): React.ReactElement | null {
   const projected = typeof useProjection === 'function' ? useProjection('endeavourPlan') : undefined
   const own = projected as EndeavourCardData | null | undefined
   const data = (own ?? (external as EndeavourCardData | null | undefined)) ?? null
+  // Official standard hook, read before the early return so the hook order is
+  // stable: live Challenger activity comes only from the session list.
+  const useSessions = (props as { readonly useSessions?: SessionsSelector }).useSessions
+  const activity = useSessions === undefined
+    ? undefined
+    : useSessions((state: SessionActivityLike) => (data === null ? 'inactive' : challengerActivity(data, state)))
   if (data === null) return null
   return (
     <PlanView
@@ -52,6 +62,7 @@ export function PlanDock(props: PlanDockProps): React.ReactElement | null {
       action={planAction(data, props.currentSessionId)}
       onOpenBuilder={(target) => { props.openCounterpart(target) }}
       variant="dock"
+      {...(activity === undefined ? {} : { activity })}
     />
   )
 }

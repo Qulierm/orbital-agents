@@ -139,8 +139,20 @@ path; the fallback then stays hidden.
   role-aware navigation action (`Open Challenger` on the Endeavour side, `Open
   Endeavour` on the peer side). Detailed instructions never enter the card
   payload.
-- Status glyphs are the shared check-ring in blue while a task is Finished
-  (reported, not yet accepted) and in green once Confirmed; Working keeps the
-  animated ring and Failed its red cross.
+- Status glyphs: gray ring Waiting, animated business-blue ring Working, the
+  shared check-ring in green while Finished (reported, not yet accepted), the
+  same check-ring in the host's violet-400 accent once Confirmed
+  (`rgb(167, 139, 250)`, the ContextMeter `--meter-tint` precedent, since DSH
+  publishes no purple semantic token), and a red cross on failure.
+- Live Challenger activity adds one EPHEMERAL mark, never a durable status: when
+  the paired Challenger session is not running (`SessionListState.ready` with a
+  missing row or `running !== true`) while the plan is still in execution before
+  review, the current unreported row shows `Challenger stopped` with a static
+  warn-orange circled exclamation. It is derived in the client from the official
+  `useSessions` snapshot plus two renderer-only card facts (the current
+  unreported task id and whether the `plan-ready` relay was delivered), it never
+  writes plan state or session events, it is suppressed while the list is still
+  pending, before delivery, during review and after a terminal outcome, and it
+  clears reactively when the Challenger runs again.
 - The definition matches only `endeavour/plan` events, which exist only in the
   Lead/root session, so the card cannot render in the Challenger chat.
