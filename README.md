@@ -1,7 +1,8 @@
 # Orbital Agents
 
 Two coordinated DSH agents that plan and execute as one pair. **Orbital Agents** is the project and
-repository identity; the installable plugin keeps the package name **`dsh-endeavour`**.
+repository identity; the published package is **`dsh-orbital-agents`** (the predecessor name
+`dsh-endeavour` is superseded and deprecated on npm).
 
 The **Endeavour** agent investigates, writes the plan, and verifies results. Its persistent
 **Challenger** peer is a second ordinary chat that executes the plan and reports back through a
@@ -12,7 +13,7 @@ the same orbit instead of being re-spawned per task.
   third-party community **DSH Desktop v2.0.11**. This is a community integration; it is not an
   official DeepSeek product.
 - The global bundle only provides the durable orchestration service. The four model-facing tools are
-  registered by the scoped `dsh-endeavour/tools` row of the **Endeavour** preset, so the standard
+  registered by the scoped `dsh-orbital-agents/tools` row of the **Endeavour** preset, so the standard
   preset never sees them.
 - User-visible task states are exactly four: waiting, running, succeeded, failed — shown as
   `Waiting to start`, `Working`, `Finished`, `Confirmed`, and `Failed` display stages.
@@ -51,7 +52,7 @@ cd orbital-agents
 pnpm install --frozen-lockfile
 pnpm run build
 pnpm pack
-node scripts/install-local.mjs --tarball ./dsh-endeavour-0.2.0.tgz
+node scripts/install-local.mjs --tarball ./dsh-orbital-agents-0.2.0.tgz
 ```
 
 The installer backs up the desktop profile and any existing user preset first, installs the package
@@ -63,13 +64,13 @@ idempotent; a changed tarball at the same name/version still refreshes the insta
 ## npm package
 
 The same source is published to the public npm registry as
-[`dsh-endeavour`](https://www.npmjs.com/package/dsh-endeavour) (MIT), so the released artifact can be
+[`dsh-orbital-agents`](https://www.npmjs.com/package/dsh-orbital-agents) (MIT), so the released artifact can be
 inspected or fetched by version instead of building it locally:
 
 ```sh
-npm view dsh-endeavour version      # latest published version
-npm pack dsh-endeavour@0.2.0        # download exactly the published tarball
-node scripts/install-local.mjs --tarball ./dsh-endeavour-0.2.0.tgz
+npm view dsh-orbital-agents version # latest published version
+npm pack dsh-orbital-agents@0.2.0   # download exactly the published tarball
+node scripts/install-local.mjs --tarball ./dsh-orbital-agents-0.2.0.tgz
 ```
 
 `npm pack` writes the published tarball into the current directory, and the installer is run from a

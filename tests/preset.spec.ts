@@ -41,6 +41,7 @@ describe('Endeavour preset', () => {
     expect(metadata.order).toBe(2)
     const standard = readFileSync(STANDARD_PRESET_PATH, 'utf8')
     expect(standard).not.toContain('You are Endeavour')
+    expect(standard).not.toContain('dsh-orbital-agents')
     expect(standard).not.toContain('dsh-endeavour')
   })
 })

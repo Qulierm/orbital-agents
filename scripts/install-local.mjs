@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * Safe local installer, preset lifecycle, and Builder-route helper for
- * dsh-endeavour.
+ * dsh-orbital-agents.
  *
  * Usage:
  *   node scripts/install-local.mjs --tarball <path> [--profile desktop] [--force]
@@ -28,7 +28,14 @@ import { load, dump } from 'js-yaml'
 import { desktopRunning, repairSessionEvents } from './repair-session-events.mjs'
 import { legacyRemediation, scanLegacyPlans } from './legacy-plan-scan.mjs'
 
-const PLUGIN = 'dsh-endeavour'
+const PLUGIN = 'dsh-orbital-agents'
+/**
+ * Package-owned predecessor. Earlier releases shipped as `dsh-endeavour`; an
+ * upgrade must remove ONLY this known identity (package, bundle row, profile
+ * dependency and the preset link it owns) before installing the new one, and
+ * must never touch unrelated bundles, packages or user presets.
+ */
+const LEGACY_PLUGIN = 'dsh-endeavour'
 const PRESET_ID = 'endeavour'
 /**
  * Owned preset roster. Endeavour mounts the orchestration tools plugin (so it
@@ -181,8 +188,11 @@ function installPreset(entry, { force }) {
   if (entry.linkPackage === true) {
     const linkPath = join(dir, 'node_modules')
     mkdirSync(linkPath, { recursive: true })
+    // The predecessor's link lives in the same place and must go, or the preset
+    // would keep resolving a package the profile no longer installs.
+    rmSync(join(linkPath, LEGACY_PLUGIN), { recursive: true, force: true })
     const packageLink = join(linkPath, PLUGIN)
-    rmSync(packageLink, { force: true })
+    rmSync(packageLink, { recursive: true, force: true })
     const installedPackage = join(profileDir, 'node_modules', PLUGIN)
     if (!existsSync(installedPackage)) throw new Error(`installed package missing: ${installedPackage}`)
     symlinkSync(installedPackage, packageLink, 'dir')
@@ -260,11 +270,24 @@ function install(tarball, { force }) {
     } catch {
       console.log('install-local: no previous install to remove')
     }
+    // A profile upgraded from the predecessor still depends on it. Removing the
+    // known legacy identity keeps exactly one owner of the bundle row.
+    try {
+      runPnpm(['remove', LEGACY_PLUGIN], profileDir)
+    } catch {
+      console.log(`install-local: no legacy ${LEGACY_PLUGIN} install to remove`)
+    }
     runPnpm(['add', resolve(tarball)], profileDir)
     const manifest = readManifest()
     const bundles = manifest.dsh?.profile?.bundles
     if (!Array.isArray(bundles)) throw new Error('profile manifest has no dsh.profile.bundles array')
-    if (!bundles.includes(PLUGIN)) {
+    const legacyRows = bundles.filter((entry) => entry === LEGACY_PLUGIN).length
+    if (legacyRows > 0) {
+      // In-place rename keeps the bundle order and can never duplicate the row.
+      manifest.dsh.profile.bundles = bundles.map((entry) => (entry === LEGACY_PLUGIN ? PLUGIN : entry))
+      writeManifest(manifest)
+      console.log(`install-local: migrated ${String(legacyRows)} legacy ${LEGACY_PLUGIN} bundle row(s) to ${PLUGIN}`)
+    } else if (!bundles.includes(PLUGIN)) {
       bundles.push(PLUGIN)
       writeManifest(manifest)
       console.log(`install-local: added ${PLUGIN} to dsh.profile.bundles (order preserved)`)
@@ -297,7 +320,7 @@ function uninstall() {
   const manifest = readManifest()
   const bundles = manifest.dsh?.profile?.bundles
   if (Array.isArray(bundles)) {
-    manifest.dsh.profile.bundles = bundles.filter((entry) => entry !== PLUGIN)
+    manifest.dsh.profile.bundles = bundles.filter((entry) => entry !== PLUGIN && entry !== LEGACY_PLUGIN)
     writeManifest(manifest)
   }
   const state = JSON.parse(readFileSync(join(backupRoot, stamp, 'state.json'), 'utf8'))

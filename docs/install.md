@@ -14,7 +14,7 @@ git clone git@github.com:Qulierm/orbital-agents.git
 cd orbital-agents
 pnpm install --frozen-lockfile
 pnpm run typecheck && pnpm test && pnpm run build
-pnpm pack                     # dsh-endeavour-0.2.0.tgz
+pnpm pack                     # dsh-orbital-agents-0.2.0.tgz
 node scripts/pack-check.mjs   # tarball contents, no secrets/sources
 node scripts/preset-check.ts  # preset contract + persona drift
 ```
@@ -22,7 +22,7 @@ node scripts/preset-check.ts  # preset contract + persona drift
 ## 2. Install the package and the user preset
 
 ```sh
-node scripts/install-local.mjs --tarball ./dsh-endeavour-0.2.0.tgz
+node scripts/install-local.mjs --tarball ./dsh-orbital-agents-0.2.0.tgz
 ```
 
 What happens, in order:
@@ -36,11 +36,11 @@ What happens, in order:
    `~/.dsh/profiles/desktop` (no sudo). The remove-first step guarantees a
    changed tarball at the same package name/version refreshes the installed
    artifact instead of pnpm reusing stale content.
-3. **Bundle row** — `dsh-endeavour` is appended to `dsh.profile.bundles` only
+3. **Bundle row** — `dsh-orbital-agents` is appended to `dsh.profile.bundles` only
    when absent; existing entries and their order are preserved.
 4. **User preset** — `preset/endeavour/` is copied atomically to
    `~/.dsh/.agent-presets/endeavour/`, gets the ownership marker
-   `.dsh-endeavour-owned`, and a `node_modules/dsh-endeavour` symlink to the
+   `.dsh-endeavour-owned`, and a `node_modules/dsh-orbital-agents` symlink to the
    installed package so the preset's scoped tools row resolves.
 
 Re-running install is idempotent. If the target preset exists without our
@@ -69,7 +69,7 @@ keep their existing scope.
 
 The installer places **two** owned presets, `~/.dsh/.agent-presets/endeavour`
 and `~/.dsh/.agent-presets/challenger`, each linking
-`node_modules/dsh-endeavour`. Endeavour mounts the planner catalog
+`node_modules/dsh-orbital-agents`. Endeavour mounts the planner catalog
 (`endeavour_plan`, `endeavour_verify`); Challenger mounts the executor catalog
 (`challenger_start_task`, `challenger_report`) and keeps the full coding tool
 surface with no delegation or ordinary messaging tools. Uninstall removes both
@@ -78,7 +78,27 @@ owned presets; rollback restores both exact prior states.
 `preset-check` validates both personas, both role mounts, the coding rows, and
 the absence of subagent/delegation mounts.
 
-## 5. Model selection
+## 5. Upgrading from the predecessor package
+
+Earlier releases shipped as `dsh-endeavour`. The installer treats that name as a known, owned
+predecessor and migrates it in one run, without touching anything it does not own:
+
+1. removes the predecessor package from the profile (`pnpm remove dsh-endeavour`);
+2. rewrites its `dsh.profile.bundles` row to `dsh-orbital-agents` **in place**, so the row is never
+   duplicated and unrelated bundles keep their order;
+3. installs `dsh-orbital-agents` and links `node_modules/dsh-orbital-agents` into the owned presets,
+   removing the predecessor's link from the same directory;
+4. leaves every other bundle, package and user-authored preset exactly as it was.
+
+The `.dsh-endeavour-owned` marker keeps working as the ownership marker, so presets installed by the
+predecessor are still recognised as ours (and are still never confused with a user's own preset).
+Durable identities stay on the predecessor spelling on purpose — recorded events (`endeavour/plan`,
+`endeavour/peer`), the deterministic pair/challenger ids, the injected CSS class namespace and the
+backup directory (`~/.dsh/backups/endeavour/`) are unchanged, so existing sessions, pairs, styles and
+backups keep working. `--uninstall` and `--rollback` clear both the new and the predecessor bundle
+rows.
+
+## 6. Model selection
 
 The paired Endeavour composer carries one unified control that configures the
 **Endeavour** and **Challenger** model and thinking routes from a single menu;
@@ -87,7 +107,7 @@ rejected by the installer. Installation first runs a read-only legacy-plan
 preflight: a nonterminal `childId`-only plan aborts the install with the
 affected session ids and remediation (terminal historical plans are allowed).
 
-## 6. Uninstall and rollback
+## 7. Uninstall and rollback
 
 ```sh
 # remove plugin, bundle row, and only the preset this package owns

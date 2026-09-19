@@ -13,7 +13,7 @@ import { createHash } from 'node:crypto'
 import { existsSync, readFileSync } from 'node:fs'
 
 const path = process.argv[2] ?? 'lib/client.js'
-const EXPECTED_ID = 'dsh-endeavour'
+const EXPECTED_ID = 'dsh-orbital-agents'
 const APP_MODULES = process.env.DSH_APP_MODULES
   ?? '/Applications/DSH Desktop.app/Contents/Resources/app/node_modules/@deepseek-ai'
 

@@ -8,7 +8,7 @@ import { join } from 'node:path'
 // Check the tarball of the CURRENT package version; stale tarballs of earlier
 // versions must never be mistaken for this release.
 const { version } = JSON.parse(readFileSync('package.json', 'utf8'))
-const expected = `dsh-endeavour-${version}.tgz`
+const expected = `dsh-orbital-agents-${version}.tgz`
 const tarballs = readdirSync('.').filter((file) => file.endsWith('.tgz'))
 if (tarballs.length === 0) throw new Error('pack-check: no .tgz found; run `pnpm pack` first')
 if (!tarballs.includes(expected)) throw new Error(`pack-check: ${expected} is missing (found: ${tarballs.join(', ')}); run \`pnpm pack\` first`)

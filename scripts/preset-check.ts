@@ -35,7 +35,7 @@ export const STANDARD_PRESET_PATH = process.env.DSH_STANDARD_PRESET
   ?? '/Applications/DSH Desktop.app/Contents/Resources/app/node_modules/@deepseek-ai/dsh-agent-presets/presets/standard/agent.cordis.yml'
 
 /** Relative package path our preset row resolves through. */
-export const TOOLS_ROW_NAME = './node_modules/dsh-endeavour/lib/tools-plugin.js'
+export const TOOLS_ROW_NAME = './node_modules/dsh-orbital-agents/lib/tools-plugin.js'
 
 interface Row {
   readonly id?: string

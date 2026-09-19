@@ -42,7 +42,7 @@ function evaluate(code: string, window: unknown): void {
 }
 
 describe('client artifact (ModuleLoader contract)', () => {
-  it('is a classic script that registers exactly id dsh-endeavour', async () => {
+  it('is a classic script that registers exactly id dsh-orbital-agents', async () => {
     const code = await buildClientCode()
     expect(code).not.toMatch(/^\s*(?:import|export)\b/m)
     const { window, registrations } = mockLoader()

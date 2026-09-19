@@ -11,7 +11,7 @@
 import { build } from 'esbuild'
 
 /** Exact registration id required by the DSH client module loader. */
-export const CLIENT_ID = 'dsh-endeavour'
+export const CLIENT_ID = 'dsh-orbital-agents'
 
 /** Browser entry point. */
 export const CLIENT_ENTRY = 'src/client/index.ts'

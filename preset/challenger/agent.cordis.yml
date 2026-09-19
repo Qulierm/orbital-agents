@@ -248,10 +248,10 @@
 # sees exactly `challenger_start_task` and `challenger_report` — the durable
 # protocol channel to the paired Endeavour — and no delegation or ordinary
 # messaging tools. The relative path resolves from the composition directory;
-# the installer links node_modules/dsh-endeavour next to this file, because bare
+# the installer links node_modules/dsh-orbital-agents next to this file, because bare
 # package names in user presets resolve from the harness base, not from
 # ~/.dsh/.agent-presets.
 - id: challenger-tools
-  name: './node_modules/dsh-endeavour/lib/tools-plugin.js'
+  name: './node_modules/dsh-orbital-agents/lib/tools-plugin.js'
   config:
     role: challenger

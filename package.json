@@ -1,5 +1,5 @@
 {
-  "name": "dsh-endeavour",
+  "name": "dsh-orbital-agents",
   "version": "0.2.0",
   "description": "Persistent Endeavour/Challenger ordinary-session peer runtime for DSH: durable plans, two-phase Challenger execution and peer navigation.",
   "type": "module",

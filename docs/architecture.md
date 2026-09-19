@@ -44,7 +44,7 @@ last task succeeded -> plan terminal completed
   preset's agent sees exactly its catalog: `endeavour_plan`/`endeavour_verify`
   for the planner, `challenger_start_task`/`challenger_report` for the executor.
   Standard mounts no row and sees none.
-- The installer links `node_modules/dsh-endeavour` into BOTH preset directories
+- The installer links `node_modules/dsh-orbital-agents` into BOTH preset directories
   because the relative tools row resolves from the composition directory.
 - The service no longer creates subagents: `SubagentHost`, `startContinuable`,
   `sendMessage` and `SubagentAddress` are removed from active code, and the

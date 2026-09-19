@@ -361,10 +361,10 @@
 # ── Endeavour scoped orchestration tools ───────────────────────────────────
 # Mounted only inside this preset's scope: the standard preset never sees the
 # four tools. The relative path resolves from the composition directory; the
-# installer links node_modules/dsh-endeavour next to this file, because bare
+# installer links node_modules/dsh-orbital-agents next to this file, because bare
 # package names in user presets resolve from the harness base, not from
 # ~/.dsh/.agent-presets.
 - id: endeavour-tools
-  name: './node_modules/dsh-endeavour/lib/tools-plugin.js'
+  name: './node_modules/dsh-orbital-agents/lib/tools-plugin.js'
   config:
     role: endeavour
