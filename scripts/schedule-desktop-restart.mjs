@@ -59,6 +59,21 @@ const QUIT_ARGV = ['-e', 'quit app "DSH Desktop"']
 const OPEN_EXECUTABLE = '/usr/bin/open'
 const OPEN_ARGV = [APP_BUNDLE]
 
+/**
+ * Normalized scheduler configuration. Both modes parse it through the same
+ * helper, so schedule mode can never print success for settings the detached
+ * worker would reject before it even opens its log.
+ */
+function readConfig({ source, fallbackDelaySeconds }) {
+  return {
+    delaySeconds: numericOption('--delay-seconds', source.delaySeconds, { minimum: 0, fallback: fallbackDelaySeconds }),
+    port: numericOption('DSH_RESTART_PORT', source.port, { minimum: 1, fallback: DEFAULT_PORT }),
+    quitTimeoutMs: numericOption('DSH_RESTART_QUIT_TIMEOUT_MS', source.quitTimeoutMs, { minimum: 1, fallback: DEFAULT_QUIT_TIMEOUT_MS }),
+    readyTimeoutMs: numericOption('DSH_RESTART_READY_TIMEOUT_MS', source.readyTimeoutMs, { minimum: 1, fallback: DEFAULT_READY_TIMEOUT_MS }),
+    mainMatch: source.mainMatch ?? DEFAULT_MAIN_MATCH,
+  }
+}
+
 /** Parse a CLI/env numeric value, rejecting NaN, negatives and non-integers. */
 function numericOption(name, raw, { minimum, fallback }) {
   if (raw === undefined || raw === '') return fallback
@@ -72,7 +87,7 @@ function numericOption(name, raw, { minimum, fallback }) {
 /** Structured, timestamped progress log; every phase is durable evidence. */
 function createRecorder(logPath) {
   // Append: the scheduler already recorded the `scheduled` phase in this file.
-  mkdirSync(join(logPath, '..'), { recursive: true })
+  mkdirSync(dirname(logPath), { recursive: true })
   return (phase, detail) => {
     const entry = { at: new Date().toISOString(), pid: process.pid, phase, ...(detail === undefined ? {} : { detail }) }
     appendFileSync(logPath, `${JSON.stringify(entry)}\n`)
@@ -123,15 +138,40 @@ function runCommand(executable, argv) {
 async function worker() {
   const id = flag('--id') ?? String(Date.now())
   const logPath = flag('--log') ?? join(restartRoot(), `${id}.log`)
-  const delaySeconds = numericOption('--delay-seconds', flag('--delay-seconds'), { minimum: 0, fallback: DEFAULT_DELAY_SECONDS })
-  const port = numericOption('DSH_RESTART_PORT', process.env.DSH_RESTART_PORT, { minimum: 1, fallback: DEFAULT_PORT })
-  const mainMatch = process.env.DSH_RESTART_MAIN_MATCH ?? DEFAULT_MAIN_MATCH
-  const quitTimeout = numericOption('DSH_RESTART_QUIT_TIMEOUT_MS', process.env.DSH_RESTART_QUIT_TIMEOUT_MS, { minimum: 1, fallback: DEFAULT_QUIT_TIMEOUT_MS })
-  const readyTimeout = numericOption('DSH_RESTART_READY_TIMEOUT_MS', process.env.DSH_RESTART_READY_TIMEOUT_MS, { minimum: 1, fallback: DEFAULT_READY_TIMEOUT_MS })
+  // The recorder exists before ANY option is parsed, so a malformed worker
+  // invocation still leaves durable failure evidence instead of an empty log.
+  let record
+  try {
+    record = createRecorder(logPath)
+  } catch (error) {
+    process.stderr.write(`schedule-desktop-restart: cannot open log ${logPath}: ${String(error.message)}\n`)
+    return 1
+  }
+  let config
+  try {
+    config = readConfig({
+      source: {
+        delaySeconds: flag('--delay-seconds'),
+        // The scheduler passes normalized values explicitly; the environment
+        // stays a supported fallback for a hand-run worker.
+        port: flag('--port') ?? process.env.DSH_RESTART_PORT,
+        quitTimeoutMs: flag('--quit-timeout-ms') ?? process.env.DSH_RESTART_QUIT_TIMEOUT_MS,
+        readyTimeoutMs: flag('--ready-timeout-ms') ?? process.env.DSH_RESTART_READY_TIMEOUT_MS,
+        mainMatch: process.env.DSH_RESTART_MAIN_MATCH,
+      },
+      fallbackDelaySeconds: DEFAULT_DELAY_SECONDS,
+    })
+  } catch (error) {
+    record('failed', { step: 'config', message: String(error.message) })
+    process.stderr.write(`${String(error.message)}\n`)
+    return 2
+  }
+  const { delaySeconds, port, mainMatch } = config
+  const quitTimeout = config.quitTimeoutMs
+  const readyTimeout = config.readyTimeoutMs
   // Hermetic mode: quit/open are simulated and never executed, so tests can
   // prove the protocol without touching a real desktop.
   const simulate = process.env.DSH_RESTART_TEST_MODE !== undefined
-  const record = createRecorder(logPath)
   record('worker-started', { delaySeconds, port })
 
   await new Promise((resolve) => setTimeout(resolve, delaySeconds * 1_000))
@@ -177,6 +217,25 @@ async function worker() {
   return 0
 }
 
+/** Run the worker body, recording any unexpected failure durably. */
+async function workerGuarded() {
+  try {
+    return await worker()
+  } catch (error) {
+    const logPath = flag('--log')
+    const message = error instanceof Error ? error.message : String(error)
+    if (typeof logPath === 'string' && logPath !== '') {
+      try {
+        createRecorder(logPath)('failed', { step: 'worker', message })
+      } catch {
+        // The log itself is unusable; stderr below still reports the failure.
+      }
+    }
+    process.stderr.write(`schedule-desktop-restart: worker failed: ${message}\n`)
+    return 1
+  }
+}
+
 function help() {
   process.stdout.write([
     'schedule-desktop-restart: quit and reopen DSH Desktop from a detached worker.',
@@ -196,10 +255,25 @@ async function schedule() {
     process.stderr.write(`schedule-desktop-restart: unsupported platform ${platform}; this helper is macOS-only\n`)
     return 2
   }
-  let delaySeconds
+  // EVERY inherited setting is validated here, before a log exists or a child
+  // is spawned: success may only mean "configuration valid AND child spawned".
+  let config
   try {
-    const requestedDelay = numericOption('--delay-seconds', flag('--delay-seconds'), { minimum: 0, fallback: DEFAULT_DELAY_SECONDS })
-    delaySeconds = process.env.DSH_RESTART_TEST_MODE !== undefined ? requestedDelay : Math.max(requestedDelay, 30)
+    const requested = readConfig({
+      source: {
+        delaySeconds: flag('--delay-seconds'),
+        port: process.env.DSH_RESTART_PORT,
+        quitTimeoutMs: process.env.DSH_RESTART_QUIT_TIMEOUT_MS,
+        readyTimeoutMs: process.env.DSH_RESTART_READY_TIMEOUT_MS,
+        mainMatch: process.env.DSH_RESTART_MAIN_MATCH,
+      },
+      fallbackDelaySeconds: DEFAULT_DELAY_SECONDS,
+    })
+    config = {
+      ...requested,
+      // Production floor: the report needs time to land before the worker acts.
+      delaySeconds: process.env.DSH_RESTART_TEST_MODE !== undefined ? requested.delaySeconds : Math.max(requested.delaySeconds, 30),
+    }
   } catch (error) {
     process.stderr.write(`${String(error.message)}\n`)
     return 2
@@ -210,21 +284,35 @@ async function schedule() {
   const id = `${stamp}-${process.pid}`
   const logPath = join(root, `${id}.log`)
   // The schedule record is written BEFORE the spawn so it is deterministically
-  // the first line, and a spawn failure is recorded rather than lost.
-  appendFileSync(logPath, `${JSON.stringify({ at: new Date().toISOString(), phase: 'scheduled', detail: { delaySeconds } })}\n`)
-  const workerProcess = spawn(process.execPath, [
+  // the first line, and a spawn failure is appended right after it.
+  appendFileSync(logPath, `${JSON.stringify({ at: new Date().toISOString(), phase: 'scheduled', detail: { delaySeconds: config.delaySeconds } })}\n`)
+  const node = process.env.DSH_RESTART_NODE ?? process.execPath
+  const workerProcess = spawn(node, [
     fileURLToPath(import.meta.url),
-    '--worker', '--id', id, '--log', logPath, '--delay-seconds', String(delaySeconds),
+    '--worker', '--id', id, '--log', logPath,
+    '--delay-seconds', String(config.delaySeconds),
+    '--port', String(config.port),
+    '--quit-timeout-ms', String(config.quitTimeoutMs),
+    '--ready-timeout-ms', String(config.readyTimeoutMs),
   ], { detached: true, stdio: 'ignore' })
-  workerProcess.on('error', (error) => {
-    appendFileSync(logPath, `${JSON.stringify({ at: new Date().toISOString(), phase: 'failed', detail: { step: 'spawn', message: String(error.message) } })}\n`)
+  // Await ONLY the spawn acknowledgement — never the restart itself. Success is
+  // reported after the OS confirms the child, so a spawn failure cannot be
+  // announced as a scheduled restart.
+  const spawned = await new Promise((resolveSpawn) => {
+    workerProcess.once('spawn', () => { resolveSpawn(true) })
+    workerProcess.once('error', () => { resolveSpawn(false) })
   })
-  workerProcess.unref()
+  if (!spawned) {
+    appendFileSync(logPath, `${JSON.stringify({ at: new Date().toISOString(), phase: 'failed', detail: { step: 'spawn', message: `cannot spawn ${node}` } })}\n`)
+    process.stderr.write(`schedule-desktop-restart: could not spawn the restart worker (${node}); see ${logPath}\n`)
+    return 1
+  }
   appendFileSync(logPath, `${JSON.stringify({ at: new Date().toISOString(), phase: 'worker-spawned', detail: { workerPid: workerProcess.pid } })}\n`)
-  process.stdout.write(`schedule-desktop-restart: scheduled id=${id} delay=${delaySeconds}s log=${logPath}\n`)
+  workerProcess.unref()
+  process.stdout.write(`schedule-desktop-restart: scheduled id=${id} delay=${config.delaySeconds}s log=${logPath}\n`)
   process.stdout.write('schedule-desktop-restart: report the scheduled restart now; do not wait for it in this call\n')
   return 0
 }
 
-const code = hasFlag('--worker') ? await worker() : hasFlag('--help') ? (help(), 0) : await schedule()
+const code = hasFlag('--worker') ? await workerGuarded() : hasFlag('--help') ? (help(), 0) : await schedule()
 process.exit(code)

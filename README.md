@@ -52,7 +52,7 @@ cd orbital-agents
 pnpm install --frozen-lockfile
 pnpm run build
 pnpm pack
-node scripts/install-local.mjs --tarball ./dsh-orbital-agents-0.2.3.tgz
+node scripts/install-local.mjs --tarball ./dsh-orbital-agents-0.2.4.tgz
 ```
 
 The installer backs up the desktop profile and any existing user preset first, installs the package
@@ -69,8 +69,8 @@ inspected or fetched by version instead of building it locally:
 
 ```sh
 npm view dsh-orbital-agents version # latest published version
-npm pack dsh-orbital-agents@0.2.3   # download exactly the published tarball
-node scripts/install-local.mjs --tarball ./dsh-orbital-agents-0.2.3.tgz
+npm pack dsh-orbital-agents@0.2.4   # download exactly the published tarball
+node scripts/install-local.mjs --tarball ./dsh-orbital-agents-0.2.4.tgz
 ```
 
 `npm pack` writes the published tarball into the current directory, and the installer is run from a

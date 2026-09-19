@@ -8,13 +8,23 @@
  */
 
 import { execFileSync, spawnSync } from 'node:child_process'
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 
 const REPO = resolve(import.meta.dirname, '..')
 const SCHEDULER = join(REPO, 'scripts', 'schedule-desktop-restart.mjs')
+/**
+ * Real Node binary for every spawn in this spec. `process.execPath` is the DSH
+ * Desktop app binary when the suite runs inside the harness, which would start
+ * stray app processes instead of a plain Node.
+ */
+const NODE = process.env.DSH_TEST_NODE ?? execFileSync('/usr/bin/which', ['node'], { encoding: 'utf8' }).trim()
+/** Environment that makes the scheduler spawn NODE for its detached worker. */
+const workerNodeEnv = (extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv => ({
+  ...process.env, DSH_RESTART_NODE: NODE, ...extra,
+})
 const dirs: string[] = []
 
 function tempHome(): string {
@@ -24,8 +34,29 @@ function tempHome(): string {
 }
 
 afterEach(() => {
+  // The scheduler spawns its detached worker with `process.execPath`, which is
+  // the DSH Desktop binary inside the harness; until the pre-spawn validation
+  // lands, a red case really does start one. Kill anything still referencing
+  // this test's temp home so no app process outlives the suite.
+  for (const dir of dirs) killProcessesReferencing(dir)
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true })
 })
+
+/** Terminate every process whose command line mentions this path. */
+function killProcessesReferencing(marker: string): void {
+  const listing = spawnSync('/bin/ps', ['-Ao', 'pid=,command='], { encoding: 'utf8' })
+  if (listing.status !== 0) return
+  for (const line of listing.stdout.split('\n')) {
+    if (!line.includes(marker)) continue
+    const pid = Number(line.trim().split(/\s+/)[0])
+    if (!Number.isInteger(pid) || pid === process.pid) continue
+    try {
+      process.kill(pid, 'SIGKILL')
+    } catch {
+      // Already gone: nothing to clean.
+    }
+  }
+}
 
 function restartDir(home: string): string {
   return join(home, '.dsh', 'backups', 'endeavour', 'restarts')
@@ -46,9 +77,9 @@ function phases(logPath: string): string[] {
 /** Schedule a restart hermetically and return the parent's wall time plus logs. */
 function schedule(home: string, delaySeconds = 1): { readonly ms: number; readonly stdout: string } {
   const started = Date.now()
-  const result = spawnSync(process.execPath, [SCHEDULER, '--delay-seconds', String(delaySeconds)], {
+  const result = spawnSync(NODE, [SCHEDULER, '--delay-seconds', String(delaySeconds)], {
     encoding: 'utf8',
-    env: { ...process.env, DSH_RESTART_HOME: home, DSH_RESTART_TEST_MODE: '1' },
+    env: workerNodeEnv({ DSH_RESTART_HOME: home, DSH_RESTART_TEST_MODE: '1' }),
   })
   expect(result.status).toBe(0)
   return { ms: Date.now() - started, stdout: result.stdout }
@@ -66,9 +97,9 @@ async function waitForPhase(logPath: string, phase: string, timeoutMs = 20_000):
 describe('detached restart scheduler', () => {
   it('refuses unsupported platforms', () => {
     const home = tempHome()
-    const result = spawnSync(process.execPath, [SCHEDULER], {
+    const result = spawnSync(NODE, [SCHEDULER], {
       encoding: 'utf8',
-      env: { ...process.env, DSH_RESTART_HOME: home, DSH_RESTART_TEST_PLATFORM: 'linux' },
+      env: workerNodeEnv({ DSH_RESTART_HOME: home, DSH_RESTART_TEST_PLATFORM: 'linux' }),
     })
     expect(result.status).toBe(2)
     expect(result.stderr).toContain('macOS-only')
@@ -102,11 +133,11 @@ describe('detached restart scheduler', () => {
 
   it('records failure evidence instead of a false ready', async () => {
     const home = tempHome()
-    const result = spawnSync(process.execPath, [
+    const result = spawnSync(NODE, [
       SCHEDULER, '--worker', '--id', 'manual-failure', '--log', join(home, 'failure.log'), '--delay-seconds', '1',
     ], {
       encoding: 'utf8',
-      env: { ...process.env, DSH_RESTART_TEST_MODE: '1', DSH_RESTART_TEST_QUIT_FAIL: '1' },
+      env: workerNodeEnv({ DSH_RESTART_TEST_MODE: '1', DSH_RESTART_TEST_QUIT_FAIL: '1' }),
     })
     expect(result.status).toBe(1)
     const seen = phases(join(home, 'failure.log'))
@@ -142,7 +173,7 @@ describe('detached restart scheduler', () => {
     expect(source).toMatch(/simulate \? process\.env\.DSH_RESTART_TEST_OPEN_FAIL !== '1' : runCommand\(openExecutable, openArgv\)/)
     // The schedule path must never wait.
     expect(source).not.toMatch(/^\s*(?:await\s+)?(?:sleep|execFileSync\(['"]sleep)/m)
-    const scheduled = spawnSync(process.execPath, [SCHEDULER, '--help'], { encoding: 'utf8' })
+    const scheduled = spawnSync(NODE, [SCHEDULER, '--help'], { encoding: 'utf8' })
     expect(scheduled.stdout).toContain('returns immediately')
   })
 
@@ -157,9 +188,9 @@ describe('detached restart scheduler', () => {
     const home = tempHome()
     // Hermetic worker run: the real commands are NOT executed, but the worker
     // records exactly what it would have run.
-    spawnSync(process.execPath, [
+    spawnSync(NODE, [
       SCHEDULER, '--worker', '--id', 'argv-probe', '--log', join(home, 'argv.log'), '--delay-seconds', '1',
-    ], { encoding: 'utf8', env: { ...process.env, DSH_RESTART_HOME: home, DSH_RESTART_TEST_MODE: '1' } })
+    ], { encoding: 'utf8', env: workerNodeEnv({ DSH_RESTART_HOME: home, DSH_RESTART_TEST_MODE: '1' }) })
     const entries = readFileSync(join(home, 'argv.log'), 'utf8').split('\n').filter(Boolean)
       .map((line) => JSON.parse(line) as { readonly phase: string; readonly detail?: { readonly executable?: string; readonly argv?: readonly string[] } })
     const quit = entries.find((entry) => entry.phase === 'quit')
@@ -182,9 +213,9 @@ describe('detached restart scheduler', () => {
   it('rejects invalid numeric arguments before spawning a worker', () => {
     const home = tempHome()
     for (const value of ['abc', '-5', 'NaN']) {
-      const result = spawnSync(process.execPath, [SCHEDULER, '--delay-seconds', value], {
+      const result = spawnSync(NODE, [SCHEDULER, '--delay-seconds', value], {
         encoding: 'utf8',
-        env: { ...process.env, DSH_RESTART_HOME: home, DSH_RESTART_TEST_MODE: '1' },
+        env: workerNodeEnv({ DSH_RESTART_HOME: home, DSH_RESTART_TEST_MODE: '1' }),
       })
       expect(result.status, `delay-seconds=${value}`).toBe(2)
       expect(result.stderr).toMatch(/delay-seconds/)
@@ -219,9 +250,9 @@ describe('detached restart scheduler', () => {
     mkdirSync(spacedDir, { recursive: true })
     const spacedCopy = join(spacedDir, 'schedule-desktop-restart.mjs')
     copyFileSync(SCHEDULER, spacedCopy)
-    const result = spawnSync(process.execPath, [spacedCopy, '--delay-seconds', '1'], {
+    const result = spawnSync(NODE, [spacedCopy, '--delay-seconds', '1'], {
       encoding: 'utf8',
-      env: { ...process.env, DSH_RESTART_HOME: home, DSH_RESTART_TEST_MODE: '1' },
+      env: workerNodeEnv({ DSH_RESTART_HOME: home, DSH_RESTART_TEST_MODE: '1' }),
     })
     expect(result.status).toBe(0)
     const logPath = join(restartDir(home), logs(home)[0]!)
@@ -233,6 +264,87 @@ describe('detached restart scheduler', () => {
     expect(phases(logPath)).toContain('ready')
   })
 
+  it('rejects every invalid inherited worker setting before creating a log', () => {
+    const cases: readonly (readonly [string, string])[] = [
+      ['DSH_RESTART_PORT', 'abc'],
+      ['DSH_RESTART_PORT', '-1'],
+      ['DSH_RESTART_QUIT_TIMEOUT_MS', 'soon'],
+      ['DSH_RESTART_QUIT_TIMEOUT_MS', '0'],
+      ['DSH_RESTART_READY_TIMEOUT_MS', 'NaN'],
+      ['DSH_RESTART_READY_TIMEOUT_MS', '-3'],
+    ]
+    for (const [name, value] of cases) {
+      const home = tempHome()
+      const result = spawnSync(NODE, [SCHEDULER, '--delay-seconds', '1'], {
+        encoding: 'utf8',
+        env: workerNodeEnv({ DSH_RESTART_HOME: home, DSH_RESTART_TEST_MODE: '1', [name]: value }),
+      })
+      // RED today: schedule mode validates only --delay-seconds, so an invalid
+      // inherited setting exits 0, writes a log and prints the report-now line.
+      expect(result.status, `${name}=${value} exit`).toBe(2)
+      expect(result.stdout, `${name}=${value} stdout`).not.toContain('report the scheduled restart now')
+      expect(result.stderr, `${name}=${value} stderr`).toMatch(/must be an integer/)
+      expect(logs(home), `${name}=${value} logs`).toHaveLength(0)
+    }
+  })
+
+  it('never reports success when the detached worker cannot spawn', () => {
+    const home = tempHome()
+    // Hermetic spawn failure: the scheduler spawns DSH_RESTART_NODE, so pointing
+    // it at a nonexistent binary makes ChildProcess emit `error` without any
+    // real desktop involvement.
+    const result = spawnSync(NODE, [SCHEDULER, '--delay-seconds', '1'], {
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        DSH_RESTART_HOME: home,
+        DSH_RESTART_TEST_MODE: '1',
+        DSH_RESTART_NODE: join(home, 'nonexistent-node-binary'),
+      },
+    })
+    expect(result.status, 'exit status').not.toBe(0)
+    expect(result.stdout).not.toContain('report the scheduled restart now')
+    expect(result.stderr).toMatch(/could not spawn the restart worker/)
+    const logPath = join(restartDir(home), logs(home)[0]!)
+    // Durable evidence: the schedule attempt, then the failure.
+    expect(phases(logPath)).toEqual(['scheduled', 'failed'])
+  })
+
+  it('records a durable failure for malformed private worker configuration', () => {
+    const home = tempHome()
+    const logPath = join(home, 'worker-bad-config.log')
+    const result = spawnSync(NODE, [
+      SCHEDULER, '--worker', '--id', 'bad', '--log', logPath, '--delay-seconds', '1',
+    ], {
+      encoding: 'utf8',
+      env: workerNodeEnv({ DSH_RESTART_HOME: home, DSH_RESTART_TEST_MODE: '1', DSH_RESTART_PORT: 'nope' }),
+    })
+    expect(result.status).not.toBe(0)
+    // RED today: the worker parses options before creating the recorder, so the
+    // log stays empty and the failure is invisible.
+    expect(existsSync(logPath), 'log exists').toBe(true)
+    expect(phases(logPath)).toContain('failed')
+  })
+
+  it('returns in under five seconds after the spawn acknowledgement', () => {
+    const home = tempHome()
+    const started = Date.now()
+    const { stdout } = schedule(home, 30)
+    const elapsed = Date.now() - started
+    // Success waits for the OS spawn confirmation only, never for the restart.
+    expect(elapsed).toBeLessThan(5_000)
+    expect(stdout).toContain('report the scheduled restart now')
+    const logPath = join(restartDir(home), logs(home)[0]!)
+    expect(phases(logPath)).toContain('worker-spawned')
+  })
+
+  it('documents the spawn-failure hook used by the tests', () => {
+    const source = readFileSync(SCHEDULER, 'utf8')
+    expect(source).toContain('DSH_RESTART_NODE')
+    expect(source).toMatch(/once\('spawn'/)
+    expect(source).toMatch(/once\('error'/)
+  })
+
   it('is dependency-free and exposes no library API', () => {
     const source = readFileSync(SCHEDULER, 'utf8')
     const imports = [...source.matchAll(/^import .* from '([^']+)'/gm)].map((match) => match[1])
@@ -240,6 +352,6 @@ describe('detached restart scheduler', () => {
     expect(imports.every((specifier) => (specifier ?? '').startsWith('node:'))).toBe(true)
     expect(source).not.toMatch(/^export\s/m)
     // Executable directly, and syntax-valid as ESM.
-    execFileSync(process.execPath, ['--check', SCHEDULER], { stdio: 'ignore' })
+    execFileSync(NODE, ['--check', SCHEDULER], { stdio: 'ignore' })
   })
 })
