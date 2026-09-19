@@ -60,6 +60,24 @@ at `~/.dsh/.agent-presets/endeavour` and `~/.dsh/.agent-presets/challenger`. Re-
 idempotent; a changed tarball at the same name/version still refreshes the installed artifact
 (remove-before-add). See [docs/install.md](docs/install.md) for the full lifecycle.
 
+## npm package
+
+The same source is published to the public npm registry as
+[`dsh-endeavour`](https://www.npmjs.com/package/dsh-endeavour) (MIT), so the released artifact can be
+inspected or fetched by version instead of building it locally:
+
+```sh
+npm view dsh-endeavour version      # latest published version
+npm pack dsh-endeavour@0.2.0        # download exactly the published tarball
+node scripts/install-local.mjs --tarball ./dsh-endeavour-0.2.0.tgz
+```
+
+`npm pack` writes the published tarball into the current directory, and the installer is run from a
+clone of this repository with that path — the same installer documented in
+[docs/install.md](docs/install.md). Installing the package as a plain library dependency is not a
+supported way to load it into DSH Desktop: the plugin is mounted by the desktop profile and its
+presets, which is what the installer configures.
+
 ## Model selection
 
 The composer carries one unified control: a single icon-only button (id `endeavour-models`) that opens

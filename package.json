@@ -5,6 +5,28 @@
   "type": "module",
   "license": "MIT",
   "private": false,
+  "author": "Qulierm",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Qulierm/orbital-agents.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Qulierm/orbital-agents/issues"
+  },
+  "homepage": "https://github.com/Qulierm/orbital-agents#readme",
+  "keywords": [
+    "deepseek-harness",
+    "dsh",
+    "cordis",
+    "multi-agent",
+    "ai-agents",
+    "orchestration",
+    "endeavour",
+    "challenger"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
   "main": "lib/index.js",
   "types": "lib/index.d.ts",
   "exports": {
