@@ -79,6 +79,53 @@ clone of this repository with that path — the same installer documented in
 supported way to load it into DSH Desktop: the plugin is mounted by the desktop profile and its
 presets, which is what the installer configures.
 
+## Why two agents
+
+Think of a rendezvous in orbit: one vehicle does the planning and holds the checklist, a second flies
+the burn. Neither is a passenger, and neither is a throwaway stage — they stay docked for as long as
+the mission lasts.
+
+**Two persistent ordinary sessions, not a subagent system.** Endeavour and Challenger are two regular
+chats that are paired once. The Challenger has its own conversation, its own model selection, and its
+own history; it is provisioned through the same ordinary session path the UI uses, is never recreated
+per plan, and is never spawned as a subagent. What connects them is a durable protocol, not a parent
+process: Endeavour sends the whole plan once, the Challenger reports evidence back, and Endeavour
+answers with a verdict.
+
+**The split of work.** Endeavour owns requirements analysis, architecture, acceptance criteria and
+verification. The Challenger receives the finished plan and executes its bounded, sequential tasks,
+reporting for each one a summary, the files it touched, the validation it actually ran, and — when
+something goes wrong — a blocker or failure. Endeavour then accepts or rejects each item against the
+criteria it wrote. A task is only `Confirmed` after that review; until then it stays `Finished`.
+Because the plan constrains the execution, the Challenger's job is usually narrower than the
+planner's: follow the decisions, run the checks, report honestly.
+
+**Why that can be economical.** This shape lets you spend differently on the two halves. Put an
+expensive, strong-at-reasoning model on Endeavour, where the plan, the constraints and the acceptance
+checks are decided, and a faster, lower-cost model on the Challenger, where the work is already
+bounded by that plan and every task is verified afterwards. Depending on your provider and pricing,
+that division can reduce what a long run costs compared with using the strongest model for everything,
+and the two routes are configured independently — see [Model selection](#model-selection). Examples
+people use for the two roles, purely as provider-dependent illustration and not as a claim about what
+this project supports or what any provider offers:
+
+- premium planning and review routes, in the same class as *Opus 5*, *Fable 5.1*, *GPT 6 Astra* or
+  *GPT 5.6 Sol*;
+- economical execution routes, in the same class as *DeepSeek 4.1 Flash* or *GPT 5.6 Luna*.
+
+Whatever you choose, decide it in your own provider setup: which models exist, what they cost and how
+they behave are properties of your deployment, not of Orbital Agents. Savings are a possible outcome
+of the split, not a guarantee, and quality is supported by Endeavour's acceptance criteria and its
+review of the Challenger's evidence — not promised by the pairing.
+
+**The panel is the protocol made visible.** Directly above the composer (and as a card in the
+transcript) the plan panel shows the run as it happens: how many tasks are confirmed, which task is
+current, a live timer on the working row, and the frozen duration afterwards. Its rows are the durable
+task states, not decoration — `Waiting to start`, `Working`, `Finished` (reported, awaiting review),
+`Confirmed` (accepted after Endeavour's check) and `Failed`. While a review is in progress the panel
+says so, and the same card offers the action that opens the paired session, so you can watch the
+Challenger work without relaying anything by hand.
+
 ## Model selection
 
 The composer carries one unified control: a single icon-only button (id `endeavour-models`) that opens
