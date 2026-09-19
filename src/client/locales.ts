@@ -34,6 +34,8 @@ export const en = {
   'unified.trigger': 'Model settings: Endeavour and Challenger',
   'unified.endeavour': 'Endeavour',
   'unified.challenger': 'Challenger',
+  'unified.error': 'Model settings unavailable',
+  'unified.errorDetail': 'Details: {detail}',
   'unified.unavailable': '{role} is unavailable',
   'builder.model': 'Model',
   'builder.effort': 'Effort',

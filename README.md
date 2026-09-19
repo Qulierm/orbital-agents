@@ -52,7 +52,7 @@ cd orbital-agents
 pnpm install --frozen-lockfile
 pnpm run build
 pnpm pack
-node scripts/install-local.mjs --tarball ./dsh-orbital-agents-0.2.1.tgz
+node scripts/install-local.mjs --tarball ./dsh-orbital-agents-0.2.2.tgz
 ```
 
 The installer backs up the desktop profile and any existing user preset first, installs the package
@@ -69,8 +69,8 @@ inspected or fetched by version instead of building it locally:
 
 ```sh
 npm view dsh-orbital-agents version # latest published version
-npm pack dsh-orbital-agents@0.2.1   # download exactly the published tarball
-node scripts/install-local.mjs --tarball ./dsh-orbital-agents-0.2.1.tgz
+npm pack dsh-orbital-agents@0.2.2   # download exactly the published tarball
+node scripts/install-local.mjs --tarball ./dsh-orbital-agents-0.2.2.tgz
 ```
 
 `npm pack` writes the published tarball into the current directory, and the installer is run from a
@@ -136,6 +136,28 @@ itself as soon as the Challenger runs again. This is deliberately *not* a fifth 
 it is live session activity read from the official session list, so nothing about the recorded plan,
 its events or the protocol changes. A task that had already started keeps counting its elapsed time
 while it waits to be resumed, and opening the Challenger is still a normal chat away.
+
+## Restarting Desktop
+
+DSH Desktop serves this plugin, so quitting it also kills whatever tool call is running inside it.
+That makes an in-app restart asymmetric: a manual restart is always safe, while an agent-driven one
+must be scheduled before anything is reported.
+
+- **Manual:** quit and reopen DSH Desktop yourself (`osascript -e 'quit app "DSH Desktop"'`, then
+  `open "/Applications/DSH Desktop.app"`), or just use the app's own quit. Nothing else is needed.
+- **Agent-safe scheduling:** the packaged helper
+  `node scripts/schedule-desktop-restart.mjs --delay-seconds 45` validates macOS, writes its log under
+  `~/.dsh/backups/endeavour/restarts`, spawns a detached worker and returns **immediately** with a
+  schedule id and the log path. The worker waits, quits the app, waits for the old process to leave,
+  reopens the bundle and records `ready` or `failed` in that log.
+- A restart is the **last** task of a plan. The executor reports `restart scheduled` with the schedule
+  id and log path and stops; nobody claims the app came back, because the host that would observe that
+  is the one being restarted. Read the log afterwards for the real outcome.
+- Never keep a call alive across the restart: no `sleep`, no `tail`, no `ps`/`lsof` polling after the
+  quit step. DSH records such a call as interrupted with an unknown outcome and the report is lost.
+
+The `--delay-seconds` floor is 30 seconds, so the report always has time to land before the worker
+acts.
 
 ## Model selection
 

@@ -288,6 +288,21 @@ export function apply(ctx: ClientContext): void {
       }
       return retainedChallengerId
     }
+    /**
+     * Persistent admission, owned by this per-session controller so it survives
+     * component remounts (a React ref would not). Admission is granted only when
+     * BOTH facts hold at the same moment for THIS session: an explicit
+     * `endeavour` preset selection and a fully validated peer view whose role for
+     * this exact session id is the Endeavour side. After that, transient null or
+     * malformed snapshots are ignored; the only revocation is an explicit,
+     * non-null preset that is not `endeavour`.
+     */
+    let admitted = false
+    const admit = (preset: string | undefined): boolean => {
+      if (preset !== undefined && preset !== 'endeavour') admitted = false
+      if (!admitted && preset === 'endeavour' && challengerId() !== undefined) admitted = true
+      return admitted
+    }
     // The Endeavour side is the session this control belongs to; the Challenger
     // side is its durable companion. Neither id is ever shared between roles.
     const targetId = (target: UnifiedRole): string | undefined => target === 'endeavour' ? sessionId : challengerId()
@@ -342,6 +357,7 @@ export function apply(ctx: ClientContext): void {
     })
     const controller: UnifiedModelController = {
       roles: { endeavour: roleController('endeavour'), challenger: roleController('challenger') },
+      admit,
     }
     unifiedControllers.set(sessionId, controller)
     return controller

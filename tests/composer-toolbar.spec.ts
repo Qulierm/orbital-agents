@@ -58,7 +58,7 @@ describe('slot registration', () => {
     const inject = right[0]?.inject as ((sessionId: string) => { unifiedModels: unknown }) | undefined
     expect(typeof inject).toBe('function')
     const injected = inject?.('session-root')
-    expect(Object.keys(injected?.unifiedModels as object)).toEqual(['roles'])
+    expect(Object.keys(injected?.unifiedModels as object).sort()).toEqual(['admit', 'roles'])
   })
 })
 

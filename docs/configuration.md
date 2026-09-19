@@ -12,6 +12,20 @@ button (slot id `endeuvre-models`, order 1000) that opens a menu with two
 sections — **Endeavour** and **Challenger** — each with its own **Model** and
 **Thinking** rows.
 
+Admission to that control is persistent and owned by the per-session client
+controller, so the trigger and the CSS marker that hides the host's native
+selector survive a null or malformed projection, a slot remount and a directory
+failure. The trigger is a stable shell that performs no model-directory
+operation; every role availability read, subscription, catalog load and write
+lives in the menu subtree below a menu-only error boundary, and all of them run
+after commit from the snapshot effect rather than while rendering — probing a
+directory lazily can publish composer/session changes, and doing that during a
+render nests an update inside a render. An unexpected
+exception there leaves the trigger mounted, keeps the native selector hidden and
+offers a localized retry that remounts just the menu, while an expected
+missing-scope or missing-binding error stays a per-role unavailable state with
+both role sections still visible.
+
 - Every read, subscription, catalog load and write goes through the official
   model directory of the target session: the Endeavour session the control is
   rendered in, and its paired Challenger. The two roles never share mutable

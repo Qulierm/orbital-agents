@@ -16,6 +16,7 @@ const tarball = tarballs[0]
 const listing = execFileSync('tar', ['-tzf', tarball], { encoding: 'utf8' }).split('\n').filter(Boolean)
 
 const required = [
+  'package/scripts/schedule-desktop-restart.mjs',
   'package/package.json',
   'package/lib/index.js',
   'package/lib/client.js',

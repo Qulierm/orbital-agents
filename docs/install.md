@@ -14,7 +14,7 @@ git clone git@github.com:Qulierm/orbital-agents.git
 cd orbital-agents
 pnpm install --frozen-lockfile
 pnpm run typecheck && pnpm test && pnpm run build
-pnpm pack                     # dsh-orbital-agents-0.2.1.tgz
+pnpm pack                     # dsh-orbital-agents-0.2.2.tgz
 node scripts/pack-check.mjs   # tarball contents, no secrets/sources
 node scripts/preset-check.ts  # preset contract + persona drift
 ```
@@ -22,7 +22,7 @@ node scripts/preset-check.ts  # preset contract + persona drift
 ## 2. Install the package and the user preset
 
 ```sh
-node scripts/install-local.mjs --tarball ./dsh-orbital-agents-0.2.1.tgz
+node scripts/install-local.mjs --tarball ./dsh-orbital-agents-0.2.2.tgz
 ```
 
 What happens, in order:
@@ -46,6 +46,21 @@ What happens, in order:
 Re-running install is idempotent. If the target preset exists without our
 ownership marker, the installer **refuses** and leaves it untouched; pass
 `--force` to replace it (a backup is taken first).
+
+### Manual restart versus scheduled restart
+
+Restarting by hand is always safe. When an agent has to restart the app it must schedule it instead of
+performing it inside the same call, because quitting DSH Desktop kills the host that owns that call:
+DSH records the call as interrupted with an unknown outcome and any pending report is never delivered.
+
+```
+node scripts/schedule-desktop-restart.mjs --delay-seconds 45
+# prints: schedule-desktop-restart: scheduled id=<id> delay=45s log=~/.dsh/backups/endeavour/restarts/<id>.log
+```
+
+The call returns immediately (the public floor is 30 seconds); the detached worker then records
+`requested`, `quit`, `open` and `ready`/`failed` in that log. Report `restart scheduled` with the id and
+log path and stop — the log, not the report, carries the post-restart outcome.
 
 ## 3. Restart and use
 

@@ -104,3 +104,16 @@ Rules:
   Confirmed, Failed) from durable state and reports; you only record the
   durable verdicts.
 - Never ask the user to relay messages; the plan card is the shared surface.
+
+## Desktop restarts
+
+- A DSH Desktop restart is always the FINAL Builder task of a plan. Never place one
+  while other tasks still depend on the running app.
+- Its acceptance criteria must expect durable scheduling evidence — the scheduler's
+  schedule id and its log path under `~/.dsh/backups/endeavour/restarts` — and never
+  a synchronous confirmation that the app came back: the host that would observe
+  that is the one being restarted, and a call that waits for it is recorded as
+  interrupted with an unknown outcome.
+- The Builder schedules the restart in one call that returns immediately, reports
+  `restart scheduled` with that id and path, and stops. The user performs or waits
+  out the restart; you then verify the scheduled evidence rather than a live result.

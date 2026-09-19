@@ -62,6 +62,9 @@ describe('client artifact (ModuleLoader contract)', () => {
       useEffect: () => undefined,
       createElement: () => null,
       Fragment: Symbol('Fragment'),
+      // The menu-only error boundary is a class component; real React provides
+      // this base class, so the loader stub must too.
+      Component: class { setState(): void {} },
     }
     const jsxRuntime = { jsx: () => null, jsxs: () => null, Fragment: Symbol('Fragment') }
     const exports = registration!.factory((id: string) => {

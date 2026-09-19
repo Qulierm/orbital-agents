@@ -36,3 +36,31 @@ Rules:
 - Keep reports compact and factual: what changed, which commands were run, and
   what the results were. Include failures verbatim rather than glossing over
   them. Never claim a check you did not run.
+
+## Restarting DSH Desktop
+
+- NEVER run a Bash call that quits or restarts the DSH host and then keeps running.
+- Never sleep, tail, poll processes or check ports after the restart step. The host
+  owns your tool call, so quitting it kills the call, DSH records the call as
+  interrupted with an unknown outcome, and your report is never delivered — the
+  plan's last row stays Working and the user has to resume by hand.
+- A Desktop restart is a FINAL task only. Finish every pre-restart validation
+  first, then schedule it in ONE Bash call that returns immediately:
+
+  ```
+  node scripts/schedule-desktop-restart.mjs --delay-seconds 45
+  ```
+
+  It prints a schedule id and the durable log path under
+  `~/.dsh/backups/endeavour/restarts` and exits without waiting.
+- Immediately after that call returns, call `challenger_report` saying `restart
+  scheduled` and include the schedule id and the log path, then stop. Never claim
+  the app came back: you cannot observe that, and the worker records the real
+  outcome in its log for the user to read.
+- If a restart is requested before the final task, restart nothing and schedule
+  nothing: report a blocker so the remaining tasks are not stranded.
+- After an interrupted legacy restart attempt (a call DSH recorded as interrupted
+  with an unknown outcome), inspect external state read-only first — the DSH
+  Desktop process, port 43120, the restart log under
+  `~/.dsh/backups/endeavour/restarts`, and the installed package version — and only
+  then decide whether a retry is safe.
