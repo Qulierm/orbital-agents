@@ -3,13 +3,19 @@
  * Capture the marketplace screenshots.
  *
  * Builds the harness, then renders each scene with a locally cached headless
- * Chromium and writes `assets/screenshots/<scene>.png` at 2x device scale.
- * Everything runs from `file://` against a temp-free local bundle: no network
- * request is made and no application state is touched.
+ * Chromium and writes `<out>/<scene>.png` at 2x device scale. Everything runs
+ * from `file://` against a local bundle: no network request is made and no
+ * application state is touched.
+ *
+ * The default output is `scripts/screenshots/out/`, NOT the committed
+ * marketplace captures in `assets/screenshots/`: those are real screenshots of
+ * the running app, so a harness run must never overwrite them. Pass
+ * `--out assets/screenshots` deliberately to target them, which prints a warning.
  *
  * Usage:
  *   node scripts/screenshots/capture.mjs
  *   node scripts/screenshots/capture.mjs --scene plan-running
+ *   node scripts/screenshots/capture.mjs --out /tmp/shots
  *
  * Browser resolution order:
  *   1. `DSH_SHOT_CHROME`
@@ -26,7 +32,10 @@ import { fileURLToPath } from 'node:url'
 const HERE = dirname(fileURLToPath(import.meta.url))
 const REPO = resolve(HERE, '..', '..')
 const DIST = join(HERE, 'dist')
-const OUT_DIR = join(REPO, 'assets', 'screenshots')
+/** Default output: generated scenes, never the committed marketplace captures. */
+const DEFAULT_OUT_DIR = join(HERE, 'out')
+/** The committed marketplace captures, which the harness must not clobber. */
+const COMMITTED_DIR = join(REPO, 'assets', 'screenshots')
 
 /** Scene → viewport. The plan card and the menu use the card width; the dock is shorter. */
 const SCENES = [
@@ -71,6 +80,17 @@ function resolveBrowser() {
   )
 }
 
+/** Resolve the output directory: `--out <dir>` wins, otherwise the generated dir. */
+function resolveOutDir() {
+  const args = process.argv.slice(2)
+  const index = args.indexOf('--out')
+  const dir = index >= 0 ? args[index + 1] : undefined
+  if (index >= 0 && (dir === undefined || dir === '')) {
+    throw new Error('screenshots capture: --out needs a directory argument')
+  }
+  return resolve(dir ?? DEFAULT_OUT_DIR)
+}
+
 function selectedScenes() {
   const args = process.argv.slice(2)
   const index = args.indexOf('--scene')
@@ -86,8 +106,8 @@ function build() {
 }
 
 /** Capture one scene; returns the written path. */
-function capture(browser, scene) {
-  const target = join(OUT_DIR, `${scene.name}.png`)
+function capture(browser, outDir, scene) {
+  const target = join(outDir, `${scene.name}.png`)
   const url = `file://${join(DIST, 'index.html')}#${scene.name}`
   // Explicit executable/argv: never a shell string split on whitespace.
   const argv = [
@@ -119,14 +139,22 @@ function inspect(path) {
   return { width, height, bytes: statSync(path).size }
 }
 
-mkdirSync(OUT_DIR, { recursive: true })
+const outDir = resolveOutDir()
+if (outDir === COMMITTED_DIR) {
+  console.warn(
+    'screenshots capture: WARNING — writing into assets/screenshots/, the committed marketplace captures. '
+    + 'A run here overwrites the real screenshots of the running app; use the default output directory instead.',
+  )
+}
+mkdirSync(outDir, { recursive: true })
 build()
 const browser = resolveBrowser()
 console.log(`screenshots capture: browser=${browser}`)
+console.log(`screenshots capture: out=${outDir}`)
 
 const report = []
 for (const scene of selectedScenes()) {
-  const path = capture(browser, scene)
+  const path = capture(browser, outDir, scene)
   const info = inspect(path)
   const expectedWidth = scene.width * DEVICE_SCALE
   const expectedHeight = scene.height * DEVICE_SCALE
@@ -142,4 +170,4 @@ for (const scene of selectedScenes()) {
   console.log(`screenshots capture: ${scene.name} -> ${path} (${String(info.width)}x${String(info.height)}, ${String(info.bytes)} bytes)`)
 }
 
-console.log(`screenshots capture: ${String(report.length)} image(s) written to ${OUT_DIR}`)
+console.log(`screenshots capture: ${String(report.length)} image(s) written to ${outDir}`)

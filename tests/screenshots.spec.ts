@@ -2,10 +2,11 @@
  * Marketplace screenshot contract.
  *
  * The plugin registry reads `screenshots.json` from the repository root and
- * resolves each relative path against the repository at HEAD, so the declaration,
- * the committed images and the capture tooling must agree. These tests pin that
- * agreement, the registry's own limits, and the fact that none of it ships in the
- * published package.
+ * resolves each relative path against the repository at HEAD. The committed
+ * images are REAL captures of a running DSH Desktop session, so the rules here
+ * describe published bytes rather than generated renders: they pin the
+ * declaration, the images, the README agreement, the capture tooling and the
+ * fact that none of it ships in the published package.
  */
 
 import { execFileSync } from 'node:child_process'
@@ -18,11 +19,18 @@ const DECLARATION = join(REPO, 'screenshots.json')
 const SCREENSHOT_DIR = join(REPO, 'assets', 'screenshots')
 const CAPTURE = join(REPO, 'scripts', 'screenshots', 'capture.mjs')
 const HARNESS = join(REPO, 'scripts', 'screenshots', 'harness.tsx')
+const README = join(REPO, 'README.md')
 
 /** The registry caps a declaration at 8 images. */
 const REGISTRY_CAP = 8
 const PNG_SIGNATURE = '89504e470d0a1a0a'
 const MAX_BYTES = 1_500_000
+/**
+ * Minimum legible size. Real captures are not 2x renders, so the rule is a
+ * readability floor rather than an even-dimension check.
+ */
+const MIN_WIDTH = 400
+const MIN_HEIGHT = 100
 
 interface Png {
   readonly width: number
@@ -55,46 +63,40 @@ describe('screenshots declaration', () => {
     expect(new Set(entries).size).toBe(entries.length)
   })
 
-  it('points at files that exist as real 2x PNGs', () => {
+  it('points at files that exist as readable captures', () => {
     for (const entry of declared as string[]) {
       const path = join(REPO, entry)
       expect(existsSync(path), `${entry} exists`).toBe(true)
       const png = readPng(path)
-      expect(png.width, `${entry} width`).toBeGreaterThan(0)
-      expect(png.height, `${entry} height`).toBeGreaterThan(0)
-      // Captured at 2x device scale, so both axes are even.
-      expect(png.width % 2, `${entry} is 2x wide`).toBe(0)
-      expect(png.height % 2, `${entry} is 2x tall`).toBe(0)
+      expect(png.width, `${entry} width`).toBeGreaterThanOrEqual(MIN_WIDTH)
+      expect(png.height, `${entry} height`).toBeGreaterThanOrEqual(MIN_HEIGHT)
       expect(png.bytes, `${entry} size`).toBeLessThan(MAX_BYTES)
     }
   })
 
-  it('declares exactly the captured files, with no orphans either way', () => {
+  it('declares exactly the committed files, with no orphans either way', () => {
     const onDisk = readdirSync(SCREENSHOT_DIR).filter((name) => name.endsWith('.png')).sort()
     const declaredNames = (declared as string[]).map((entry) => entry.split('/').at(-1)!).sort()
     expect(declaredNames).toEqual(onDisk)
   })
-})
 
-describe('screenshot harness coverage', () => {
-  it('renders every durable display stage plus the interruption mark', () => {
-    const harness = readFileSync(HARNESS, 'utf8')
-    // The five scenes the declaration names must exist in the harness.
-    for (const entry of declared as string[]) {
-      const scene = entry.split('/').at(-1)!.replace(/\.png$/, '')
-      expect(harness, `scene ${scene}`).toContain(`'${scene}':`)
-    }
-    // Durable stages exercised by the fixtures.
-    for (const stage of ["'confirmed'", "'finished'", "'working'", "'waiting'"]) {
-      expect(harness, `stage ${stage}`).toContain(stage)
-    }
-    // The ephemeral interruption mark is driven through the real activity prop.
-    expect(harness).toContain("activity")
-    expect(harness).toContain("'interrupted'")
-    // A terminal plan is captured too.
-    expect(harness).toContain("outcome: 'completed'")
+  it('is mirrored exactly by the README image references', () => {
+    const readme = readFileSync(README, 'utf8')
+    const linked = [...readme.matchAll(/assets\/screenshots\/[A-Za-z0-9._-]+\.png/g)].map((match) => match[0])
+    expect(new Set(linked).size).toBe(linked.length)
+    expect([...linked].sort()).toEqual([...(declared as string[])].sort())
   })
 
+  it('describes the images as real captures of the running app', () => {
+    const readme = readFileSync(README, 'utf8')
+    expect(readme).toMatch(/real captures of a running DSH Desktop session/i)
+    // No stale claim about generated or fixture-based marketplace images.
+    expect(readme).not.toMatch(/synthetic fixture/i)
+    expect(readme).not.toMatch(/rendered offline from the plugin's own components against\s+synthetic/i)
+  })
+})
+
+describe('screenshot harness', () => {
   it('renders the real components rather than reimplementations', () => {
     const harness = readFileSync(HARNESS, 'utf8')
     expect(harness).toContain("from '../../src/client/PlanView.js'")
@@ -103,10 +105,28 @@ describe('screenshot harness coverage', () => {
     // Frozen clock: every timer string is deterministic.
     expect(harness).toContain('static override now()')
   })
+
+  it('covers the durable display stages and the interruption mark', () => {
+    const harness = readFileSync(HARNESS, 'utf8')
+    for (const stage of ["'confirmed'", "'finished'", "'working'", "'waiting'"]) {
+      expect(harness, `stage ${stage}`).toContain(stage)
+    }
+    expect(harness).toContain("'interrupted'")
+    expect(harness).toContain("outcome: 'completed'")
+  })
 })
 
 describe('capture tooling', () => {
   const capture = readFileSync(CAPTURE, 'utf8')
+
+  it('writes to a generated directory by default, never to the committed captures', () => {
+    expect(capture).toContain("const DEFAULT_OUT_DIR = join(HERE, 'out')")
+    expect(capture).toContain("const COMMITTED_DIR = join(REPO, 'assets', 'screenshots')")
+    // The committed marketplace captures can only be targeted deliberately, and
+    // that path warns.
+    expect(capture).toMatch(/if \(outDir === COMMITTED_DIR\) \{[\s\S]*?WARNING/)
+    expect(capture).toContain("'--out'")
+  })
 
   it('spawns an explicit executable/argv pair and never splits a string', () => {
     expect(capture).not.toMatch(/split\(' '\)/)

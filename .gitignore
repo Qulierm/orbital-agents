@@ -5,3 +5,6 @@ dist/
 *.log
 .DS_Store
 tmp/
+
+# Generated screenshot output (the committed captures live in assets/screenshots/).
+scripts/screenshots/out/

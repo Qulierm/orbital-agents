@@ -196,54 +196,49 @@ See [docs/install.md](docs/install.md) for the full lifecycle and
 
 ## Screenshots
 
-Every image below is rendered offline from the plugin's own components against
-synthetic fixture data — no real session, workspace path or credential appears in
-them.
+These are real captures of a running DSH Desktop session using the plugin — not
+offline renders or mock-ups.
 
-### A running plan
+### A live plan
 
-![A plan card with one confirmed task, one reported task, a working task with its timer, and two waiting tasks](assets/screenshots/plan-running.png)
+![The plan card for a running plan: one Finished row, the Working row with its timer, two Waiting rows, and the composer below](assets/screenshots/plan-running.png)
 
-Confirmed is the violet check, Finished is the green check, Working is the blue
-animated ring with its live timer, and Waiting is the gray ring.
-
-### A stopped Challenger
-
-![The same plan with the current row showing an orange circled exclamation and the text Challenger stopped](assets/screenshots/plan-interrupted.png)
-
-When the paired Challenger is no longer running while the plan still expects
-execution work, the current unreported row switches to `Challenger stopped` with a
-static orange circled exclamation. It is live session activity, not a durable task
-state.
-
-### A completed plan
-
-![A terminal plan with all five tasks confirmed](assets/screenshots/plan-complete.png)
+The card tracks the plan as it happens: a green check on the row the Challenger
+has already reported, the blue animated ring with a live timer on the row it is
+working on, and gray rings on the rows still waiting to start.
 
 ### The unified model menu
 
-![The model menu open with an Endeavour section and a Challenger section, each with Model and Effort cells](assets/screenshots/model-menu.png)
+![The model menu open with an Endeavour section and a Challenger section, each with Model and Effort rows](assets/screenshots/model-menu.png)
 
-One control configures both ordinary sessions of the pair.
+One control configures both ordinary sessions of the pair: the Endeavour section
+and the Challenger section each carry their own Model and Effort.
 
-### The composer dock
+### The paired sessions
 
-![The plan dock above the composer input, with the unified model trigger on the right](assets/screenshots/composer-dock.png)
+![The sidebar showing an Endeavour session and its paired Challenger session in the same workspace](assets/screenshots/paired-sessions.png)
 
-### Regenerating them
+The pair lives in the workspace sidebar as two ordinary sessions, labelled with
+the shared pair code.
 
-```
-node scripts/screenshots/capture.mjs
-```
+### The Challenger view tab
 
-The harness bundles the real `PlanView` and `UnifiedModelControl` with a snapshot
-of the dark theme tokens and a frozen clock, then renders each scene with a locally
-cached headless Chromium at 2x. It makes no network request and touches no
-application state. Set `DSH_SHOT_CHROME` to point at a different Chromium binary.
+![The session header with Chat, Trajectory, Context and Challenger tabs](assets/screenshots/challenger-tab.png)
+
+The session header carries the tab that opens the paired Challenger, so the
+executor's own chat is one click away.
+
+### Updating them
 
 The plugin registry reads `screenshots.json` from this repository root, so the
-Market card and install dialog pick up these images on the next registry build —
-no pull request is needed to update them.
+Market card and install dialog pick these images up on the next registry build —
+no pull request is needed to change them. To replace one, drop a new PNG at the
+same relative path declared in `screenshots.json`.
+
+`scripts/screenshots/` holds an offline harness that renders the plan card and
+the model control from the plugin's own components against fixture data; it
+writes to `scripts/screenshots/out/` by default and never touches the committed
+captures above.
 
 ## License
 
