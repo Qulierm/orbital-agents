@@ -1,0 +1,99 @@
+/**
+ * Offline dark theme snapshot for screenshot rendering.
+ *
+ * Source: /Users/nikita/Documents/Coding/DPHarness/packages/client/ui-theme/src/styles/design-platform.css
+ * (the `body[data-ds-dark-theme]` token block) plus the `--dsw-elevation-*` and
+ * `--dsw-elevation-stroke-color` declarations from
+ * .../src/styles/gradient-shadow-text.css. Every `--dsw-static-*` value the
+ * tokens reference is inlined here, so this file renders correctly on its own,
+ * with no network access and no dependency on the app stylesheet.
+ *
+ * This is a SNAPSHOT for offline rendering: it is not shipped in the package and
+ * is not a source of truth for the product theme.
+ */
+
+body[data-ds-dark-theme] {
+  /* Static palette referenced by the alias tokens below (dark values). */
+  --dsw-static-amber-500: rgb(245, 158, 11);
+  --dsw-static-deepseek-400: rgb(103, 158, 254);
+  --dsw-static-green-500: rgb(34, 197, 94);
+  --dsw-static-red-400: rgb(242, 90, 90);
+  --dsw-static-neutral-550: rgb(101, 103, 107);
+  --dsw-static-neutral-600: rgb(84, 85, 87);
+  --dsw-static-neutral-bluish-50: rgb(249, 250, 251);
+  --dsw-static-neutral-bluish-300: rgb(207, 211, 214);
+  --dsw-static-neutral-bluish-400: rgb(173, 178, 184);
+  --dsw-static-neutral-bluish-600: rgb(129, 133, 140);
+  --dsw-static-neutral-bluish-750: rgb(67, 69, 74);
+  --dsw-static-neutral-bluish-800: rgb(53, 54, 56);
+  --dsw-static-neutral-bluish-850: rgb(44, 44, 46);
+  --dsw-static-neutral-bluish-875: rgb(35, 35, 36);
+  --dsw-static-neutral-bluish-950: rgb(21, 21, 23);
+
+  /* Surfaces. */
+  --dsw-alias-bg-base: var(--dsw-static-neutral-bluish-950);
+  --dsw-alias-bg-layer-1: var(--dsw-static-neutral-bluish-875);
+  --dsw-alias-bg-layer-2: var(--dsw-static-neutral-bluish-850);
+  --dsw-alias-bg-layer-3: var(--dsw-static-neutral-bluish-800);
+
+  /* Borders and interaction. */
+  --dsw-alias-border-l1: rgba(255, 255, 255, 0.06);
+  --dsw-alias-border-l2: rgba(255, 255, 255, 0.12);
+  --dsw-alias-border-l3: rgba(255, 255, 255, 0.16);
+  --dsw-alias-border-l4: rgba(255, 255, 255, 0.2);
+  --dsw-alias-interactive-bg-hover: rgba(255, 255, 255, 0.08);
+
+  /* Text. */
+  --dsw-alias-label-primary: var(--dsw-static-neutral-bluish-50);
+  --dsw-alias-label-secondary: var(--dsw-static-neutral-bluish-300);
+  --dsw-alias-label-tertiary: var(--dsw-static-neutral-bluish-400);
+  --dsw-alias-label-caption: var(--dsw-static-neutral-bluish-600);
+  --dsw-alias-label-dimmed: var(--dsw-static-neutral-bluish-750);
+
+  /* State. */
+  --dsw-alias-state-business-primary: var(--dsw-static-deepseek-400);
+  --dsw-alias-state-success-primary: var(--dsw-static-green-500);
+  --dsw-alias-state-warn-primary: var(--dsw-static-amber-500);
+  --dsw-alias-state-error-primary: var(--dsw-static-red-400);
+
+  /* Component surfaces. */
+  --dsw-specific-menu: var(--dsw-alias-bg-layer-3);
+  --dsw-specific-input-major: var(--dsw-static-neutral-bluish-850);
+  --dsw-specific-tip: var(--dsw-static-neutral-bluish-800);
+
+  /* Scrollbars. */
+  --dsw-alias-scrollbar-bg-l2: var(--dsw-static-neutral-600);
+  --dsw-alias-scrollbar-hover-l2: var(--dsw-static-neutral-550);
+
+  /* Elevation: hairline stroke plus two very soft glows. */
+  --dsw-elevation-stroke-color: var(--dsw-alias-border-l4);
+  --dsw-elevation-stroke: 0 0 0 0.5px var(--dsw-elevation-stroke-color);
+  --dsw-elevation-panel:
+    var(--dsw-elevation-stroke), 0 3px 8px 0 rgba(0, 0, 0, 0.03), 0 0 16px 0 rgba(0, 0, 0, 0.02);
+  --dsw-elevation-prominent:
+    var(--dsw-elevation-stroke), 0 3px 8px 0 rgba(0, 0, 0, 0.04), 0 0 20px 0 rgba(0, 0, 0, 0.05);
+
+  /* Composer geometry the plan surfaces inherit from the host. */
+  --dsh-composer-card-max-width: 720px;
+  --dsh-composer-side-clearance: 16px;
+  --dsh-composer-stack-gap: 8px;
+  --dsh-scrollbar-thumb: var(--dsw-alias-scrollbar-bg-l2);
+  --dsh-scrollbar-thumb-hover: var(--dsw-alias-scrollbar-hover-l2);
+}
+
+body[data-ds-dark-theme] {
+  margin: 0;
+  padding: 16px;
+  background: var(--dsw-alias-bg-base);
+  color: var(--dsw-alias-label-primary);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 14px;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Scene scaffolding: a plain column so each capture shows one surface. */
+body[data-ds-dark-theme] .scene {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}

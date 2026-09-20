@@ -194,6 +194,57 @@ control. See [docs/configuration.md](docs/configuration.md).
 See [docs/install.md](docs/install.md) for the full lifecycle and
 [docs/architecture.md](docs/architecture.md) for the invariants.
 
+## Screenshots
+
+Every image below is rendered offline from the plugin's own components against
+synthetic fixture data — no real session, workspace path or credential appears in
+them.
+
+### A running plan
+
+![A plan card with one confirmed task, one reported task, a working task with its timer, and two waiting tasks](assets/screenshots/plan-running.png)
+
+Confirmed is the violet check, Finished is the green check, Working is the blue
+animated ring with its live timer, and Waiting is the gray ring.
+
+### A stopped Challenger
+
+![The same plan with the current row showing an orange circled exclamation and the text Challenger stopped](assets/screenshots/plan-interrupted.png)
+
+When the paired Challenger is no longer running while the plan still expects
+execution work, the current unreported row switches to `Challenger stopped` with a
+static orange circled exclamation. It is live session activity, not a durable task
+state.
+
+### A completed plan
+
+![A terminal plan with all five tasks confirmed](assets/screenshots/plan-complete.png)
+
+### The unified model menu
+
+![The model menu open with an Endeavour section and a Challenger section, each with Model and Effort cells](assets/screenshots/model-menu.png)
+
+One control configures both ordinary sessions of the pair.
+
+### The composer dock
+
+![The plan dock above the composer input, with the unified model trigger on the right](assets/screenshots/composer-dock.png)
+
+### Regenerating them
+
+```
+node scripts/screenshots/capture.mjs
+```
+
+The harness bundles the real `PlanView` and `UnifiedModelControl` with a snapshot
+of the dark theme tokens and a frozen clock, then renders each scene with a locally
+cached headless Chromium at 2x. It makes no network request and touches no
+application state. Set `DSH_SHOT_CHROME` to point at a different Chromium binary.
+
+The plugin registry reads `screenshots.json` from this repository root, so the
+Market card and install dialog pick up these images on the next registry build —
+no pull request is needed to update them.
+
 ## License
 
 MIT — see [LICENSE](LICENSE).
