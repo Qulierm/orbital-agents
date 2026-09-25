@@ -83,12 +83,13 @@ message-less session cannot surface the native `Chat/Trajectory/Endeavour` strip
 No synthetic turn, `beginSubmission` misuse or fabricated event is used to work
 around this.
 
-Navigation therefore uses two official surfaces, both `ISessions.open` bridges:
+Navigation therefore uses two official surfaces, both `uiWorkspace.openSession` bridges:
 
 - the **role-aware plan action** (transcript card and composer dock): the
   Endeavour side opens its persistent Challenger, the Challenger side opens the
   paired Endeavour root, and a historical `childId`-only card stays a disabled
-  history affordance;
+  history affordance. Peer-tab registration briefly retries projection-face
+  binding so slow hydration cannot permanently hide navigation;
 - the **blank-peer return fallback** in `conversation.input.dock`, rendered only
   while the current session is the paired Challenger AND no plan is projected,
   so a blank peer still has a visible `Endeavour` return button. As soon as a
@@ -111,6 +112,9 @@ path; the fallback then stays hidden.
   permission-preset service on create/adopt/repair and re-asserted before every
   `plan-ready` delivery; failure keeps the outbox pending and returns a typed
   error instead of starting execution. The Endeavour side keeps its own preset.
+- An immutable Challenger row can never become an Endeavour root: reselecting
+  Challenger as Endeavour repairs its selection instead of spawning a second
+  companion.
 
 ## Historical compatibility: the legacy Builder child
 

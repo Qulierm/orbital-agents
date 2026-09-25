@@ -15,7 +15,7 @@ git clone git@github.com:Qulierm/orbital-agents.git
 cd orbital-agents
 pnpm install --frozen-lockfile
 pnpm run typecheck && pnpm test && pnpm run build
-pnpm pack                     # dsh-orbital-agents-0.2.6.tgz
+pnpm pack                     # dsh-orbital-agents-0.2.7.tgz
 node scripts/pack-check.mjs   # tarball contents, no secrets/sources
 node scripts/preset-check.ts  # preset contract + persona drift
 ```
@@ -26,7 +26,7 @@ generated patch files the package declares in `dsh.bundle.patch`.
 ## 2. Install the package and its presets
 
 ```sh
-node scripts/install-local.mjs --tarball ./dsh-orbital-agents-0.2.6.tgz
+node scripts/install-local.mjs --tarball ./dsh-orbital-agents-0.2.7.tgz
 ```
 
 What happens, in order:

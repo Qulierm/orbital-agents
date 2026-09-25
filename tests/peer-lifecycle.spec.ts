@@ -20,6 +20,7 @@ vi.mock('@deepseek-ai/cordis', () => ({
 }))
 
 import type { PeerState } from '../src/peer.js'
+import type { PeerHostSeam } from '../src/peer-host.js'
 
 const { EndeavourService } = await import('../src/service.js')
 const { challengerSessionIdFor, peerEventPayload, peerPairIdFor } = await import('../src/peer.js')
@@ -388,5 +389,40 @@ describe('peer session lifecycle', () => {
     await settle()
     expect(h.creates).toHaveLength(0)
     expect(h.messages).toEqual([])
+  })
+})
+
+describe('reselected Challenger rows', () => {
+  it('heals a Challenger that was switched to Endeavour instead of making it a new root', async () => {
+    const pair = pairOf('session-root')
+    const repairs: { id: string; preset: string }[] = []
+    const created: string[] = []
+    const seam: PeerHostSeam = {
+      listSessionIds: () => [pair.challengerSessionId],
+      sessionMeta: () => ({
+        id: pair.challengerSessionId,
+        headerAgentPreset: 'challenger',
+        selectedAgentPreset: 'endeavour',
+      }),
+      createOrdinarySession: async (input) => {
+        created.push(input.id)
+        return { sessionId: input.id, adopted: false }
+      },
+      resolveAgent: async () => undefined,
+      repairPreset: async (sessionId, preset) => {
+        repairs.push({ id: sessionId, preset })
+      },
+    }
+    const provisioner = new PeerProvisioner({
+      seam,
+      readPair: () => pair,
+      hasCheckpoint: () => true,
+      appendPair: async () => undefined,
+      now: () => 1,
+    })
+
+    await expect(provisioner.ensure(pair.challengerSessionId)).rejects.toThrow('is a Challenger session')
+    expect(created).toEqual([])
+    expect(repairs).toEqual([{ id: pair.challengerSessionId, preset: 'challenger' }])
   })
 })

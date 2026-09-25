@@ -1,14 +1,14 @@
 // @vitest-environment happy-dom
 /**
  * Peer navigation tabs: visibility from the `endeavourPeer` projection, role
- * labels, exact ISessions.open navigation, trusted-activation gating and
+ * labels, exact Workspace-view navigation, trusted-activation gating and
  * live update when the pair arrives or disappears. No subagent concepts.
  */
 
 import { StrictMode, createElement } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   openPeerTab,
   PeerTabView,
@@ -123,6 +123,27 @@ describe('registration', () => {
     expect(disposed).toBe(3)
     dispose()
     expect(disposed).toBe(3)
+  })
+
+  it('registers once a late-binding projection face hydrates', async () => {
+    const a = pair()
+    let current = 'session-root'
+    const currentListeners = new Set<() => void>()
+    const faces = new Map<string, ReturnType<typeof face>>()
+    const registrations: string[] = []
+    const dispose = reconcilePeerTab({
+      currentSession: () => current,
+      subscribeCurrent: (listener) => { currentListeners.add(listener); return () => { currentListeners.delete(listener) } },
+      peerFace: (sessionId, key) => (key === 'endeavourPeer' ? faces.get(sessionId) : undefined),
+      register: (role) => { registrations.push(role); return () => undefined },
+    })
+    expect(registrations).toEqual([])
+    // The binding arrives after the shell mounts, without another session switch.
+    faces.set('session-root', face(a))
+    await vi.waitFor(() => {
+      expect(registrations).toEqual(['endeavour'])
+    })
+    dispose()
   })
 
   it('registers the official entry options per role', () => {

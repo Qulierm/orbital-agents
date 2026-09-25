@@ -61,7 +61,7 @@ function seedOwnedPreset(home: string, id: string): string {
 
 function tarball(): string {
   const home = tempHome()
-  const path = join(home, 'dsh-orbital-agents-0.2.6.tgz')
+  const path = join(home, 'dsh-orbital-agents-0.2.7.tgz')
   writeFileSync(path, 'fake tarball for lifecycle tests\n')
   return path
 }
@@ -280,7 +280,7 @@ describe('installer lifecycle', () => {
     const home = tempHome()
     seedProfile(home)
     const bin = fakePnpmDir(home)
-    const file = join(home, 'dsh-orbital-agents-0.2.6.tgz')
+    const file = join(home, 'dsh-orbital-agents-0.2.7.tgz')
     const installed = join(home, '.dsh', 'profiles', 'desktop', 'node_modules', 'dsh-orbital-agents', 'lib', 'client.js')
     writeFileSync(file, 'OLD ARTIFACT')
     expect(installerWithPath(home, bin, '--tarball', file).status).toBe(0)

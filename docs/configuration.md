@@ -66,8 +66,8 @@ peer runtime stay readable as history.
 A peer with no turns yet has no native View ring in rc.2, so the composer shows
 a role-aware plan action (Open Challenger / Open Endeavour) and, while no plan
 is projected on the Challenger side, a restrained `Endeavour` return button in
-the composer dock. Both open the exact counterpart through the official
-`ISessions.open` bridge; see [architecture.md](architecture.md).
+the composer dock. Both open the exact counterpart through the `uiWorkspace.openSession`
+bridge; see [architecture.md](architecture.md).
 
 ## Pair codes and titles
 

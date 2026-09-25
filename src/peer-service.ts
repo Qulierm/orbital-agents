@@ -39,6 +39,7 @@ export interface PeerProvisionDeps {
 /** Serialized provisioner: one in-flight ensure per Endeavour session. */
 export class PeerProvisioner {
   private readonly jobs = new Map<string, Promise<PeerState>>()
+  private readonly presetRepairJobs = new Map<string, Promise<void>>()
 
   constructor(private readonly deps: PeerProvisionDeps) {}
 
@@ -63,6 +64,13 @@ export class PeerProvisioner {
     const meta = this.deps.seam.sessionMeta(endeavourSessionId)
     if (meta === undefined) throw new PeerError('peer-unknown-session', `unknown session ${endeavourSessionId}`)
     if (meta.origin === 'subagent') throw new PeerError('peer-not-ordinary', `session ${endeavourSessionId} is a subagent session`)
+    if (meta.headerAgentPreset === 'challenger') {
+      // An immutable Challenger row cannot become an Endeavour root when its
+      // preset is temporarily reselected. Heal the selection instead of
+      // spawning a second companion, then reject this ensure call.
+      await this.repairPairMemberPreset(meta)
+      throw new PeerError('peer-not-endeavour', `session ${endeavourSessionId} is a Challenger session`)
+    }
     if (meta.agentPreset !== 'endeavour') {
       throw new PeerError('peer-not-endeavour', `session ${endeavourSessionId} is not an Endeavour session`)
     }
@@ -90,7 +98,7 @@ export class PeerProvisioner {
         })
         // The adopted session is live now: heal its composition BEFORE the
         // attachments so a recomposed member is restored on every restart.
-        await this.repairMemberPreset(this.deps.seam.sessionMeta(challengerSessionId) ?? { id: challengerSessionId })
+        await this.repairPairMemberPreset(this.deps.seam.sessionMeta(challengerSessionId) ?? { id: challengerSessionId })
         await this.repairAttachments(endeavourSessionId, challengerSessionId, meta.cwd)
         await this.repairPairPolicy(existing)
         // A challenger that is merely NOT LIVE in this process (cold persisted
@@ -104,7 +112,7 @@ export class PeerProvisioner {
       }
       // Composition repair runs BEFORE the challenger assertion: a recomposed
       // member still has the challenger header and must be healed, not rejected.
-      await this.repairMemberPreset(peerMeta)
+      await this.repairPairMemberPreset(peerMeta)
       this.assertChallenger(this.deps.seam.sessionMeta(challengerSessionId) ?? peerMeta)
       // Composition repair: a blank pair member whose IMMUTABLE header is the
       // Challenger preset but whose latest selection was recomposed (the blank
@@ -155,6 +163,32 @@ export class PeerProvisioner {
     }
     await this.repairAttachments(endeavourSessionId, challengerSessionId, meta.cwd)
     return state
+  }
+
+  /**
+   * Share one preset-repair operation per Challenger row.
+   *
+   * Mount and preset notifications can observe the root and its reselected
+   * peer in the same tick, before the repaired selection is durable. Sharing
+   * the in-flight repair keeps those concurrent ensures idempotent without
+   * weakening the started-session guard.
+   */
+  private repairPairMemberPreset(peerMeta: PeerSessionMeta): Promise<void> {
+    const inFlight = this.presetRepairJobs.get(peerMeta.id)
+    if (inFlight !== undefined) return inFlight
+    const job = this.repairMemberPreset(peerMeta)
+    this.presetRepairJobs.set(peerMeta.id, job)
+    // Track cleanup on a fork, not the returned repair: awaiting the shared
+    // repair must cost exactly one caller microtask, as before.
+    void job.then(
+      () => {
+        if (this.presetRepairJobs.get(peerMeta.id) === job) this.presetRepairJobs.delete(peerMeta.id)
+      },
+      () => {
+        if (this.presetRepairJobs.get(peerMeta.id) === job) this.presetRepairJobs.delete(peerMeta.id)
+      },
+    )
+    return job
   }
 
   /**

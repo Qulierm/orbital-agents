@@ -5,7 +5,7 @@
  * `endeavourPeer` projection: an Endeavour root shows a `Challenger` tab, the
  * paired Challenger shows an `Endeavour` tab, and an unpaired or corrupt
  * session shows none. A trusted click resets the local view to Chat and then
- * opens the exact counterpart through the official `ISessions.open`. The whole
+ * opens the exact counterpart through the Workspace view owner. The whole
  * path is ordinary-session navigation: no addressed-child APIs and no
  * delegation metadata are involved.
  */
@@ -138,10 +138,19 @@ export function reconcilePeerTab(targets: PeerTabTargets): () => void {
   let disposeFace: (() => void) | undefined
   let subscribed: string | undefined
   let registered: PeerRole | undefined
+  let retry: ReturnType<typeof setTimeout> | undefined
+  let attempts = 0
+
+  const clearRetry = (): void => {
+    if (retry !== undefined) clearTimeout(retry)
+    retry = undefined
+  }
 
   const refresh = (): void => {
     const sessionId = targets.currentSession()
     if (subscribed !== sessionId) {
+      clearRetry()
+      attempts = 0
       disposeFace?.()
       disposeFace = undefined
       subscribed = sessionId
@@ -153,10 +162,24 @@ export function reconcilePeerTab(targets: PeerTabTargets): () => void {
     const peer = sessionId === undefined ? undefined : targets.peerFace(sessionId, 'endeavourPeer')?.getSnapshot()
     const target = peerTabTarget(sessionId, peer)
     const role = target?.role
+    if (role === undefined) {
+      disposeEntry?.()
+      disposeEntry = undefined
+      registered = undefined
+      // The projection face can bind after the shell mounts. Retry briefly so
+      // a slow hydration does not permanently hide the counterpart tab.
+      if (attempts < 12 && sessionId === targets.currentSession()) {
+        attempts += 1
+        clearRetry()
+        retry = setTimeout(refresh, 250)
+      }
+      return
+    }
+    clearRetry()
     if (role !== registered) {
       disposeEntry?.()
       disposeEntry = undefined
-      if (role !== undefined) disposeEntry = targets.register(role)
+      disposeEntry = targets.register(role)
       registered = role
     }
   }
@@ -164,6 +187,7 @@ export function reconcilePeerTab(targets: PeerTabTargets): () => void {
   const disposeCurrent = targets.subscribeCurrent(refresh)
   refresh()
   return () => {
+    clearRetry()
     disposeCurrent()
     disposeFace?.()
     disposeEntry?.()
