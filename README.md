@@ -40,7 +40,9 @@ the same orbit instead of being re-spawned per task.
 Two ordinary presets ship together: **Endeavour** (planner: `endeavour_plan`, `endeavour_verify`)
 and **Challenger** (executor: `challenger_start_task`, `challenger_report`). A plan is delivered once
 to the persistent Challenger session paired with its Endeavour session; the companion is never a
-subagent and is reused by every later plan of that pair.
+subagent and is reused by every later plan of that pair. If a user asks for the
+Challenger directly, Endeavour uses that paired companion and starts work only
+through `endeavour_plan`; it never spawns a native subagent to replace it.
 
 A paired Endeavour session shows a native `Challenger` view tab next to `Chat` and `Trajectory`, and
 the Challenger session shows the reciprocal `Endeavour` tab; either tab opens the other ordinary
@@ -54,7 +56,7 @@ cd orbital-agents
 pnpm install --frozen-lockfile
 pnpm run build
 pnpm pack
-node scripts/install-local.mjs --tarball ./dsh-orbital-agents-0.2.5.tgz
+node scripts/install-local.mjs --tarball ./dsh-orbital-agents-0.2.6.tgz
 ```
 
 The installer backs up the desktop profile and any existing user preset first, installs the package
@@ -73,8 +75,8 @@ inspected or fetched by version instead of building it locally:
 
 ```sh
 npm view dsh-orbital-agents version # latest published version
-npm pack dsh-orbital-agents@0.2.5   # download exactly the published tarball
-node scripts/install-local.mjs --tarball ./dsh-orbital-agents-0.2.5.tgz
+npm pack dsh-orbital-agents@0.2.6   # download exactly the published tarball
+node scripts/install-local.mjs --tarball ./dsh-orbital-agents-0.2.6.tgz
 ```
 
 `npm pack` writes the published tarball into the current directory, and the installer is run from a

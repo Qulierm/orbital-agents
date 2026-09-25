@@ -169,6 +169,6 @@ describe('published package isolation', () => {
     expect(manifest.files.some((entry) => entry.includes('screenshots'))).toBe(false)
     // No script entry and no version change came with the screenshots.
     expect(Object.keys(manifest.scripts)).not.toContain('screenshots')
-    expect(manifest.version).toBe('0.2.5')
+    expect(manifest.version).toBe('0.2.6')
   })
 })

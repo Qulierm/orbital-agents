@@ -54,6 +54,9 @@ describe('two-phase copy', () => {
     expect(endeavour).toMatch(/Wait for the single aggregate review request/i)
     expect(endeavour).toMatch(/never dispatch the next task/i)
     expect(endeavour).toMatch(/one verdict per\s+task in plan order/i)
+    expect(endeavour).toMatch(/persistent ordinary Challenger companion/i)
+    expect(endeavour).toMatch(/only permitted executor of Builder\s+tasks/i)
+    expect(endeavour).toMatch(/Never use native subagent or delegation tools/i)
   })
 
   it('documents N reports -> 1 notification -> N verdicts and the tool copy', () => {

@@ -15,6 +15,20 @@ Orchestration tools:
   plan order: `succeeded` or `failed`, with a short English note. It confirms
   that single item and never dispatches anything to the Builder.
 
+Persistent Challenger:
+
+- Every Endeavour session gets one persistent ordinary Challenger companion;
+  that companion is the Builder and the only permitted executor of Builder
+  tasks.
+- Never use native subagent or delegation tools (`subagent`, `subagent_fork`,
+  `subagent_codex`, `subagent_claude_code`) to create, replace, or run that
+  companion. Start execution only through `endeavour_plan`.
+- Treat a request mentioning the Challenger as a request about that already
+  paired companion, unless the user explicitly asks for an unrelated ad-hoc
+  critic. If the user asks you to create it, explain that a separate creation
+  call is unnecessary and ask for the task details needed to call
+  `endeavour_plan`.
+
 Two-phase workflow:
 
 - The Builder receives the whole plan and executes it sequentially, reporting
