@@ -103,7 +103,7 @@ describe('client artifact (ModuleLoader contract)', () => {
     const manifest = JSON.parse(readFileSync('package.json', 'utf8')) as {
       name: string
       files: string[]
-      dsh: { client: { platform: string; inject: string[] }; bundle: { patch: string } }
+      dsh: { client: { platform: string; inject: string[] }; bundle: { patch: string | string[] } }
       exports: Record<string, { default: string }>
     }
     expect(manifest.name).toBe(CLIENT_ID)
@@ -111,8 +111,13 @@ describe('client artifact (ModuleLoader contract)', () => {
     expect(manifest.exports['./client']?.default).toBe('./lib/client.js')
     expect(manifest.files).toContain('lib')
     expect(manifest.files).toContain('cordis.patch.yml')
-    expect(existsSync(manifest.dsh.bundle.patch)).toBe(true)
+    expect(manifest.files).toContain('presets')
+    // A bundle declares its patches as one path or a list; 0.1.7 registers agent
+    // presets from composition rows, so each preset ships as its own patch.
+    const declared = manifest.dsh.bundle.patch
+    const patches = typeof declared === 'string' ? [declared] : declared
+    expect(patches).toEqual(['./cordis.patch.yml', './presets/endeavour.patch.yml', './presets/challenger.patch.yml'])
+    expect(existsSync('cordis.patch.yml')).toBe(true)
     expect(existsSync(CLIENT_ENTRY)).toBe(true)
-    expect(existsSync('preset/endeavour.patch.yml')).toBe(true)
   })
 })

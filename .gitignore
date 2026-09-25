@@ -1,5 +1,6 @@
 node_modules/
 lib/
+presets/
 dist/
 *.tgz
 *.log

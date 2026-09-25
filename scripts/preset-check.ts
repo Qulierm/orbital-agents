@@ -1,8 +1,9 @@
 /**
  * Preset contract and drift checker.
  *
- * The Endeavour preset is version-pinned to the exact standard composition
- * shipped inside the installed DSH Desktop rc.2 payload. This check proves:
+ * The Endeavour and Challenger presets are pinned to the exact standard
+ * composition shipped inside the installed DSH Desktop payload. This check
+ * proves:
  * - every standard row is retained (full coding tool composition),
  * - the only composition differences are the persona prefix and the appended
  *   scoped tools row,
@@ -21,7 +22,8 @@ const JS_EXPRESSION_TAG = new Type('tag:yaml.org,2002:js', {
   construct: (data: string) => data,
 })
 
-const COMPOSITION_SCHEMA = DEFAULT_SCHEMA.extend([JS_EXPRESSION_TAG])
+/** Composition schema accepting DSH's `!!js` tag as text; exported for patch tests. */
+export const COMPOSITION_SCHEMA = DEFAULT_SCHEMA.extend([JS_EXPRESSION_TAG])
 
 /** Parse a composition file with DSH's `!!js` tag accepted as text. */
 export function loadRows(path: string): Row[] {
@@ -32,16 +34,34 @@ export function loadRows(path: string): Row[] {
 
 /** Default installed source of truth for the standard preset. */
 export const STANDARD_PRESET_PATH = process.env.DSH_STANDARD_PRESET
-  ?? '/Applications/DSH Desktop.app/Contents/Resources/app/node_modules/@deepseek-ai/dsh-agent-presets/presets/standard/agent.cordis.yml'
+  ?? '/Applications/DSH Desktop.app/Contents/Resources/app/node_modules/@deepseek-ai/dsh-web-app/presets/standard.patch.yml'
 
-/** Relative package path our preset row resolves through. */
-export const TOOLS_ROW_NAME = './node_modules/dsh-orbital-agents/lib/tools-plugin.js'
+/** Package specifier our scoped tools row resolves through. */
+export const TOOLS_ROW_NAME = 'dsh-orbital-agents/tools'
 
 interface Row {
   readonly id?: string
   readonly name?: string
   readonly config?: Record<string, unknown>
   readonly [key: string]: unknown
+}
+
+/**
+ * Read the standard preset's own composition rows.
+ *
+ * DSH 0.1.7 declares a preset as one `@deepseek-ai/dsh-agent-preset` row whose
+ * `config.plugins` carries the composition, so the installed source of truth is
+ * a bundle patch rather than a preset directory holding `agent.cordis.yml`.
+ * @returns the standard preset's plugin rows in composition order.
+ */
+export function loadStandardRows(): Row[] {
+  const inserted = loadRows(STANDARD_PRESET_PATH).flatMap((entry) => (entry as { insert?: Row[] }).insert ?? [])
+  const preset = inserted.find((row) => row.id === 'preset-standard')
+  const plugins = (preset?.config as { plugins?: unknown } | undefined)?.plugins
+  if (!Array.isArray(plugins)) {
+    throw new Error(`preset-check: ${STANDARD_PRESET_PATH} declares no preset-standard plugin list`)
+  }
+  return plugins as Row[]
 }
 
 function rowsOf(path: string): Row[] {
@@ -59,7 +79,7 @@ function personaPrefix(rows: Row[]): string {
 export function checkPreset(): string[] {
   const failures: string[] = []
   const ours = rowsOf('preset/endeavour/agent.cordis.yml')
-  const standard = rowsOf(STANDARD_PRESET_PATH)
+  const standard = loadStandardRows()
   const prompt = readFileSync('src/prompts/endeavour.md', 'utf8')
 
   if (personaPrefix(ours) !== prompt) {

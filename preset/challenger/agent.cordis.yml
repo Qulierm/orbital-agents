@@ -76,10 +76,10 @@
         first, then schedule it in ONE Bash call that returns immediately:
 
         ```
-        node "$HOME/.dsh/.agent-presets/challenger/node_modules/dsh-orbital-agents/scripts/schedule-desktop-restart.mjs" --delay-seconds 45
+        node "$HOME/.dsh/profiles/desktop/node_modules/dsh-orbital-agents/scripts/schedule-desktop-restart.mjs" --delay-seconds 45
         ```
 
-        The path goes through the owned Challenger preset link, so it works from any
+        The path points at the package the desktop profile installed, so it works from any
         working directory.
 
         It prints a schedule id and the durable log path under
@@ -239,8 +239,8 @@
   isolate:
     workflowEngine: true
   config:
-    - id: workflow-worker-thread
-      name: '@deepseek-ai/dsh-workflow-worker-thread'
+    - id: workflow-ptc
+      name: '@deepseek-ai/dsh-workflow-ptc'
       config:
         provider: spawn
 
@@ -249,6 +249,7 @@
 
     - id: tool-ralph
       name: '@deepseek-ai/dsh-tool-ralph'
+      disabled: true
       config:
         subagentProvider: spawn
         maxRounds: 64
@@ -274,15 +275,17 @@
 - id: present
   name: '@deepseek-ai/dsh-tool-present'
 
+- id: tool-plugin-manager
+  name: '@deepseek-ai/dsh-plugin-manager/tools'
+  disabled: true
+
 # ── Challenger scoped orchestration tools ──────────────────────────────────
 # Mounted only inside this preset's scope with `role: challenger`, so the model
 # sees exactly `challenger_start_task` and `challenger_report` — the durable
 # protocol channel to the paired Endeavour — and no delegation or ordinary
-# messaging tools. The relative path resolves from the composition directory;
-# the installer links node_modules/dsh-orbital-agents next to this file, because bare
-# package names in user presets resolve from the harness base, not from
-# ~/.dsh/.agent-presets.
+# messaging tools. The bare specifier resolves through the profile's
+# node_modules, where this package exposes `./tools`.
 - id: challenger-tools
-  name: './node_modules/dsh-orbital-agents/lib/tools-plugin.js'
+  name: 'dsh-orbital-agents/tools'
   config:
     role: challenger

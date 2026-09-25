@@ -6,7 +6,7 @@
  * cold resumes and idle wakeups behave like any other ordinary message.
  */
 
-import { createUserMessage, MessageId } from '@deepseek-ai/dsh-llm'
+import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import { PeerError, validatePeerState, type PeerRole, type PeerState } from './peer.js'
 import type { PeerAgentFace, PeerHostSeam } from './peer-host.js'
 
@@ -76,10 +76,13 @@ export function peerRelayText(relay: PeerRelay): string {
   ].join('\n')
 }
 
-/** Durable user-message shape for one relay. */
-export function peerRelayMessage(relay: PeerRelay, messageId: string = MessageId(`peer-${relay.planId}-${relay.messageKind}-${String(Date.now())}`)) {
+/**
+ * Durable user-message shape for one relay. `createUserMessage` mints the
+ * identity itself and rejects a caller-supplied `id`, so the durable dedupe
+ * key stays in `source` instead of the message id.
+ */
+export function peerRelayMessage(relay: PeerRelay) {
   return createUserMessage({
-    id: messageId,
     content: [{ type: 'text', text: peerRelayText(relay) }],
     source: {
       kind: 'endeavour-peer',

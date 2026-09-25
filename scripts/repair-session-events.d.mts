@@ -2,7 +2,9 @@
 
 export const EVENT_TYPE: string
 export const MARKER_TEXT: string
+export const SINGLETON_LOCK_PATH: string
 export function desktopRunning(): boolean
+export function singletonOwnerPid(lockPath?: string): number | undefined
 export function parseZstdFrames(buffer: Buffer): Buffer[]
 export function markLine(line: string): string | null
 export interface RepairResult {

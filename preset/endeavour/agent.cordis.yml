@@ -144,8 +144,8 @@
         interrupted with an unknown outcome.
       - The Builder schedules the restart in one call that returns immediately, reports
         `restart scheduled` with that id and path, and stops. The command is
-        `node "$HOME/.dsh/.agent-presets/challenger/node_modules/dsh-orbital-agents/scripts/schedule-desktop-restart.mjs" --delay-seconds 45`, i.e. the installed package
-        through the owned Challenger preset link rather than a workspace-relative path. The user performs or waits
+        `node "$HOME/.dsh/profiles/desktop/node_modules/dsh-orbital-agents/scripts/schedule-desktop-restart.mjs" --delay-seconds 45`, i.e. the installed package
+        in the desktop profile's node_modules rather than a workspace-relative path. The user performs or waits
         out the restart; you then verify the scheduled evidence rather than a live result.
 - id: agent-instructions
   name: '@deepseek-ai/dsh-agent-instructions'
@@ -338,8 +338,8 @@
         backgroundMode: one-shot
         maxDepth: provider-managed
 
-    - id: workflow-worker-thread
-      name: '@deepseek-ai/dsh-workflow-worker-thread'
+    - id: workflow-ptc
+      name: '@deepseek-ai/dsh-workflow-ptc'
       config:
         provider: spawn
 
@@ -348,6 +348,7 @@
 
     - id: tool-ralph
       name: '@deepseek-ai/dsh-tool-ralph'
+      disabled: true
       config:
         subagentProvider: spawn
         maxRounds: 64
@@ -373,13 +374,15 @@
 - id: present
   name: '@deepseek-ai/dsh-tool-present'
 
+- id: tool-plugin-manager
+  name: '@deepseek-ai/dsh-plugin-manager/tools'
+  disabled: true
+
 # ── Endeavour scoped orchestration tools ───────────────────────────────────
 # Mounted only inside this preset's scope: the standard preset never sees the
-# four tools. The relative path resolves from the composition directory; the
-# installer links node_modules/dsh-orbital-agents next to this file, because bare
-# package names in user presets resolve from the harness base, not from
-# ~/.dsh/.agent-presets.
+# four tools. The bare specifier resolves through the profile's node_modules,
+# where this package exposes `./tools`.
 - id: endeavour-tools
-  name: './node_modules/dsh-orbital-agents/lib/tools-plugin.js'
+  name: 'dsh-orbital-agents/tools'
   config:
     role: endeavour

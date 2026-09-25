@@ -232,13 +232,13 @@ describe('detached restart scheduler', () => {
     expect(first.phase).toBe('scheduled')
   })
 
-  it('runs from an arbitrary cwd through the installed preset path', () => {
-    // The prompt must invoke the package through the owned preset symlink, which
-    // exists regardless of the user's working directory.
+  it('runs from an arbitrary cwd through the installed package path', () => {
+    // The prompt must invoke the package where the desktop profile installed it,
+    // which exists regardless of the user's working directory.
     const prompt = readFileSync(join(REPO, 'src', 'prompts', 'challenger.md'), 'utf8')
-    expect(prompt).toContain('$HOME/.dsh/.agent-presets/challenger/node_modules/dsh-orbital-agents/scripts/schedule-desktop-restart.mjs')
+    expect(prompt).toContain('$HOME/.dsh/profiles/desktop/node_modules/dsh-orbital-agents/scripts/schedule-desktop-restart.mjs')
     const persona = readFileSync(join(REPO, 'preset', 'challenger', 'agent.cordis.yml'), 'utf8')
-    expect(persona).toContain('$HOME/.dsh/.agent-presets/challenger/node_modules/dsh-orbital-agents/scripts/schedule-desktop-restart.mjs')
+    expect(persona).toContain('$HOME/.dsh/profiles/desktop/node_modules/dsh-orbital-agents/scripts/schedule-desktop-restart.mjs')
     // No bare relative invocation survives anywhere the model reads.
     expect(prompt).not.toMatch(/node scripts\/schedule-desktop-restart\.mjs/)
     expect(persona).not.toMatch(/node scripts\/schedule-desktop-restart\.mjs/)

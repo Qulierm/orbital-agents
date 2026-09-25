@@ -1,26 +1,25 @@
 #!/usr/bin/env node
 /**
- * Safe local installer, preset lifecycle, and Builder-route helper for
- * dsh-orbital-agents.
+ * Safe local installer and profile lifecycle helper for dsh-orbital-agents.
  *
  * Usage:
- *   node scripts/install-local.mjs --tarball <path> [--profile desktop] [--force]
+ *   node scripts/install-local.mjs --tarball <path> [--profile desktop]
  *   node scripts/install-local.mjs --uninstall
  *   node scripts/install-local.mjs --rollback <timestamp>
- *   node scripts/install-local.mjs --configure-builder --provider <p> --model <m>
- *        [--reasoning-effort <e>] [--max-tokens <n>]
- *   node scripts/install-local.mjs --show-builder
- *   node scripts/install-local.mjs --reset-builder
  *   node scripts/install-local.mjs --list-backups
  *
- * Guarantees: no sudo, no app-bundle edits, backed-up mutations, atomic preset
- * install, ownership marker so uninstall never deletes a user-authored preset,
- * idempotent re-install, rollback restores profile files and preset state.
+ * Guarantees: no sudo, no app-bundle edits, backed-up mutations, ownership
+ * marker so retirement never deletes a user-authored preset, idempotent
+ * re-install, rollback restores profile files and preset state.
+ *
+ * The agent presets ship inside the package as bundle patches, so the installer
+ * no longer writes `~/.dsh/.agent-presets/<id>`; it only retires the
+ * ownership-marked directories earlier releases installed there.
  */
 
 import { execFileSync } from 'node:child_process'
 import {
-  cpSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, symlinkSync, writeFileSync,
+  cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync,
 } from 'node:fs'
 import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -38,14 +37,11 @@ const PLUGIN = 'dsh-orbital-agents'
 const LEGACY_PLUGIN = 'dsh-endeavour'
 const PRESET_ID = 'endeavour'
 /**
- * Owned preset roster. Endeavour mounts the orchestration tools plugin (so it
- * needs the package link); Challenger is a plain coding preset with its own
- * persona and no delegation rows, so it never links the plugin.
+ * Roster of preset directories earlier releases installed under
+ * `~/.dsh/.agent-presets`. The presets now ship as bundle patches, so these
+ * ids exist only to retire what an upgrade left behind.
  */
-const OWNED_PRESETS = [
-  { id: 'endeavour', linkPackage: true },
-  { id: 'challenger', linkPackage: true },
-]
+const OWNED_PRESETS = [{ id: 'endeavour' }, { id: 'challenger' }]
 const OWNERSHIP_MARKER = '.dsh-endeavour-owned'
 const args = process.argv.slice(2)
 
@@ -58,13 +54,12 @@ const profileName = flag('--profile') ?? 'desktop'
 const homeBase = process.env.DSH_ENDEAVOUR_HOME ?? homedir()
 const profileDir = join(homeBase, '.dsh', 'profiles', profileName)
 const presetRoot = join(homeBase, '.dsh', '.agent-presets')
-/** Directory of one owned preset (kept for the legacy single-preset helpers). */
+/** Retired directory of one owned preset (kept for the legacy single-preset helpers). */
 function presetDirOf(entry) {
   return join(presetRoot, entry.id)
 }
 const presetDir = presetDirOf(OWNED_PRESETS[0])
 const backupRoot = join(homeBase, '.dsh', 'backups', 'endeavour')
-const packageRoot = resolve(import.meta.dirname, '..')
 
 /** Repair targets derived from the same home base as the profile state. */
 function repairPaths() {
@@ -98,14 +93,6 @@ function writeManifest(manifest) {
 
 function timestamp() {
   return new Date().toISOString().replace(/[:.]/g, '-')
-}
-
-/** Copy a directory to a fresh atomic location then swap it in. */
-function atomicReplaceDir(source, target) {
-  const staging = `${target}.staging-${timestamp()}`
-  cpSync(source, staging, { recursive: true })
-  if (existsSync(target)) rmSync(target, { recursive: true, force: true })
-  renameSync(staging, target)
 }
 
 /**
@@ -159,51 +146,6 @@ function presetOwnedByUs(entry = OWNED_PRESETS[0]) {
   return existsSync(join(presetDirOf(entry), OWNERSHIP_MARKER))
 }
 
-/**
- * Abort before ANY mutation when a preset directory exists but is not owned by
- * this plugin. Preflighting the whole roster keeps a foreign Challenger (or
- * Endeavour) conflict from leaving a partial install behind.
- */
-function preflightPresets({ force }) {
-  for (const entry of OWNED_PRESETS) {
-    const source = join(packageRoot, 'preset', entry.id)
-    const dir = presetDirOf(entry)
-    if (!existsSync(source)) throw new Error(`preset asset missing: ${source}`)
-    if (existsSync(dir) && !presetOwnedByUs(entry) && !force) {
-      throw new Error(`refusing to overwrite existing user preset at ${dir}; re-run with --force to replace it (a backup is taken)`)
-    }
-  }
-}
-
-function installPreset(entry, { force }) {
-  const source = join(packageRoot, 'preset', entry.id)
-  const dir = presetDirOf(entry)
-  if (!existsSync(source)) throw new Error(`preset asset missing: ${source}`)
-  if (existsSync(dir) && !presetOwnedByUs(entry) && !force) {
-    throw new Error(`refusing to overwrite existing user preset at ${dir}; re-run with --force to replace it (a backup is taken)`)
-  }
-  mkdirSync(presetRoot, { recursive: true })
-  atomicReplaceDir(source, dir)
-  writeFileSync(join(dir, OWNERSHIP_MARKER), `${PLUGIN}\n`)
-  if (entry.linkPackage === true) {
-    const linkPath = join(dir, 'node_modules')
-    mkdirSync(linkPath, { recursive: true })
-    // The predecessor's link lives in the same place and must go, or the preset
-    // would keep resolving a package the profile no longer installs.
-    rmSync(join(linkPath, LEGACY_PLUGIN), { recursive: true, force: true })
-    const packageLink = join(linkPath, PLUGIN)
-    rmSync(packageLink, { recursive: true, force: true })
-    const installedPackage = join(profileDir, 'node_modules', PLUGIN)
-    if (!existsSync(installedPackage)) throw new Error(`installed package missing: ${installedPackage}`)
-    symlinkSync(installedPackage, packageLink, 'dir')
-  }
-  console.log(`install-local: preset installed at ${dir}`)
-}
-
-function installPresets(options) {
-  for (const entry of OWNED_PRESETS) installPreset(entry, options)
-}
-
 function removePreset(entry = OWNED_PRESETS[0]) {
   const dir = presetDirOf(entry)
   if (!existsSync(dir)) return false
@@ -214,6 +156,26 @@ function removePreset(entry = OWNED_PRESETS[0]) {
   rmSync(dir, { recursive: true, force: true })
   console.log(`install-local: removed owned preset ${dir}`)
   return true
+}
+
+/**
+ * Retire the directory presets every release up to 0.2.4 installed under
+ * `~/.dsh/.agent-presets/<id>`. DSH 0.1.7 replaced directory discovery
+ * (`@deepseek-ai/dsh-agent-presets` roots reading `agent.cordis.yml` +
+ * `preset.yml`) with inline `@deepseek-ai/dsh-agent-preset` rows, which this
+ * package now ships as bundle patches, so an upgraded host ignores those
+ * directories. Only ownership-marked directories are removed; a user-authored
+ * preset of the same id is left exactly as it is, and the removal is reported
+ * because the preset now arrives from the bundle instead.
+ */
+function retirePresets() {
+  let retired = 0
+  for (const entry of OWNED_PRESETS) {
+    if (removePreset(entry)) retired += 1
+  }
+  if (retired > 0) {
+    console.log(`install-local: retired ${String(retired)} directory preset(s); the presets now ship as bundle patches`)
+  }
 }
 
 function backup() {
@@ -253,13 +215,11 @@ function latestBackup() {
   return stamps.at(-1)
 }
 
-function install(tarball, { force }) {
+function install(tarball) {
   // Strictly read-only gate, FIRST: no mutation happens before it passes.
   preflightLegacyPlans()
   if (!existsSync(profileDir)) throw new Error(`profile not found: ${profileDir}`)
   if (!tarball || !existsSync(resolve(tarball))) throw new Error(`tarball not found: ${String(tarball)}`)
-  // Fail before any mutation (including the package install) on foreign presets.
-  preflightPresets({ force })
   const stamp = backup()
   migrateOwnedSettings()
   try {
@@ -292,7 +252,7 @@ function install(tarball, { force }) {
       writeManifest(manifest)
       console.log(`install-local: added ${PLUGIN} to dsh.profile.bundles (order preserved)`)
     }
-    installPresets({ force })
+    retirePresets()
   } catch (error) {
     console.error(`install-local: install failed (${String(error.message)}); rolling back to ${stamp}`)
     rollback(stamp)
@@ -399,7 +359,6 @@ const FLAGS = [
   { name: '--tarball', value: true },
   { name: '--profile', value: true },
   { name: '--rollback', value: true },
-  { name: '--force', value: false },
   { name: '--uninstall', value: false },
   { name: '--list-backups', value: false },
 ]
@@ -427,6 +386,6 @@ try {
 if (args.includes('--uninstall')) uninstall()
 else if (args.includes('--rollback')) rollback(flag('--rollback'))
 else if (args.includes('--list-backups')) listBackups()
-else install(flag('--tarball'), { force: args.includes('--force') })
+else install(flag('--tarball'))
 
 export { latestBackup }

@@ -1,7 +1,12 @@
 /**
- * Installer lifecycle tests over hermetic temp homes: atomic preset install,
- * idempotency, conflict refusal, ownership, uninstall/rollback exactness,
- * failure rollback, and Builder-route configuration.
+ * Installer lifecycle tests over hermetic temp homes: package/bundle install,
+ * idempotency, own-preset retirement with ownership safety, uninstall/rollback
+ * exactness, failure rollback, legacy-plan preflight, and package rename.
+ *
+ * Since 0.2.5 the agent presets ship as bundle patches, so the installer writes
+ * no preset directory: these tests pin that it spends the rest of its lifecycle
+ * retiring the ownership-marked directories earlier releases installed and never
+ * touching a user-authored one.
  */
 
 import { spawnSync } from 'node:child_process'
@@ -36,9 +41,27 @@ function seedProfile(home: string): string {
   return profile
 }
 
+/** Directory an earlier release installed for one owned preset. */
+function presetDir(home: string, id: string): string {
+  return join(home, '.dsh', '.agent-presets', id)
+}
+
+/**
+ * Seed the directory an earlier release installed, ownership marker included.
+ * @returns the preset directory path.
+ */
+function seedOwnedPreset(home: string, id: string): string {
+  const dir = presetDir(home, id)
+  mkdirSync(join(dir, 'node_modules'), { recursive: true })
+  writeFileSync(join(dir, '.dsh-endeavour-owned'), 'dsh-orbital-agents\n')
+  writeFileSync(join(dir, 'preset.yml'), `name: ${id}\n`)
+  writeFileSync(join(dir, 'agent.cordis.yml'), '# legacy directory preset\n')
+  return dir
+}
+
 function tarball(): string {
   const home = tempHome()
-  const path = join(home, 'dsh-orbital-agents-0.2.4.tgz')
+  const path = join(home, 'dsh-orbital-agents-0.2.5.tgz')
   writeFileSync(path, 'fake tarball for lifecycle tests\n')
   return path
 }
@@ -83,6 +106,23 @@ process.exit(0)
   return dir
 }
 
+/** Fake pnpm whose `add` fails, to exercise the automatic rollback path. */
+function failingPnpmDir(home: string): string {
+  const dir = join(home, 'fake-bin')
+  mkdirSync(dir, { recursive: true })
+  const script = `#!/usr/bin/env node
+const fs = require('node:fs')
+const path = require('node:path')
+const [cmd] = process.argv.slice(2)
+fs.appendFileSync(path.join(process.env.DSH_ENDEAVOUR_HOME, 'pnpm.log'), cmd + '\\n')
+if (cmd === 'add') { process.stderr.write('fake pnpm: add failed\\n'); process.exit(1) }
+process.exit(0)
+`
+  writeFileSync(join(dir, 'pnpm'), script)
+  chmodSync(join(dir, 'pnpm'), 0o755)
+  return dir
+}
+
 function installerWithPath(home: string, bin: string, ...args: string[]) {
   const env: NodeJS.ProcessEnv = { ...process.env, DSH_ENDEAVOUR_HOME: home, DSH_ENDEAVOUR_TEST_NO_DESKTOP: '1', PATH: `${bin}:${process.env.PATH ?? ''}` }
   delete env.DSH_ENDEAVOUR_TEST_PNPM
@@ -103,20 +143,20 @@ afterEach(() => {
 })
 
 describe('installer lifecycle', () => {
-  it('installs package row, preset, ownership marker and symlink with a backup', () => {
+  it('installs the package row and writes no preset directory', () => {
     const home = tempHome()
     seedProfile(home)
     const result = installer(home, '--tarball', tarball())
     expect(result.status).toBe(0)
     const bundles = manifest(home).dsh.profile.bundles as string[]
     expect(bundles).toEqual(['@deepseek-ai/dsh-base', 'dsh-context', 'dsh-orbital-agents'])
-    const preset = join(home, '.dsh', '.agent-presets', 'endeavour')
-    expect(existsSync(join(preset, 'agent.cordis.yml'))).toBe(true)
-    expect(existsSync(join(preset, 'preset.yml'))).toBe(true)
-    expect(existsSync(join(preset, '.dsh-endeavour-owned'))).toBe(true)
-    expect(existsSync(join(preset, 'node_modules', 'dsh-orbital-agents'))).toBe(true)
+    // Both presets arrive from the bundle patch, so no directory is written.
+    expect(existsSync(presetDir(home, 'endeavour'))).toBe(false)
+    expect(existsSync(presetDir(home, 'challenger'))).toBe(false)
     const state = JSON.parse(readFileSync(join(home, '.dsh', 'backups', 'endeavour', latestStamp(home), 'state.json'), 'utf8'))
     expect(state.presetExisted).toBe(false)
+    expect(state.presets.endeavour.existed).toBe(false)
+    expect(state.presets.challenger.existed).toBe(false)
   })
 
   it('is idempotent, including the bundle list', () => {
@@ -129,20 +169,34 @@ describe('installer lifecycle', () => {
     expect(bundles.filter((entry) => entry === 'dsh-orbital-agents')).toHaveLength(1)
   })
 
-  it('refuses to overwrite a user-authored preset unless forced, then replaces it', () => {
+  it('retires both owned preset directories an earlier release installed', () => {
     const home = tempHome()
     seedProfile(home)
-    const preset = join(home, '.dsh', '.agent-presets', 'endeavour')
-    mkdirSync(preset, { recursive: true })
-    writeFileSync(join(preset, 'preset.yml'), 'name: MyOwn\n')
-    const file = tarball()
-    const refused = installer(home, '--tarball', file)
-    expect(refused.status).not.toBe(0)
-    expect(readFileSync(join(preset, 'preset.yml'), 'utf8')).toBe('name: MyOwn\n')
-    const forced = installer(home, '--tarball', file, '--force')
-    expect(forced.status).toBe(0)
-    expect(existsSync(join(preset, '.dsh-endeavour-owned'))).toBe(true)
-    expect(readFileSync(join(preset, 'preset.yml'), 'utf8')).toContain('Endeavour')
+    seedOwnedPreset(home, 'endeavour')
+    seedOwnedPreset(home, 'challenger')
+    const result = installer(home, '--tarball', tarball())
+    expect(result.status).toBe(0)
+    expect(result.stdout).toContain('retired 2 directory preset(s)')
+    expect(existsSync(presetDir(home, 'endeavour'))).toBe(false)
+    expect(existsSync(presetDir(home, 'challenger'))).toBe(false)
+    const state = JSON.parse(readFileSync(join(home, '.dsh', 'backups', 'endeavour', latestStamp(home), 'state.json'), 'utf8'))
+    expect(state.presets.endeavour).toEqual({ dir: presetDir(home, 'endeavour'), existed: true, owned: true })
+    expect(state.presets.challenger).toEqual({ dir: presetDir(home, 'challenger'), existed: true, owned: true })
+  })
+
+  it('leaves a user-authored preset directory untouched', () => {
+    const home = tempHome()
+    seedProfile(home)
+    const own = join(home, '.dsh', '.agent-presets', 'endeavour')
+    mkdirSync(own, { recursive: true })
+    writeFileSync(join(own, 'preset.yml'), 'name: MyOwn\n')
+    const result = installer(home, '--tarball', tarball())
+    // No marker means not ours: the install proceeds and never overwrites it.
+    expect(result.status).toBe(0)
+    expect(result.stdout).toContain('is not owned by dsh-orbital-agents; leaving it untouched')
+    expect(readFileSync(join(own, 'preset.yml'), 'utf8')).toBe('name: MyOwn\n')
+    expect(existsSync(join(own, '.dsh-endeavour-owned'))).toBe(false)
+    expect(manifest(home).dsh.profile.bundles).toContain('dsh-orbital-agents')
   })
 
   it('migrates a live-like old deployment in one isolated temp home', () => {
@@ -150,12 +204,7 @@ describe('installer lifecycle', () => {
     const profile = seedProfile(home)
     const profileBefore = readFileSync(join(profile, 'cordis.patch.yml'))
     // 1. Old single-preset deployment: the owned `endeavour` preset exists.
-    const presuppose = join(home, '.dsh', '.agent-presets', 'endeavour')
-    mkdirSync(presuppose, { recursive: true })
-    writeFileSync(join(presuppose, 'preset.yml'), 'name: endeavour\nversion: 0.1.0\n')
-    // Ownership marker written by the PREVIOUS version of this installer, so the
-    // migration recognises the preset as ours instead of a user-authored one.
-    writeFileSync(join(presuppose, '.dsh-endeavour-owned'), 'dsh-orbital-agents\n')
+    seedOwnedPreset(home, 'endeavour')
     // 2. Retired settings namespace next to unrelated keys.
     writeFileSync(join(home, '.dsh', 'settings.yaml'), 'theme: dark\nendeavour-builder:\n  mode: custom\nprovider: keep\n')
     // 3. Real-looking session logs: a TERMINAL legacy plan (allowed), an
@@ -172,13 +221,8 @@ describe('installer lifecycle', () => {
     expect(installed.status).toBe(0)
     expect(installed.stdout).toContain('terminal legacy plan')
     expect(installed.stdout).toContain('skipped unreadable session log')
-    // Both owned presets installed and linked; the challenger row is present.
-    for (const preset of ['endeavour', 'challenger']) {
-      const dirPath = join(home, '.dsh', '.agent-presets', preset)
-      expect(existsSync(join(dirPath, 'preset.yml'))).toBe(true)
-      expect(existsSync(join(dirPath, 'node_modules', 'dsh-orbital-agents'))).toBe(true)
-      expect(readFileSync(join(dirPath, 'agent.cordis.yml'), 'utf8')).toContain('dsh-orbital-agents')
-    }
+    // The legacy directory preset is retired, not replaced.
+    expect(existsSync(presetDir(home, 'endeavour'))).toBe(false)
     // Repair markers landed on BOTH admitted event types, file stays readable.
     const repaired = readFileSync(sessionFile, 'utf8')
     expect(repaired.split('\n').filter((line) => line.includes('"ignorable":true'))).toHaveLength(2)
@@ -188,21 +232,22 @@ describe('installer lifecycle', () => {
     const settings = readFileSync(join(home, '.dsh', 'settings.yaml'), 'utf8')
     expect(settings).toContain('theme: dark')
     expect(settings).not.toContain('endeavour-builder')
-    // Rollback restores the profile file byte-exactly.
+    // Rollback restores the profile file byte-exactly and the retired preset.
     const stamps = readdirSync(join(home, '.dsh', 'backups', 'endeavour')).filter((name) => /^\d{4}-/.test(name))
     expect(stamps.length).toBeGreaterThan(0)
     expect(installer(home, '--rollback', stamps[stamps.length - 1]!).status).toBe(0)
     expect(readFileSync(join(profile, 'cordis.patch.yml'))).toEqual(profileBefore)
-    // Uninstall removes only presets this package owns.
+    expect(existsSync(join(presetDir(home, 'endeavour'), 'preset.yml'))).toBe(true)
+    // Uninstall removes only directories this package owns.
     expect(installer(home, '--uninstall').status).toBe(0)
-    expect(existsSync(join(home, '.dsh', '.agent-presets', 'challenger'))).toBe(false)
+    expect(existsSync(presetDir(home, 'challenger'))).toBe(false)
   })
 
   it('retired Builder-route flags fail clearly without touching the profile', () => {
     const home = tempHome()
     seedProfile(home)
     const before = readFileSync(join(home, '.dsh', 'profiles', 'desktop', 'cordis.patch.yml'), 'utf8')
-    for (const flag of ['--configure-builder', '--show-builder', '--reset-builder']) {
+    for (const flag of ['--configure-builder', '--show-builder', '--reset-builder', '--force']) {
       const result = installer(home, flag)
       expect(result.status).not.toBe(0)
       expect(result.stderr).toContain('unknown flag')
@@ -216,20 +261,26 @@ describe('installer lifecycle', () => {
     expect(missing.stderr).toContain('requires a value')
   })
 
-  it('uninstalls owned preset and bundle entry but preserves a user-authored preset', () => {
+  it('uninstalls the bundle entry and owned presets but preserves a user-authored one', () => {
     const home = tempHome()
     seedProfile(home)
+    seedOwnedPreset(home, 'challenger')
+    const foreign = join(home, '.dsh', '.agent-presets', 'user-own')
+    mkdirSync(foreign, { recursive: true })
+    writeFileSync(join(foreign, 'preset.yml'), 'name: User Own\n')
     expect(installer(home, '--tarball', tarball()).status).toBe(0)
+    expect(existsSync(presetDir(home, 'challenger'))).toBe(false)
     expect(installer(home, '--uninstall').status).toBe(0)
     expect(manifest(home).dsh.profile.bundles).not.toContain('dsh-orbital-agents')
-    expect(existsSync(join(home, '.dsh', '.agent-presets', 'endeavour'))).toBe(false)
+    expect(existsSync(presetDir(home, 'endeavour'))).toBe(false)
+    expect(readFileSync(join(foreign, 'preset.yml'), 'utf8')).toBe('name: User Own\n')
   })
 
   it('refreshes the installed artifact when the tarball changes at the same name and version', () => {
     const home = tempHome()
     seedProfile(home)
     const bin = fakePnpmDir(home)
-    const file = join(home, 'dsh-orbital-agents-0.2.4.tgz')
+    const file = join(home, 'dsh-orbital-agents-0.2.5.tgz')
     const installed = join(home, '.dsh', 'profiles', 'desktop', 'node_modules', 'dsh-orbital-agents', 'lib', 'client.js')
     writeFileSync(file, 'OLD ARTIFACT')
     expect(installerWithPath(home, bin, '--tarball', file).status).toBe(0)
@@ -245,42 +296,19 @@ describe('installer lifecycle', () => {
   it('rolls back profile files and preset state exactly', () => {
     const home = tempHome()
     seedProfile(home)
-    const file = tarball()
-    const installed = installer(home, '--tarball', file)
+    seedOwnedPreset(home, 'endeavour')
+    const installed = installer(home, '--tarball', tarball())
     expect(installed.status).toBe(0)
     const stamp = /--rollback (\S+)/.exec(installed.stdout)?.[1]
     expect(stamp).toBeTruthy()
-    // A second install takes its own backup (the replacement for the retired
-    // route CLI) with both presets present.
+    expect(existsSync(presetDir(home, 'endeavour'))).toBe(false)
+    // A second install takes its own backup with the preset already retired.
     expect(installer(home, '--tarball', tarball()).status).toBe(0)
     expect(installer(home, '--rollback', stamp!).status).toBe(0)
     expect(manifest(home).dsh.profile.bundles).toEqual(['@deepseek-ai/dsh-base', 'dsh-context'])
-    expect(existsSync(join(home, '.dsh', '.agent-presets', 'endeavour'))).toBe(false)
-  })
-
-  it('installs both owned presets with per-preset state and no plugin link on Challenger', () => {
-    const home = tempHome()
-    seedProfile(home)
-    expect(installer(home, '--tarball', tarball()).status).toBe(0)
-    const root = join(home, '.dsh', '.agent-presets')
-    for (const id of ['endeavour', 'challenger']) {
-      expect(existsSync(join(root, id, 'agent.cordis.yml'))).toBe(true)
-      expect(existsSync(join(root, id, 'preset.yml'))).toBe(true)
-      expect(existsSync(join(root, id, '.dsh-endeavour-owned'))).toBe(true)
-    }
-    expect(existsSync(join(root, 'endeavour', 'node_modules', 'dsh-orbital-agents'))).toBe(true)
-    // Challenger mounts the role tools row, so it links the package too.
-    expect(existsSync(join(root, 'challenger', 'node_modules', 'dsh-orbital-agents'))).toBe(true)
-    const agent = readFileSync(join(root, 'challenger', 'agent.cordis.yml'), 'utf8')
-    expect(agent).not.toMatch(/tool-subagent|send_message|subagent_fork/)
-    expect(agent).toMatch(/role: challenger/)
-    const plannerAgent = readFileSync(join(root, 'endeavour', 'agent.cordis.yml'), 'utf8')
-    expect(plannerAgent).toMatch(/role: endeavour/)
-    expect(readFileSync(join(root, 'challenger', 'preset.yml'), 'utf8')).toContain('Challenger')
-    const state = JSON.parse(readFileSync(join(home, '.dsh', 'backups', 'endeavour', latestStamp(home), 'state.json'), 'utf8'))
-    expect(state.presetExisted).toBe(false)
-    expect(state.presets.endeavour).toEqual({ dir: join(root, 'endeavour'), existed: false, owned: false })
-    expect(state.presets.challenger.existed).toBe(false)
+    // The first backup recorded the preset as present and owned.
+    expect(existsSync(join(presetDir(home, 'endeavour'), 'preset.yml'))).toBe(true)
+    expect(readFileSync(join(presetDir(home, 'endeavour'), '.dsh-endeavour-owned'), 'utf8')).toContain('dsh-orbital-agents')
   })
 
   it('refuses to migrate while a nonterminal legacy plan exists, with zero mutation', () => {
@@ -339,90 +367,23 @@ describe('installer lifecycle', () => {
     expect(readdirSync(backupRoot).filter((name) => name.startsWith('settings-'))).toHaveLength(1)
   })
 
-  it('repairs a Challenger preset that predates the role tools link', () => {
+  it('rolls back a retired owned preset to its prior present state', () => {
     const home = tempHome()
     seedProfile(home)
-    const file = tarball()
-    expect(installer(home, '--tarball', file).status).toBe(0)
-    const root = join(home, '.dsh', '.agent-presets')
-    // Simulate the pre-C3 Challenger install: preset present, no package link.
-    rmSync(join(root, 'challenger', 'node_modules'), { recursive: true, force: true })
-    expect(existsSync(join(root, 'challenger', 'node_modules', 'dsh-orbital-agents'))).toBe(false)
-    expect(installer(home, '--tarball', file).status).toBe(0)
-    expect(existsSync(join(root, 'challenger', 'node_modules', 'dsh-orbital-agents'))).toBe(true)
-    expect(readFileSync(join(root, 'challenger', 'agent.cordis.yml'), 'utf8')).toMatch(/role: challenger/)
-  })
-
-  it('upgrades a legacy Endeavour-only install and restores both sides', () => {
-    const home = tempHome()
-    seedProfile(home)
-    const file = tarball()
-    expect(installer(home, '--tarball', file).status).toBe(0)
-    const root = join(home, '.dsh', '.agent-presets')
-    // Simulate the pre-roster world: only the Endeavour preset is installed.
-    rmSync(join(root, 'challenger'), { recursive: true, force: true })
-    const upgraded = installer(home, '--tarball', file)
-    expect(upgraded.status).toBe(0)
-    expect(existsSync(join(root, 'endeavour'))).toBe(true)
-    expect(existsSync(join(root, 'challenger'))).toBe(true)
-    const stamp = /--rollback (\S+)/.exec(upgraded.stdout)?.[1]
-    expect(stamp).toBeTruthy()
-    // Rollback restores the state captured BEFORE that install: the legacy
-    // Endeavour preset stays, the newly added Challenger disappears.
-    expect(installer(home, '--rollback', stamp!).status).toBe(0)
-    expect(existsSync(join(root, 'endeavour'))).toBe(true)
-    expect(existsSync(join(root, 'challenger'))).toBe(false)
-  })
-
-  it('aborts on a foreign Challenger preset with zero partial mutation', () => {
-    const home = tempHome()
-    seedProfile(home)
-    const root = join(home, '.dsh', '.agent-presets')
-    mkdirSync(join(root, 'challenger'), { recursive: true })
-    writeFileSync(join(root, 'challenger', 'preset.yml'), 'name: MyOwnChallenger\n')
-    const refused = installer(home, '--tarball', tarball())
-    expect(refused.status).not.toBe(0)
-    // Nothing moved: no bundle row, no Endeavour preset, no foreign overwrite.
-    expect(manifest(home).dsh.profile.bundles).toEqual(['@deepseek-ai/dsh-base', 'dsh-context'])
-    expect(existsSync(join(root, 'endeavour'))).toBe(false)
-    expect(readFileSync(join(root, 'challenger', 'preset.yml'), 'utf8')).toBe('name: MyOwnChallenger\n')
-    expect(existsSync(join(home, '.dsh', 'backups', 'endeavour'))).toBe(false)
-  })
-
-  it('uninstalls every owned preset and preserves nothing foreign', () => {
-    const home = tempHome()
-    seedProfile(home)
+    seedOwnedPreset(home, 'challenger')
     expect(installer(home, '--tarball', tarball()).status).toBe(0)
-    expect(installer(home, '--uninstall').status).toBe(0)
-    const root = join(home, '.dsh', '.agent-presets')
-    expect(existsSync(join(root, 'endeavour'))).toBe(false)
-    expect(existsSync(join(root, 'challenger'))).toBe(false)
-    expect(manifest(home).dsh.profile.bundles).not.toContain('dsh-orbital-agents')
-  })
-
-  it('rolls back a missing owned preset to its prior present state', () => {
-    const home = tempHome()
-    seedProfile(home)
-    expect(installer(home, '--tarball', tarball()).status).toBe(0)
-    // Second mutation takes a backup with BOTH presets present.
-    // A second install takes its own backup (the replacement for the retired
-    // route CLI) with both presets present.
-    expect(installer(home, '--tarball', tarball()).status).toBe(0)
+    expect(existsSync(presetDir(home, 'challenger'))).toBe(false)
     const stamp = latestStamp(home)
-    const root = join(home, '.dsh', '.agent-presets')
-    rmSync(join(root, 'challenger'), { recursive: true, force: true })
     expect(installer(home, '--rollback', stamp).status).toBe(0)
-    expect(existsSync(join(root, 'endeavour', 'preset.yml'))).toBe(true)
-    expect(existsSync(join(root, 'challenger', 'preset.yml'))).toBe(true)
+    expect(existsSync(join(presetDir(home, 'challenger'), 'preset.yml'))).toBe(true)
+    expect(readFileSync(join(presetDir(home, 'challenger'), 'agent.cordis.yml'), 'utf8')).toBe('# legacy directory preset\n')
   })
 
   it('refuses an interrupted backup instead of restoring a mixed pair', () => {
     const home = tempHome()
     seedProfile(home)
-    expect(installer(home, '--tarball', tarball()).status).toBe(0)
-    // A later mutation captures a backup where BOTH presets existed.
-    // A second install takes its own backup (the replacement for the retired
-    // route CLI) with both presets present.
+    seedOwnedPreset(home, 'endeavour')
+    seedOwnedPreset(home, 'challenger')
     expect(installer(home, '--tarball', tarball()).status).toBe(0)
     const stamp = latestStamp(home)
     // Simulate an interrupted backup: the challenger copy never landed.
@@ -434,14 +395,15 @@ describe('installer lifecycle', () => {
     expect(manifest(home).dsh.profile.bundles).toContain('dsh-orbital-agents')
   })
 
-  it('rolls back partial changes when preset installation fails', () => {
+  it('rolls back partial changes when the package install fails', () => {
     const home = tempHome()
-    const profile = seedProfile(home)
-    rmSync(join(profile, 'node_modules', 'dsh-orbital-agents'), { recursive: true, force: true })
-    const result = installer(home, '--tarball', tarball())
+    seedProfile(home)
+    const bin = failingPnpmDir(home)
+    const result = installerWithPath(home, bin, '--tarball', tarball())
     expect(result.status).not.toBe(0)
+    expect(result.stderr).toContain('rolling back')
     expect(manifest(home).dsh.profile.bundles).toEqual(['@deepseek-ai/dsh-base', 'dsh-context'])
-    expect(existsSync(join(home, '.dsh', '.agent-presets', 'endeavour'))).toBe(false)
+    expect(existsSync(join(home, '.dsh', '.agent-presets'))).toBe(false)
   })
 })
 
@@ -468,10 +430,9 @@ function seedLegacyProfile(home: string, presetExists: boolean): string {
   writeFileSync(join(profile, 'cordis.patch.yml'), '# user patch layer\n[]\n')
   writeFileSync(join(profile, 'pnpm-workspace.yaml'), 'packages:\n  - .\n')
   if (presetExists) {
-    const preset = join(home, '.dsh', '.agent-presets', 'endeavour')
-    mkdirSync(join(preset, 'node_modules'), { recursive: true })
+    seedOwnedPreset(home, 'endeavour')
+    const preset = presetDir(home, 'endeavour')
     writeFileSync(join(preset, '.dsh-endeavour-owned'), `${LEGACY_PACKAGE}\n`)
-    writeFileSync(join(preset, 'preset.yml'), 'name: Endeavour\n')
     const target = join(profile, 'node_modules', LEGACY_PACKAGE)
     symlinkSync(target, join(preset, 'node_modules', LEGACY_PACKAGE), 'dir')
   }
@@ -530,11 +491,10 @@ describe('package rename migration', () => {
     expect(bundles).toContain(NEW_PACKAGE)
     expect(bundles).not.toContain(LEGACY_PACKAGE)
     expect(bundles).toContain('dsh-context')
-    for (const name of ['endeavour', 'challenger']) {
-      const preset = join(home, '.dsh', '.agent-presets', name)
-      expect(existsSync(join(preset, 'node_modules', NEW_PACKAGE))).toBe(true)
-      expect(existsSync(join(preset, 'node_modules', LEGACY_PACKAGE))).toBe(false)
-    }
+    // The presets now come from the bundle patch: no directory is written, and
+    // the predecessor's directory was never there to retire.
+    expect(existsSync(presetDir(home, 'endeavour'))).toBe(false)
+    expect(existsSync(presetDir(home, 'challenger'))).toBe(false)
     const log = readFileSync(join(home, 'pnpm.log'), 'utf8')
     expect(log).toContain('add ')
     expect(log).toContain(LEGACY_PACKAGE)
@@ -557,10 +517,8 @@ describe('package rename migration', () => {
     expect(Object.keys(dependencies)).not.toContain(LEGACY_PACKAGE)
     expect(Object.keys(dependencies)).toContain('dsh-context')
 
-    const preset = join(home, '.dsh', '.agent-presets', 'endeavour')
-    expect(existsSync(join(preset, 'node_modules', NEW_PACKAGE))).toBe(true)
-    expect(existsSync(join(preset, 'node_modules', LEGACY_PACKAGE))).toBe(false)
-    expect(readdirSync(join(preset, 'node_modules'))).toEqual([NEW_PACKAGE])
+    // The predecessor's owned directory preset, link included, is retired.
+    expect(existsSync(presetDir(home, 'endeavour'))).toBe(false)
 
     // The unrelated user-authored preset is never touched.
     const foreign = join(home, '.dsh', '.agent-presets', 'user-own')

@@ -6,13 +6,13 @@
  */
 
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { KNOWN_SESSION_EVENT_TYPES } from '@deepseek-ai/dsh-session'
 import { afterEach, describe, expect, it } from 'vitest'
 import { createPlanState, PlanId, planEventPayload, TaskId, type TaskSpec } from '../src/domain.js'
-import { markLine, parseZstdFrames, repairSessionEvents } from '../scripts/repair-session-events.mjs'
+import { markLine, parseZstdFrames, repairSessionEvents, singletonOwnerPid } from '../scripts/repair-session-events.mjs'
 import { admitEndeavourEvents } from '../src/index.js'
 
 const homes: string[] = []
@@ -183,5 +183,25 @@ describe('offline session repair', () => {
     expect(planEnvelopes.length).toBeGreaterThan(0)
     for (const envelope of planEnvelopes) expect(accepts(knownWithout, envelope)).toBe(true)
     expect(planEnvelopes[0]?.data.plan.tasks[0]?.spec.display.title).toBe('One')
+  })
+})
+
+describe('desktop-running guard', () => {
+  it('reads the owning pid from Electron single-instance lock', () => {
+    const home = tempHome()
+    const lock = join(home, 'SingletonLock')
+    symlinkSync('Nikitas-MacBook-Air.local-40377', lock)
+    expect(singletonOwnerPid(lock)).toBe(40377)
+  })
+
+  it('reports no owner for a missing, malformed or pid-less lock', () => {
+    const home = tempHome()
+    expect(singletonOwnerPid(join(home, 'absent'))).toBeUndefined()
+    const malformed = join(home, 'malformed')
+    symlinkSync('no-pid-here', malformed)
+    expect(singletonOwnerPid(malformed)).toBeUndefined()
+    const zero = join(home, 'zero')
+    symlinkSync('host-0', zero)
+    expect(singletonOwnerPid(zero)).toBeUndefined()
   })
 })

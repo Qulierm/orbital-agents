@@ -1,6 +1,8 @@
 # dsh-orbital-agents bundle patch: one host row over the active profile.
 # The row resolves from the profile's own node_modules after
 # `dsh plugin --profile desktop add <tarball>` installs this package.
+# The two agent presets are sibling patches this package also declares in
+# `dsh.bundle.patch` (presets/endeavour.patch.yml, presets/challenger.patch.yml).
 - insert:
     - id: endeavour
       name: dsh-orbital-agents

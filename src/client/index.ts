@@ -126,10 +126,23 @@ export function apply(ctx: ClientContext): void {
    */
   const sessionsService = (ctx as unknown as { get?: (name: string) => unknown }).get?.('sessions') as ISessions | undefined
 
-  /** Open one ordinary session by id (peer navigation; no subagent path). */
+  /**
+   * Open one ordinary session by id (peer navigation; no subagent path).
+   *
+   * Session selection left the Session Controller in the 0.1.7 line: its
+   * `ISessions.open` is gone and navigation now belongs to the Workspace view
+   * owner. `uiWorkspace.openSession` exists on both lines, so it leads; the
+   * retired `sessions.open` stays reachable for older hosts and fixtures.
+   */
   const openSession = (sessionId: string): void => {
-    if (sessionsService !== undefined) {
-      sessionsService.open(sessionId as SessionId)
+    const workspace = client.uiWorkspace
+    if (typeof workspace?.openSession === 'function') {
+      workspace.openSession(sessionId as SessionId)
+      return
+    }
+    const legacy = sessionsService as unknown as { open?: (id: SessionId) => void } | undefined
+    if (typeof legacy?.open === 'function') {
+      legacy.open(sessionId as SessionId)
       return
     }
     const sessions = client.sessions as unknown as { open?: (id: SessionId) => void } | undefined
@@ -227,8 +240,8 @@ export function apply(ctx: ClientContext): void {
   /**
    * Explicit peer-tab selection: reset the local view to Chat (so a return
    * never re-opens the peer), then open the exact counterpart ordinary session
-   * through the official ISessions.open. No spawn, no settings write, no model
-   * call, and no subagent address anywhere in the path.
+   * through `openSession`. No spawn, no settings write, no model call, and no
+   * subagent address anywhere in the path.
    */
   const selectPeerTab = (sessionId: string, openView?: (view: string, focus: string) => void): boolean => openPeerTab(sessionId, {
     resetChat: () => {
@@ -240,12 +253,7 @@ export function apply(ctx: ClientContext): void {
     },
     peer: faceOf(sessionId, 'endeavourPeer')?.getSnapshot(),
     openCounterpart: (counterpartId) => {
-      if (sessionsService !== undefined) {
-        sessionsService.open(counterpartId as SessionId)
-        return
-      }
-      const sessions = client.sessions as unknown as { open?: (id: SessionId) => void } | undefined
-      if (typeof sessions?.open === 'function') sessions.open(counterpartId as SessionId)
+      openSession(counterpartId)
     },
     transientActivation: hasTransientUserActivation(),
   })

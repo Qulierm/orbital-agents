@@ -139,7 +139,7 @@ describe('restart safety contract', () => {
   it('forbids the wait-after-schedule pattern in the Challenger persona', () => {
     const raw = readFileSync(join(REPO, 'preset', 'challenger', 'agent.cordis.yml'), 'utf8')
     const persona = raw.replace(/\s+/g, ' ')
-    expect(persona).toContain('$HOME/.dsh/.agent-presets/challenger/node_modules/dsh-orbital-agents/scripts/schedule-desktop-restart.mjs')
+    expect(persona).toContain('$HOME/.dsh/profiles/desktop/node_modules/dsh-orbital-agents/scripts/schedule-desktop-restart.mjs')
     expect(persona).toMatch(/never sleep, tail, poll processes or check ports/i)
     expect(persona).toMatch(/restart scheduled/i)
     expect(persona).toMatch(/final task/i)
@@ -174,13 +174,13 @@ describe('restart safety contract', () => {
     expect(persona).toContain('`challenger_report`')
     expect(persona).not.toContain('builder_report')
     // The scoped row still mounts exactly the two protocol tools for this role.
-    expect(persona).toMatch(/name: '\.\/node_modules\/dsh-orbital-agents\/lib\/tools-plugin\.js' config: role: challenger/)
+    expect(persona).toMatch(/name: 'dsh-orbital-agents\/tools' config: role: challenger/)
   })
 
   it('documents the manual-versus-scheduled restart distinction', () => {
     const readme = readFileSync(join(REPO, 'README.md'), 'utf8')
     const install = readFileSync(join(REPO, 'docs', 'install.md'), 'utf8')
-    expect(readme).toContain('$HOME/.dsh/.agent-presets/challenger/node_modules/dsh-orbital-agents/scripts/schedule-desktop-restart.mjs')
+    expect(readme).toContain('$HOME/.dsh/profiles/desktop/node_modules/dsh-orbital-agents/scripts/schedule-desktop-restart.mjs')
     expect(install).toMatch(/schedule-desktop-restart|restart scheduled/i)
   })
 })

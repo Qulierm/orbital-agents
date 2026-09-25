@@ -20,8 +20,9 @@
 
 import { execFileSync, spawnSync } from 'node:child_process'
 import {
-  closeSync, copyFileSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, statSync, unlinkSync, writeFileSync,
+  closeSync, copyFileSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, readdirSync, readlinkSync, renameSync, statSync, unlinkSync, writeFileSync,
 } from 'node:fs'
+import { homedir } from 'node:os'
 import { join, relative } from 'node:path'
 
 /** Event type this repair owns. */
@@ -31,11 +32,57 @@ export const EVENT_TYPES = ['endeavour/plan', 'endeavour/peer']
 /** Exact text inserted after the type field. */
 export const MARKER_TEXT = ',"ignorable":true'
 
-/** Whether DSH Desktop is currently running. */
+/** Electron's single-instance lock; its link target names the owning host and pid. */
+export const SINGLETON_LOCK_PATH = join(homedir(), 'Library', 'Application Support', 'DSH Desktop', 'SingletonLock')
+
+/**
+ * Read the live owner pid from the app's single-instance lock.
+ *
+ * Electron points the lock at `<hostname>-<pid>` while it runs and removes it on
+ * a clean exit, so the pid is the authoritative answer; liveness is checked
+ * separately because a crash leaves the link behind.
+ * @param lockPath - lock link to read; defaults to the installed app's lock.
+ * @returns the owner pid, or undefined when no lock names a positive one.
+ */
+export function singletonOwnerPid(lockPath = SINGLETON_LOCK_PATH) {
+  try {
+    const target = readlinkSync(lockPath)
+    const pid = Number(target.slice(target.lastIndexOf('-') + 1))
+    return Number.isInteger(pid) && pid > 0 ? pid : undefined
+  } catch {
+    // No lock (never started or cleanly exited) or an unreadable link: no owner.
+    return undefined
+  }
+}
+
+function pidAlive(pid) {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch {
+    // ESRCH means the recorded owner is gone; EPERM would still mean it exists
+    // under another account, which cannot happen for this per-user app.
+    return false
+  }
+}
+
+/**
+ * Whether DSH Desktop is currently running.
+ *
+ * macOS `pgrep -f` does not match the app's main process — its kernel command
+ * name is truncated and its argument list is unreported — so matching the
+ * executable path alone reports a running app as stopped, which would let a
+ * write-mode repair rewrite live session logs. The Helper processes exist only
+ * while it runs, and the single-instance lock names the live owner, so either
+ * signal is enough.
+ * @returns true when any of the two independent signals reports the app.
+ */
 export function desktopRunning() {
   if (process.env.DSH_ENDEAVOUR_TEST_NO_DESKTOP === '1') return false
-  const result = spawnSync('pgrep', ['-f', '/Applications/DSH Desktop.app/Contents/MacOS/DSH Desktop'], { encoding: 'utf8' })
-  return result.status === 0 && (result.stdout ?? '').trim() !== ''
+  const helpers = spawnSync('pgrep', ['-f', 'DSH Desktop Helper'], { encoding: 'utf8' })
+  if (helpers.status === 0 && (helpers.stdout ?? '').trim() !== '') return true
+  const owner = singletonOwnerPid()
+  return owner !== undefined && pidAlive(owner)
 }
 
 const ZSTD_MAGIC = Buffer.from([0x28, 0xb5, 0x2f, 0xfd])

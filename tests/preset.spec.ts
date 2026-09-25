@@ -3,7 +3,10 @@
 import { readFileSync } from 'node:fs'
 import { load } from 'js-yaml'
 import { describe, expect, it } from 'vitest'
-import { checkPreset, loadRows, STANDARD_PRESET_PATH, TOOLS_ROW_NAME } from '../scripts/preset-check.ts'
+import { PRESET_IDS, renderPresetPatch } from '../scripts/build-presets.mjs'
+import {
+  checkPreset, COMPOSITION_SCHEMA, loadRows, loadStandardRows, STANDARD_PRESET_PATH, TOOLS_ROW_NAME,
+} from '../scripts/preset-check.ts'
 
 describe('Endeavour preset', () => {
   it('passes every contract and drift check', () => {
@@ -22,7 +25,7 @@ describe('Endeavour preset', () => {
 
   it('retains the full standard composition plus the scoped tools row', () => {
     const ours = loadRows('preset/endeavour/agent.cordis.yml') as { id?: string; name?: string }[]
-    const standard = loadRows(STANDARD_PRESET_PATH) as { id?: string; name?: string }[]
+    const standard = loadStandardRows() as { id?: string; name?: string }[]
     for (const row of standard) {
       expect(ours.some((candidate) => candidate.id === row.id && candidate.name === row.name)).toBe(true)
     }
@@ -43,5 +46,24 @@ describe('Endeavour preset', () => {
     expect(standard).not.toContain('You are Endeavour')
     expect(standard).not.toContain('dsh-orbital-agents')
     expect(standard).not.toContain('dsh-endeavour')
+  })
+})
+
+describe('generated preset patches', () => {
+  it('projects each preset source into the single insert row the bundle ships', () => {
+    for (const id of PRESET_IDS) {
+      const patch = load(renderPresetPatch(process.cwd(), id), { schema: COMPOSITION_SCHEMA }) as {
+        insert?: { id?: string; name?: string; config?: { id?: string; order?: number; plugins?: unknown } }[]
+      }[]
+      expect(patch).toHaveLength(1)
+      expect(patch[0]?.insert).toHaveLength(1)
+      const row = patch[0]?.insert?.[0]
+      expect(row?.id).toBe(`preset-${id}`)
+      expect(row?.name).toBe('@deepseek-ai/dsh-agent-preset')
+      expect(row?.config?.id).toBe(id)
+      expect(row?.config?.order).toBeGreaterThan(0)
+      // The composition rows survive the projection byte for byte.
+      expect(row?.config?.plugins).toEqual(loadRows(`preset/${id}/agent.cordis.yml`))
+    }
   })
 })

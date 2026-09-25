@@ -48,10 +48,10 @@ Rules:
   first, then schedule it in ONE Bash call that returns immediately:
 
   ```
-  node "$HOME/.dsh/.agent-presets/challenger/node_modules/dsh-orbital-agents/scripts/schedule-desktop-restart.mjs" --delay-seconds 45
+  node "$HOME/.dsh/profiles/desktop/node_modules/dsh-orbital-agents/scripts/schedule-desktop-restart.mjs" --delay-seconds 45
   ```
 
-  The path goes through the owned Challenger preset link, so it works from any
+  The path points at the package the desktop profile installed, so it works from any
   working directory.
 
   It prints a schedule id and the durable log path under

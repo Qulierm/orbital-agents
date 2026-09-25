@@ -9,9 +9,11 @@ The **Endeavour** agent investigates, writes the plan, and verifies results. Its
 durable protocol. The pair is created once and reused for every later plan, so the two agents stay in
 the same orbit instead of being re-spawned per task.
 
-- Target runtime: DeepSeek Harness **v0.1.5-rc.2** (Cordis 4.0.2), the family bundled by the
-  third-party community **DSH Desktop v2.0.11**. This is a community integration; it is not an
-  official DeepSeek product.
+- Target runtime: DeepSeek Harness **v0.1.7-rc.1** (Cordis 4.0.4), the family bundled by the
+  third-party community **DSH Desktop v2.0.14**. Harness 0.1.7 replaced directory agent presets with
+  composition rows and moved session navigation to the Workspace view owner, so earlier harness
+  releases are no longer supported. This is a community integration; it is not an official DeepSeek
+  product.
 - The global bundle only provides the durable orchestration service. The four model-facing tools are
   registered by the scoped `dsh-orbital-agents/tools` row of the **Endeavour** preset, so the standard
   preset never sees them.
@@ -52,12 +54,14 @@ cd orbital-agents
 pnpm install --frozen-lockfile
 pnpm run build
 pnpm pack
-node scripts/install-local.mjs --tarball ./dsh-orbital-agents-0.2.4.tgz
+node scripts/install-local.mjs --tarball ./dsh-orbital-agents-0.2.5.tgz
 ```
 
 The installer backs up the desktop profile and any existing user preset first, installs the package
-into `~/.dsh/profiles/desktop`, preserves existing plugin order, and installs the owned user presets
-at `~/.dsh/.agent-presets/endeavour` and `~/.dsh/.agent-presets/challenger`. Re-running it is
+into `~/.dsh/profiles/desktop`, and preserves existing plugin order. The two agent presets ship inside
+the package as bundle patches (`presets/endeavour.patch.yml`, `presets/challenger.patch.yml`), so no
+preset directory is written; an upgrade retires the ownership-marked directories earlier releases
+installed under `~/.dsh/.agent-presets`. Re-running it is
 idempotent; a changed tarball at the same name/version still refreshes the installed artifact
 (remove-before-add). See [docs/install.md](docs/install.md) for the full lifecycle.
 
@@ -69,8 +73,8 @@ inspected or fetched by version instead of building it locally:
 
 ```sh
 npm view dsh-orbital-agents version # latest published version
-npm pack dsh-orbital-agents@0.2.4   # download exactly the published tarball
-node scripts/install-local.mjs --tarball ./dsh-orbital-agents-0.2.4.tgz
+npm pack dsh-orbital-agents@0.2.5   # download exactly the published tarball
+node scripts/install-local.mjs --tarball ./dsh-orbital-agents-0.2.5.tgz
 ```
 
 `npm pack` writes the published tarball into the current directory, and the installer is run from a
@@ -146,7 +150,7 @@ must be scheduled before anything is reported.
 - **Manual:** quit and reopen DSH Desktop yourself (`osascript -e 'quit app "DSH Desktop"'`, then
   `open "/Applications/DSH Desktop.app"`), or just use the app's own quit. Nothing else is needed.
 - **Agent-safe scheduling:** the packaged helper
-  `node "$HOME/.dsh/.agent-presets/challenger/node_modules/dsh-orbital-agents/scripts/schedule-desktop-restart.mjs" --delay-seconds 45` validates macOS, writes its log under
+  `node "$HOME/.dsh/profiles/desktop/node_modules/dsh-orbital-agents/scripts/schedule-desktop-restart.mjs" --delay-seconds 45` validates macOS, writes its log under
   `~/.dsh/backups/endeavour/restarts`, spawns a detached worker and returns **immediately** with a
   schedule id and the log path. The worker waits, quits the app, waits for the old process to leave,
   reopens the bundle and records `ready` or `failed` in that log.
