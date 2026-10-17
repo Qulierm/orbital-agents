@@ -55,9 +55,17 @@ if (registrations.has('@deepseek-ai/dsh-client-hmr') !== hmrChecked) {
 }
 
 const requested = []
+const react = {
+  useState: () => [],
+  useEffect: () => undefined,
+  createElement: () => null,
+  Fragment: null,
+  Component: class { setState() {} },
+}
 const exports = registration.factory((id) => {
   requested.push(id)
-  if (id === 'react' || id === 'react/jsx-runtime') return { useState: () => [], useEffect: () => undefined, createElement: () => null, jsx: () => null, jsxs: () => null, Fragment: null }
+  if (id === 'react') return react
+  if (id === 'react/jsx-runtime') return { jsx: () => null, jsxs: () => null, Fragment: null }
   if (id === 'react-dom') return { createPortal: (node) => node }
   throw new Error(`unexpected loader require "${id}"`)
 })
@@ -65,6 +73,26 @@ if (typeof exports.apply !== 'function') throw new Error('factory exports missin
 if (!Array.isArray(exports.inject)) throw new Error('factory exports missing inject array')
 if (/^\s*(?:import|export)\b/m.test(code)) throw new Error('artifact contains top-level ESM syntax')
 
+const slotRegistrations = []
+exports.apply({
+  effect: () => undefined,
+  locale: { register: () => undefined },
+  uiConversation: { events: { register: () => undefined }, views: { register: () => undefined } },
+  modelDirectories: { directoryFor: () => undefined },
+  sessions: { binding: () => undefined, list: { getSnapshot: () => ({ current: 'session-root' }), subscribe: () => () => undefined } },
+  slots: {
+    inject: (_name, callback) => { callback() },
+    register: (options) => { slotRegistrations.push(options); return () => undefined },
+  },
+})
+const challenger = slotRegistrations.filter((entry) => entry.id === 'endeavour-challenger-model')
+if (challenger.length !== 1 || challenger[0].name !== 'conversation.input.right' || challenger[0].order !== 1000) {
+  throw new Error('artifact did not register exactly one Challenger selector in the ordered trailing-controls list')
+}
+if (slotRegistrations.some((entry) => entry.name === 'conversation.input.model')) {
+  throw new Error('artifact registered in the host-owned single-occupancy model seat')
+}
+
 console.log(`artifact-smoke: PASS ${path}`)
 console.log(`  sha256=${hash}`)
-console.log(`  id=${EXPECTED_ID}; requires=${[...new Set(requested)].join(',')}; hmr-coexistence=${hmrChecked ? 'checked' : 'skipped (app artifact absent)'}`)
+console.log(`  id=${EXPECTED_ID}; requires=${[...new Set(requested)].join(',')}; hmr-coexistence=${hmrChecked ? 'checked' : 'skipped (app artifact absent)'}; right-list=conversation.input.right`)

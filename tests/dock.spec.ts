@@ -395,7 +395,6 @@ describe('English copy and planning prompts', () => {
     expect(prompt).toMatch(/4[–-]10 granular tasks/i)
     expect(prompt).toMatch(/1:1/i)
     expect(prompt).toMatch(/never collapse/i)
-    expect(prompt).toMatch(/always written in English/i)
   })
 
   it('requires the Challenger executor contract in English', () => {

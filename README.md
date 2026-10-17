@@ -28,9 +28,8 @@ the same orbit instead of being re-spawned per task.
    bundle row and the presets are loaded:
    `osascript -e 'quit app "DSH Desktop"'` then `open "/Applications/DSH Desktop.app"`.
 2. Start a **New Chat** and pick the **Endeavour** preset.
-3. Choose the planning model normally in the composer (ordinary model selection), and use the
-   unified model control — one icon-only button that opens Model/Thinking rows for **Endeavour** and
-   **Challenger** separately.
+3. Choose the planning model with the host's native Endeavour selector; use the compact
+   **Challenger** selector beside it to choose Challenger's Model and Effort independently.
 4. Describe the task in ordinary language and send it. This is the only step that needs provider
    credentials.
 5. Watch the plan card in the Endeavour chat: progress, the durable task states, a live timer per
@@ -58,7 +57,7 @@ cd orbital-agents
 pnpm install --frozen-lockfile
 pnpm run build
 pnpm pack
-node scripts/install-local.mjs --tarball ./dsh-orbital-agents-0.2.7.tgz
+node scripts/install-local.mjs --tarball ./dsh-orbital-agents-0.2.8.tgz
 ```
 
 The installer backs up the desktop profile and any existing user preset first, installs the package
@@ -72,13 +71,13 @@ idempotent; a changed tarball at the same name/version still refreshes the insta
 ## npm package
 
 The same source is published to the public npm registry as
-[`dsh-orbital-agents`](https://www.npmjs.com/package/dsh-orbital-agents) (MIT), so the released artifact can be
-inspected or fetched by version instead of building it locally:
+[`dsh-orbital-agents`](https://www.npmjs.com/package/dsh-orbital-agents) (MIT), so a released artifact can be
+inspected or fetched by version instead of building it locally. After v0.2.8 is available on npm:
 
 ```sh
 npm view dsh-orbital-agents version # latest published version
-npm pack dsh-orbital-agents@0.2.7   # download exactly the published tarball
-node scripts/install-local.mjs --tarball ./dsh-orbital-agents-0.2.7.tgz
+npm pack dsh-orbital-agents@0.2.8   # download the published 0.2.8 tarball
+node scripts/install-local.mjs --tarball ./dsh-orbital-agents-0.2.8.tgz
 ```
 
 `npm pack` writes the published tarball into the current directory, and the installer is run from a
@@ -169,22 +168,16 @@ acts.
 
 ## Model selection
 
-The composer carries one unified control: a single icon-only button (id `endeavour-models`) that opens
-a menu with an **Endeavour** section and a **Challenger** section, each with its own **Model** and
-**Thinking** rows. Both roles are configured from that one menu and stay independent:
+The composer keeps the host's native Endeavour selector in DSH's single-occupancy model seat and adds one custom **Challenger** selector (`endeavour-challenger-model`) in the trailing-controls list beside it. The native selector is never hidden, restyled or replaced. The custom button stays labelled `Challenger`; its tooltip and accessible description carry the current model, effort and pending status.
 
-- every read, subscription, catalog load and write goes through the official model directory of the
-  target session — the Endeavour session the control is rendered in, and its paired Challenger;
-- choosing a model writes through that role's directory and resets only that role's thinking effort
-  to the model's catalog default;
-- the host's native Endeavour selector is hidden by CSS only while the unified control is rendered,
-  so Standard and unpaired chats keep their ordinary selector;
-- while a plan is active the whole control is disabled, which keeps every route frozen for the run.
+- An explicit Endeavour root can use the custom selector before a Challenger peer exists. It reads the root's current selection and catalog for an inherited starting value, without writing to the root.
+- A choice made before the peer is ready is saved in this desktop browser's local storage, scoped to the browser origin and exact Endeavour root session. The pending record contains only the provider, model and optional effort; it is not synchronized with the DSH host or other browser origins.
+- When the validated Challenger peer becomes ready, the control applies the matching pending choice through that peer's model directory. A successful application removes only that revision; an application or storage error stays visible and retryable.
+- Once paired, reads, subscriptions, catalog loads and writes use the validated Challenger directory. Choosing a model resets only Challenger's effort to the catalog default; choosing an effort preserves its model.
+- The control remains enabled during plans and running turns. An applied choice affects requests assembled after application; it does not guarantee a request already begun will use the new model, or change the plan's routing or task state.
+- Pending writes and cleanup require native Web Locks in a secure context; without them, operations fail closed. Reload every open DSH tab after updating so each uses the lock-enabled code. It coordinates only updated tabs on the same origin and key, not older tabs or arbitrary `localStorage` writers; see [configuration](docs/configuration.md#pending-selection-storage).
 
-A temporary gap in the paired-session projection cannot unmount the control: admission is latched
-after the pair is first seen, and the validated Challenger identity is retained, so a role whose
-model directory is briefly unavailable shows a local unavailable/retry state instead of a vanished
-control. See [docs/configuration.md](docs/configuration.md).
+The selector appears only for an admitted Endeavour root; Standard sessions, known subagents and Challenger-side sessions do not receive it. The model directory may need a live scope and UI binding, so the selector can retain the exact validated Challenger while it is mounted and show a local retry state if that peer is unavailable. See [docs/configuration.md](docs/configuration.md) for the storage and application details.
 
 ## Lifecycle
 
@@ -209,18 +202,17 @@ offline renders or mock-ups.
 
 ### A live plan
 
-![The plan card for a running plan: one Finished row, the Working row with its timer, two Waiting rows, and the composer below](assets/screenshots/plan-running.png)
+![The plan card for an active plan: one Finished row, the Working row with its timer, one Waiting row, and the composer below](assets/screenshots/plan-running.png)
 
 The card tracks the plan as it happens: a green check on the row the Challenger
 has already reported, the blue animated ring with a live timer on the row it is
 working on, and gray rings on the rows still waiting to start.
 
-### The unified model menu
+### The Challenger Model and Effort menu
 
-![The model menu open with an Endeavour section and a Challenger section, each with Model and Effort rows](assets/screenshots/model-menu.png)
+![The compact Challenger Model and Effort menu beside the composer, showing GPT-6-Luna and High](assets/screenshots/model-menu.png)
 
-One control configures both ordinary sessions of the pair: the Endeavour section
-and the Challenger section each carry their own Model and Effort.
+The compact menu shows the Challenger model and reasoning effort beside the composer. The selector behavior, including local pending choices and their timing limits, is described in [Model selection](#model-selection).
 
 ### The paired sessions
 

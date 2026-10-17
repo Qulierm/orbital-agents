@@ -19,6 +19,7 @@ const DECLARATION = join(REPO, 'screenshots.json')
 const SCREENSHOT_DIR = join(REPO, 'assets', 'screenshots')
 const CAPTURE = join(REPO, 'scripts', 'screenshots', 'capture.mjs')
 const HARNESS = join(REPO, 'scripts', 'screenshots', 'harness.tsx')
+const THEME = join(REPO, 'scripts', 'screenshots', 'theme.css')
 const README = join(REPO, 'README.md')
 
 /** The registry caps a declaration at 8 images. */
@@ -100,7 +101,21 @@ describe('screenshot harness', () => {
   it('renders the real components rather than reimplementations', () => {
     const harness = readFileSync(HARNESS, 'utf8')
     expect(harness).toContain("from '../../src/client/PlanView.js'")
+    expect(harness).toContain('ChallengerModelControl')
     expect(harness).toContain("from '../../src/client/UnifiedModelControl.js'")
+    // The offline composition keeps a clearly marked NATIVE selector in the
+    // model seat beside the custom control, so a capture can never claim the
+    // native seat was replaced. The custom control occupies the trailing-controls
+    // seat, which the host renders immediately before the model seat.
+    expect(harness).toContain('data-native-model-selector')
+    // The native reference is explicitly a FIXTURE, never claimed as the real
+    // component, and it reproduces the installed geometry.
+    expect(harness).toContain('data-native-selector-fixture')
+    expect(harness).toContain('Native ModelSelect reference (fixture)')
+    expect(harness).toContain("data-slot=\"conversation.input.right\"")
+    expect(harness).toContain("data-slot=\"conversation.input.model\"")
+    expect(harness.indexOf('data-slot="conversation.input.right"'))
+      .toBeLessThan(harness.indexOf('data-slot="conversation.input.model"'))
     expect(harness).toContain("from '../../src/client/styles.js'")
     // Frozen clock: every timer string is deterministic.
     expect(harness).toContain('static override now()')
@@ -113,6 +128,60 @@ describe('screenshot harness', () => {
     }
     expect(harness).toContain("'interrupted'")
     expect(harness).toContain("outcome: 'completed'")
+  })
+
+  it('provides no-peer, active-work, neutral-open and keyboard acceptance scenes', () => {
+    const harness = readFileSync(HARNESS, 'utf8')
+    const capture = readFileSync(CAPTURE, 'utf8')
+    for (const scene of ['challenger-no-peer', 'challenger-active-work', 'challenger-menu-neutral', 'challenger-menu-keyboard']) {
+      expect(harness, `harness scene ${scene}`).toContain(`'${scene}':`)
+      expect(capture, `capture scene ${scene}`).toContain(`name: '${scene}'`)
+    }
+    expect(harness).toContain('sourceSnapshot: () => DRAFT_SOURCE')
+    expect(harness).toContain('running: options.activeWork === true')
+    expect(harness).toContain("'challenger-menu-neutral': () => {")
+    expect(harness).toContain("'challenger-menu-keyboard': () => {")
+    expect(harness).toContain("new KeyboardEvent('keydown', { key: 'ArrowDown'")
+    const neutralStart = harness.indexOf("'challenger-menu-neutral': () => {")
+    const keyboardStart = harness.indexOf("'challenger-menu-keyboard': () => {")
+    expect(neutralStart).toBeGreaterThan(-1)
+    expect(keyboardStart).toBeGreaterThan(neutralStart)
+    expect(harness.slice(neutralStart, keyboardStart)).not.toContain('KeyboardEvent')
+    expect(harness.slice(neutralStart, keyboardStart)).not.toContain('PointerEvent')
+  })
+
+  it('keeps the native reference geometry and all consumed theme tokens', () => {
+    const harness = readFileSync(HARNESS, 'utf8')
+    const theme = readFileSync(THEME, 'utf8')
+    const styles = readFileSync(join(REPO, 'src', 'client', 'styles.ts'), 'utf8')
+    expect(harness).toContain('height: 28')
+    expect(harness).toContain('height: 34')
+    expect(harness).toContain('Native ModelSelect reference (fixture)')
+    const consumed = new Set([...`${harness}\n${styles}`.matchAll(/var\((--[\w-]+)/g)].map((match) => match[1]!))
+    const declared = new Set([...`${theme}\n${styles}`.matchAll(/^\s*(--[\w-]+)\s*:/gm)].map((match) => match[1]!))
+    const missing = [...consumed].filter((token) => !declared.has(token)).sort()
+    expect(missing).toEqual(['--dsw-focus-ring-color'])
+    expect(styles).toContain('var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary))')
+  })
+
+  it('pins the native per-element elevation cascade and translucent menu marker', () => {
+    const harness = readFileSync(HARNESS, 'utf8')
+    const theme = readFileSync(THEME, 'utf8')
+    const capture = readFileSync(CAPTURE, 'utf8')
+    expect(theme).toMatch(/body,\s*body \*\s*\{[\s\S]*?--dsw-elevation-stroke:/)
+    for (const elevation of ['stroke', 'panel', 'prominent', 'soft']) {
+      expect(theme).toContain(`--dsw-elevation-${elevation}:`)
+    }
+    expect(theme).toContain('body[data-ds-dark-theme] [data-menu-material] {\n  --dsw-elevation-stroke-color: var(--dsw-alias-border-l3);')
+    expect(theme).toContain('[data-native-menu-fixture] {\n  --dsw-elevation-stroke-color: var(--dsw-alias-border-l1);')
+    expect(theme).toContain('--dsw-alias-border-l1: rgba(0, 0, 0, 0.04);')
+    expect(theme).toContain('body:not([data-ds-dark-theme]) {')
+    expect(capture).toContain("{ name: 'challenger-measure', width: 760, height: 430 }")
+    expect(harness).toMatch(/data-native-menu-fixture=""\s*data-menu-material="translucent"/)
+    expect(harness).toContain("style.getPropertyValue('--dsw-elevation-stroke-color')")
+    expect(harness).toContain('boxShadow: style.boxShadow')
+    expect(harness).toContain("document.body.removeAttribute('data-ds-dark-theme')")
+    expect(harness).toContain("'challenger-menu-neutral': () => modelControl({ referenceMenu: true })")
   })
 })
 
@@ -169,6 +238,6 @@ describe('published package isolation', () => {
     expect(manifest.files.some((entry) => entry.includes('screenshots'))).toBe(false)
     // No script entry and no version change came with the screenshots.
     expect(Object.keys(manifest.scripts)).not.toContain('screenshots')
-    expect(manifest.version).toBe('0.2.7')
+    expect(manifest.version).toBe('0.2.8')
   })
 })

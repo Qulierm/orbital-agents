@@ -14,12 +14,23 @@ import { registerPlanDock } from './PlanDock.js'
 import type { ISessions } from '@deepseek-ai/dsh-api-session-controller/client'
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 import {
-  UnifiedModelControl,
+  ChallengerModelControl,
   type UnifiedModelController,
   type UnifiedRole,
   type UnifiedRoleController,
+  type UnifiedRoleLease,
   type UnifiedSelection,
+  type UnifiedModelSourceSnapshot,
 } from './UnifiedModelControl.js'
+import { createPendingChallengerSelectionStore, type ChallengerSelectionLockProvider, type PendingChallengerSelectionSnapshot } from './challenger-selection-store.js'
+
+const browserSelectionLockProvider: ChallengerSelectionLockProvider = {
+  request: (name, options, callback) => {
+    const locks = typeof window === 'undefined' ? undefined : window.navigator?.locks
+    if (locks === undefined || typeof locks.request !== 'function') return Promise.reject(new Error('Web Locks API is unavailable.'))
+    return locks.request(name, { mode: 'exclusive', signal: options.signal }, () => callback())
+  },
+}
 
 /**
  * The official ModelDirectory resolver fails loud for a session that has no live
@@ -34,6 +45,36 @@ export function isUnavailableSessionError(error: unknown): boolean {
   return /ui-model-selection: session ".*" resolved no (?:scope|binding)/.test(error.message)
 }
 
+/**
+ * Retention face of the installed Session Controller. The repository dev types
+ * predate `retain`, so this narrow structural view names exactly what the bridge
+ * calls; the installed package is the runtime authority for its behavior. A host
+ * without `retain` keeps the pre-retain directory behavior.
+ */
+interface SessionsRetention {
+  readonly retain?: (target: SessionId, options: { readonly source: string }) => {
+    readonly ready: Promise<unknown>
+    readonly release: () => void
+  }
+}
+
+/**
+ * Retention source this menu owns the peer under. Distinct per owner so the
+ * reference count and the release that decrements it stay attributable.
+ */
+export const MODEL_MENU_RETENTION_SOURCE = 'orbitalModelMenu'
+
+/**
+ * Composer seat the Challenger selector registers in.
+ *
+ * The neighbouring `conversation.input.model` seat is single-occupancy and DSH's
+ * own Endeavour selector already holds it, so a second registration at the same
+ * priority is rejected. That rejection happens while this plugin activates, so it
+ * fails the whole client module rather than one control. This seat is a `list`:
+ * several controls coexist and `order` sequences them.
+ */
+export const CHALLENGER_MODEL_SEAT = 'conversation.input.right'
+
 /** Structural view of the official ModelDirectory the native selector uses. */
 interface DirectoryLike {
   readonly store?: {
@@ -43,7 +84,7 @@ interface DirectoryLike {
     subscribe?(listener: () => void): () => void
   }
   load?(): Promise<unknown>
-  select?(selection: { provider: string; model: string; reasoningEffort?: string }): Promise<void>
+  select?(selection: { provider: string; model: string; reasoningEffort?: string }): Promise<unknown> | unknown
 }
 import { en, NS, type EndeavourKey } from './locales.js'
 import { ensurePlanStyles } from './styles.js'
@@ -78,7 +119,7 @@ interface ClientServices {
         subscribe?(listener: () => void): () => void
       }
       load?(): Promise<unknown>
-      select?(selection: { provider: string; model: string; reasoningEffort?: string }): Promise<void>
+      select?(selection: { provider: string; model: string; reasoningEffort?: string }): Promise<unknown> | unknown
     } | undefined
   }
   readonly uiConversation: {
@@ -96,6 +137,8 @@ interface ClientServices {
     open?: (id: SessionId) => void
     readonly binding?: (sessionId: string) => {
       readonly session?: {
+        readonly header?: { readonly origin?: string }
+        readonly meta?: { readonly origin?: string }
         readonly projections?: { readonly faceOf?: (key: string) => PeerProjectionFace | undefined }
       }
     } | undefined
@@ -260,14 +303,10 @@ export function apply(ctx: ClientContext): void {
 
 
   /**
-   * Unified model bridge: ONE controller over the official ModelDirectory each
-   * ordinary session of the pair owns — the Endeavour session this control is
-   * rendered in, and its paired Challenger. Every read, subscription, catalog
-   * load and write resolves its own `modelDirectories.directoryFor(id)`, so the
-   * two roles never share mutable selection state, no catalog is mutated, and
-   * no peer session is created or recreated. Identity is memoized per Endeavour
-   * session so renders and HMR never swap the stores out from under the
-   * component.
+   * Per-root model bridge. The Endeavour directory supplies inherited selection
+   * and catalog reads before a validated peer exists; Challenger writes resolve
+   * only the exact peer id named by a valid Endeavour-side checkpoint. Pending
+   * choices are browser-local, and controller identity is memoized per root.
    *
    * `directoryFor` FAILS LOUD for a session without a live scope or UI binding,
    * and that condition is transient for a paired peer (it can be alive without
@@ -279,44 +318,81 @@ export function apply(ctx: ClientContext): void {
   const unifiedModels = (sessionId: string): UnifiedModelController => {
     const existing = unifiedControllers.get(sessionId)
     if (existing !== undefined) return existing
-    // The paired Challenger id is RETAINED once a validated Endeavour-side
-    // projection has named it. The projection can publish null, a half-written
-    // snapshot or a forged one at any time (the composer re-renders on its own
-    // state), and re-resolving the target on every directory operation would
-    // drop the peer mid-interaction. Only fully validated data for THIS root may
-    // set or refresh the id — never an arbitrary fallback session.
+    // Only a fully validated Endeavour-side checkpoint may name the write target.
+    // Once latched, that exact id survives transient projection gaps; no id is
+    // derived from a root or guessed when no checkpoint has named a peer.
     let retainedChallengerId: string | undefined
+    const peerFace = faceOf(sessionId, 'endeavourPeer')
+    const validatedPeer = (): { readonly role: 'endeavour' | 'challenger'; readonly counterpartId: string } | undefined => {
+      const state = (peerFace?.getSnapshot() ?? null) as PeerState | null
+      if (state === null || validatePeerState(state).length > 0) return undefined
+      return peerView(state, sessionId) ?? undefined
+    }
     const challengerId = (): string | undefined => {
-      const peer = faceOf(sessionId, 'endeavourPeer')?.getSnapshot() as PeerState | null | undefined
-      const candidate = peer ?? null
-      if (candidate !== null && validatePeerState(candidate).length === 0) {
-        const view = peerView(candidate, sessionId)
-        // A validated snapshot for the OTHER side (or another root) is ignored.
-        if (view?.role === 'endeavour') retainedChallengerId = view.counterpartId
-      }
+      const view = validatedPeer()
+      if (view?.role === 'endeavour') retainedChallengerId = view.counterpartId
+      else if (view?.role === 'challenger') retainedChallengerId = undefined
       return retainedChallengerId
     }
-    /**
-     * Persistent admission, owned by this per-session controller so it survives
-     * component remounts (a React ref would not). Admission is granted only when
-     * BOTH facts hold at the same moment for THIS session: an explicit
-     * `endeavour` preset selection and a fully validated peer view whose role for
-     * this exact session id is the Endeavour side. After that, transient null or
-     * malformed snapshots are ignored; the only revocation is an explicit,
-     * non-null preset that is not `endeavour`.
-     */
+    const isKnownSubagent = (): boolean => {
+      try {
+        const binding = (sessionsService as unknown as { binding?: (id: SessionId) => unknown } | undefined)?.binding?.(sessionId as SessionId)
+          ?? client.sessions?.binding?.(sessionId)
+        const session = (binding as { readonly session?: { readonly header?: { readonly origin?: string }; readonly meta?: { readonly origin?: string } } } | undefined)?.session
+        return session?.header?.origin === 'subagent' || session?.meta?.origin === 'subagent'
+      } catch {
+        return false
+      }
+    }
+
     let admitted = false
+    const sourceListeners = new Set<() => void>()
+    let sourceGeneration = 0
+    let sourceKey = `hidden:${sessionId}`
+    let sourceSnapshotValue: UnifiedModelSourceSnapshot = { mode: 'hidden', key: sourceKey, generation: sourceGeneration }
+    const updateSource = (): boolean => {
+      const view = validatedPeer()
+      if (view?.role === 'endeavour') retainedChallengerId = view.counterpartId
+      // A validated Challenger-side checkpoint is evidence that this is not the
+      // ordinary Endeavour root, even when a preset projection is present.
+      if (view?.role === 'challenger') {
+        admitted = false
+        retainedChallengerId = undefined
+      }
+      const peerId = retainedChallengerId
+      const mode: UnifiedModelSourceSnapshot['mode'] = !admitted
+        ? 'hidden'
+        : peerId === undefined ? 'draft' : 'peer'
+      const nextKey = mode === 'peer' ? `peer:${peerId}` : `${mode}:${sessionId}`
+      if (nextKey === sourceKey) return false
+      sourceKey = nextKey
+      sourceGeneration += 1
+      sourceSnapshotValue = mode === 'peer'
+        ? { mode, key: sourceKey, generation: sourceGeneration, peerId: peerId as string }
+        : { mode, key: sourceKey, generation: sourceGeneration }
+      return true
+    }
+    const sourceSnapshot = (): UnifiedModelSourceSnapshot => {
+      updateSource()
+      return sourceSnapshotValue
+    }
+    const notifySource = (): void => {
+      if (updateSource()) for (const listener of [...sourceListeners]) listener()
+    }
     const admit = (preset: string | undefined): boolean => {
-      if (preset !== undefined && preset !== 'endeavour') admitted = false
-      if (!admitted && preset === 'endeavour' && challengerId() !== undefined) admitted = true
+      const view = validatedPeer()
+      if (preset !== undefined && preset !== 'endeavour') {
+        admitted = false
+        retainedChallengerId = undefined
+      } else if (isKnownSubagent() || view?.role === 'challenger') {
+        admitted = false
+        retainedChallengerId = undefined
+      } else if (preset === 'endeavour' && sessionId.trim() !== '') admitted = true
+      updateSource()
       return admitted
     }
-    // The Endeavour side is the session this control belongs to; the Challenger
-    // side is its durable companion. Neither id is ever shared between roles.
-    const targetId = (target: UnifiedRole): string | undefined => target === 'endeavour' ? sessionId : challengerId()
-    const directory = (target: UnifiedRole): DirectoryLike | undefined => {
-      const id = targetId(target)
-      if (id === undefined) return undefined
+
+    const peerDirectory = (id: string): DirectoryLike | undefined => {
       try {
         return client.modelDirectories?.directoryFor?.(id)
       } catch (error) {
@@ -324,47 +400,180 @@ export function apply(ctx: ClientContext): void {
         throw error
       }
     }
+    const rootDirectory = (): DirectoryLike | undefined => peerDirectory(sessionId)
+    const directory = (target: UnifiedRole): DirectoryLike | undefined => {
+      const id = target === 'endeavour' ? sessionId : challengerId()
+      return id === undefined ? undefined : peerDirectory(id)
+    }
     const unavailable = (target: UnifiedRole): Error => new Error(
-      target === 'endeavour'
-        ? 'the Endeavour session is unavailable'
-        : 'the paired Challenger session is unavailable',
+      target === 'endeavour' ? 'the Endeavour session is unavailable' : 'the paired Challenger session is unavailable',
     )
+    const applyDirectorySelection = async (id: string, selection: UnifiedSelection): Promise<void> => {
+      const dir = peerDirectory(id)
+      if (dir === undefined) throw new Error(id === sessionId ? 'the Endeavour session is unavailable' : 'the paired Challenger session is unavailable')
+      if (typeof dir.select !== 'function') throw new Error('model selection service is unavailable')
+      const result = await dir.select({
+        provider: selection.provider,
+        model: selection.model,
+        ...(selection.reasoningEffort === undefined ? {} : { reasoningEffort: selection.reasoningEffort }),
+      })
+      if (typeof result === 'object' && result !== null && 'ok' in result && result.ok === false) {
+        const detail = 'error' in result ? result.error : undefined
+        const message = detail instanceof Error ? detail.message
+          : typeof detail === 'string' ? detail
+            : typeof detail === 'object' && detail !== null && 'message' in detail && typeof detail.message === 'string' ? detail.message
+              : 'model selection was rejected'
+        throw new Error(message)
+      }
+    }
+
+    /** Retain only the already-validated peer, never a guessed session id. */
+    const acquireChallenger = (expectedSessionId?: string): UnifiedRoleLease | undefined => {
+      const id = challengerId()
+      if (id === undefined || (expectedSessionId !== undefined && expectedSessionId !== id)) return undefined
+      const retention = (sessionsService ?? client.sessions) as SessionsRetention | undefined
+      const retain = retention?.retain
+      if (typeof retain !== 'function') return undefined
+      const reference = retain.call(retention, id as SessionId, { source: MODEL_MENU_RETENTION_SOURCE })
+      let released = false
+      return {
+        ready: reference.ready,
+        release: () => {
+          if (released) return
+          released = true
+          reference.release()
+        },
+      }
+    }
+
+    // The store is opened lazily and released when its final UI subscriber leaves.
+    // A remount reads the same browser-local record back from localStorage.
+    type PendingStore = ReturnType<typeof createPendingChallengerSelectionStore>
+    let pendingStore: PendingStore | undefined
+    let pendingSubscribers = 0
+    const getPendingStore = (): PendingStore => {
+      if (pendingStore !== undefined) return pendingStore
+      const storage = {
+        getItem: (key: string): string | null => {
+          if (typeof window === 'undefined') throw new Error('browser storage unavailable')
+          return window.localStorage.getItem(key)
+        },
+        setItem: (key: string, value: string): void => {
+          if (typeof window === 'undefined') throw new Error('browser storage unavailable')
+          window.localStorage.setItem(key, value)
+        },
+        removeItem: (key: string): void => {
+          if (typeof window === 'undefined') throw new Error('browser storage unavailable')
+          window.localStorage.removeItem(key)
+        },
+      }
+      const origin = typeof window === 'undefined' ? 'unavailable-origin' : window.location.origin
+      const eventTarget = typeof window === 'undefined' ? undefined : (() => {
+        const wrappers = new Map<(event: { readonly key: string | null; readonly newValue: string | null }) => void, (event: StorageEvent) => void>()
+        return {
+          addEventListener: (_type: 'storage', listener: (event: { readonly key: string | null; readonly newValue: string | null }) => void): void => {
+            const wrapper = (event: StorageEvent): void => listener({ key: event.key, newValue: event.newValue })
+            wrappers.set(listener, wrapper)
+            window.addEventListener('storage', wrapper)
+          },
+          removeEventListener: (_type: 'storage', listener: (event: { readonly key: string | null; readonly newValue: string | null }) => void): void => {
+            const wrapper = wrappers.get(listener)
+            if (wrapper === undefined) return
+            wrappers.delete(listener)
+            window.removeEventListener('storage', wrapper)
+          },
+        }
+      })()
+      pendingStore = createPendingChallengerSelectionStore({ storage, lockProvider: browserSelectionLockProvider, origin, rootSessionId: sessionId, ...(eventTarget === undefined ? {} : { eventTarget }) })
+      return pendingStore
+    }
+    const emptyPendingSnapshot: PendingChallengerSelectionSnapshot = Object.freeze({})
+    const pendingSelection = {
+      // Render reads only an already-loaded snapshot; storage is opened after
+      // commit by subscribe, or by an explicit selection action.
+      getSnapshot: () => sourceSnapshot().mode === 'hidden' ? emptyPendingSnapshot : pendingStore?.getSnapshot() ?? emptyPendingSnapshot,
+      subscribe: (listener: () => void): (() => void) => {
+        if (sourceSnapshot().mode === 'hidden') return () => undefined
+        const owner = getPendingStore()
+        const unsubscribe = owner.subscribe(listener)
+        pendingSubscribers += 1
+        let active = true
+        return () => {
+          if (!active) return
+          active = false
+          unsubscribe()
+          pendingSubscribers -= 1
+          if (pendingSubscribers === 0 && pendingStore === owner) {
+            owner.dispose()
+            pendingStore = undefined
+          }
+        }
+      },
+      save: (selection: UnifiedSelection) => getPendingStore().save(selection),
+      removeIfRevision: (revision: string) => getPendingStore().removeIfRevision(revision),
+    }
+
+    let applyChain: Promise<void> = Promise.resolve()
+    const applyPendingToPeer = (revision: string, peerId: string, generation: number): Promise<boolean> => {
+      const task = applyChain.then(async () => {
+        const source = sourceSnapshot()
+        if (source.mode !== 'peer' || source.peerId !== peerId || source.generation !== generation) return false
+        const record = pendingSelection.getSnapshot().record
+        if (record === undefined || record.revision !== revision) return false
+        await applyDirectorySelection(peerId, record)
+        const after = sourceSnapshot()
+        const current = pendingSelection.getSnapshot().record
+        if (after.mode !== 'peer' || after.peerId !== peerId || after.generation !== generation || current?.revision !== revision) return false
+        return await pendingSelection.removeIfRevision(revision)
+      })
+      applyChain = task.then(() => undefined, () => undefined)
+      return task
+    }
+
     const roleController = (target: UnifiedRole): UnifiedRoleController => ({
       available: () => directory(target) !== undefined,
       readSelection: (): UnifiedSelection | undefined => {
-        // A selection read must never throw at render time: the directory is
-        // simply absent while its session has no scope or binding.
         const current = directory(target)?.store?.getSnapshot?.().current
         if (current === null || current === undefined) return undefined
         const { provider, model, reasoningEffort } = current
         if (typeof provider !== 'string' || typeof model !== 'string' || provider === '' || model === '') return undefined
-        return typeof reasoningEffort === 'string' && reasoningEffort !== ''
-          ? { provider, model, reasoningEffort }
-          : { provider, model }
+        return typeof reasoningEffort === 'string' && reasoningEffort !== '' ? { provider, model, reasoningEffort } : { provider, model }
       },
       subscribeSelection: (listener) => {
         const store = directory(target)?.store
         if (store === undefined || typeof store.subscribe !== 'function') return () => undefined
-        try {
-          return store.subscribe(listener)
-        } catch (error) {
+        try { return store.subscribe(listener) } catch (error) {
           if (isUnavailableSessionError(error)) return () => undefined
           throw error
         }
       },
       loadCatalog: async () => {
-        const dir = directory(target)
+        // The root's own already-mounted directory is read-only fallback when no
+        // validated peer exists. It is never the target of Challenger writes.
+        const dir = target === 'challenger' && sourceSnapshot().mode === 'draft' ? rootDirectory() : directory(target)
         if (dir === undefined) throw unavailable(target)
         return dir.load?.()
       },
       select: async (provider, model, reasoningEffort) => {
-        const dir = directory(target)
-        if (dir === undefined) throw unavailable(target)
-        await dir.select?.({ provider, model, ...(reasoningEffort === undefined ? {} : { reasoningEffort }) })
+        const id = target === 'endeavour' ? sessionId : challengerId()
+        if (id === undefined) throw unavailable(target)
+        await applyDirectorySelection(id, { provider, model, ...(reasoningEffort === undefined ? {} : { reasoningEffort }) })
       },
+      ...(target === 'challenger' ? { acquire: acquireChallenger } : {}),
     })
     const controller: UnifiedModelController = {
       roles: { endeavour: roleController('endeavour'), challenger: roleController('challenger') },
+      sourceSnapshot,
+      subscribeSource: (listener) => {
+        sourceListeners.add(listener)
+        const disposePeer = peerFace?.subscribe(notifySource) ?? (() => undefined)
+        return () => {
+          disposePeer()
+          sourceListeners.delete(listener)
+        }
+      },
+      pendingSelection,
+      applyPendingToPeer,
       admit,
     }
     unifiedControllers.set(sessionId, controller)
@@ -397,17 +606,19 @@ export function apply(ctx: ClientContext): void {
     inject: injected,
   }, PlanCard as unknown as (props: PlanCardProps) => unknown))
   registerPlanDock(client.slots, injected)
-  // The composer keeps exactly ONE model control: an icon-only sliders button
-  // that configures both ordinary sessions of the pair. Speed (10) and limits
-  // (20) stay ahead of it, and the host-owned native conversation.input.model
-  // seat is hidden by CSS only while this control is rendered.
-  client.slots.inject('conversation.input.right', () => client.slots.register({
-    name: 'conversation.input.right',
-    id: 'endeavour-models',
+  // The Challenger selector renders in the composer's trailing controls, which
+  // is the row immediately left of the host's own model seat. The model seat
+  // itself is single-occupancy and DSH's Endeavour selector owns it: a second
+  // registration at the same priority is rejected, which used to fail this
+  // plugin's whole client activation. Nothing here replaces, unregisters or
+  // restyles the native entry.
+  client.slots.inject(CHALLENGER_MODEL_SEAT, () => client.slots.register({
+    name: CHALLENGER_MODEL_SEAT,
+    id: 'endeavour-challenger-model',
     order: 1000,
     locale: NS,
     inject: (sessionId: string) => ({ unifiedModels: unifiedModels(sessionId) }),
-  }, UnifiedModelControl as unknown as (props: unknown) => unknown))
+  }, ChallengerModelControl as unknown as (props: unknown) => unknown))
   // Builder navigation tab: registered only while the current session is an
   // Builder/Challenger tab: registered only while the current session belongs
   // to a valid durable pair; order 20 places it right after Trajectory.

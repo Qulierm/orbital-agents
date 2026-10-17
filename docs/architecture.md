@@ -50,9 +50,10 @@ last task succeeded -> plan terminal completed
   `sendMessage` and `SubagentAddress` are removed from active code, and the
   global plugin injects only `sessions`, `sessionProjections` and
   `sessionController`.
-- The composer's model UI is the unified control described under
-  [Configuration](configuration.md): one entry (`endeuvre-models`) that serves
-  both roles.
+- The composer keeps the host's native Endeavour selector and adds a separate
+  Challenger selector in the multi-entry trailing-controls list. A pre-peer
+  choice is browser-local and applies when its validated peer is ready; see
+  [Configuration](configuration.md) for its scope and timing limits.
 
 ## Two-phase protocol
 

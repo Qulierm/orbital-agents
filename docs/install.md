@@ -15,7 +15,7 @@ git clone git@github.com:Qulierm/orbital-agents.git
 cd orbital-agents
 pnpm install --frozen-lockfile
 pnpm run typecheck && pnpm test && pnpm run build
-pnpm pack                     # dsh-orbital-agents-0.2.7.tgz
+pnpm pack                     # dsh-orbital-agents-0.2.8.tgz
 node scripts/pack-check.mjs   # tarball contents, no secrets/sources
 node scripts/preset-check.ts  # preset contract + persona drift
 ```
@@ -26,7 +26,7 @@ generated patch files the package declares in `dsh.bundle.patch`.
 ## 2. Install the package and its presets
 
 ```sh
-node scripts/install-local.mjs --tarball ./dsh-orbital-agents-0.2.7.tgz
+node scripts/install-local.mjs --tarball ./dsh-orbital-agents-0.2.8.tgz
 ```
 
 What happens, in order:
@@ -126,12 +126,11 @@ rows.
 
 ## 6. Model selection
 
-The paired Endeavour composer carries one unified control that configures the
-**Endeavour** and **Challenger** model and thinking routes from a single menu;
-see [configuration.md](configuration.md). The retired Builder-route flags are
-rejected by the installer. Installation first runs a read-only legacy-plan
-preflight: a nonterminal `childId`-only plan aborts the install with the
-affected session ids and remediation (terminal historical plans are allowed).
+The Endeavour composer keeps the host's native model selector and adds a separate custom control for Challenger; see [configuration.md](configuration.md). The custom control is available on an explicit Endeavour root before its peer exists. A pre-peer choice is saved only in this desktop browser's local storage for that origin and exact root session, then applied through the validated Challenger directory when the peer is ready. This storage is not synchronized with the host, and only requests assembled after application can use the choice. Plan routing and task state remain unchanged.
+
+Saving and conditional cleanup require native Web Locks in a secure context; without the API, mutations fail closed. After updating, reload every open DSH tab so updated tabs use the same origin- and key-scoped lock. Older tabs and arbitrary `localStorage` writers are outside that coordination guarantee. See [configuration.md](configuration.md#pending-selection-storage) for the full limits.
+
+The retired Builder-route flags are rejected by the installer. Installation first runs a read-only legacy-plan preflight: a nonterminal `childId`-only plan aborts the install with the affected session ids and remediation (terminal historical plans are allowed).
 
 ## 7. Uninstall and rollback
 

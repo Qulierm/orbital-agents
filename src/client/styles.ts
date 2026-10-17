@@ -22,12 +22,14 @@ export const CLASS = {
   progress: 'dsh-endeavour-progress',
   routeHint: 'dsh-endeavour-route',
   roleGlyph: 'dsh-endeavour-role-glyph',
-  unifiedControl: 'dsh-endeavour-unified-control',
-  unifiedTrigger: 'dsh-endeavour-unified-trigger',
+  challengerControl: 'dsh-endeavour-challenger-control',
+  challengerTrigger: 'dsh-endeavour-challenger-trigger',
+  challengerTriggerLabel: 'dsh-endeavour-challenger-trigger-label',
+  challengerChevron: 'dsh-endeavour-challenger-chevron',
+  challengerChevronOpen: 'dsh-endeavour-challenger-chevron dsh-endeavour-challenger-chevron--open',
   menu: 'dsh-endeavour-menu',
-  menuSection: 'dsh-endeavour-menu-section',
-  menuSectionIcon: 'dsh-endeavour-menu-section-icon',
-  menuTitle: 'dsh-endeavour-menu-title',
+  menuMaterial: 'dsh-endeavour-menu-material',
+  menuRows: 'dsh-endeavour-menu-rows',
   menuCell: 'dsh-endeavour-menu-cell',
   menuCellActive: 'dsh-endeavour-menu-cell dsh-endeavour-menu-cell--active',
   menuCellLabel: 'dsh-endeavour-menu-cell-label',
@@ -132,66 +134,58 @@ export const STYLE_TEXT = `
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-/* One unified composer control: a 28px icon-only sliders button that opens the
-   two-role model menu. It is the only model control on a paired Endeavour chat;
-   the host-owned native seat is hidden only while this control is rendered in
-   the same composer card, so Standard, unpaired and Challenger chats keep it. */
+/* The custom Challenger selector: a compact dropdown registered in the
+   right-slot list beside the host's own Endeavour selector, which it never
+   hides, restyles or replaces. Its metrics mirror the installed native
+   ModelSelect button so the two read as siblings. */
 .dsh-endeavour-role-glyph {
   display: block;
   flex: none;
   color: currentColor;
 }
-.dsh-endeavour-unified-control {
+.dsh-endeavour-challenger-control {
   position: relative;
   display: inline-flex;
   align-items: center;
   height: 28px;
+  min-width: 0;
   flex: none;
 }
-.dsh-endeavour-unified-trigger {
-  display: inline-flex;
+/* Trigger geometry, type and states mirror the native ModelSelect button
+   (height 28, 13/20 regular, 4px gap, 0 4px 0 8px padding, --dsw-radius-sm). */
+.dsh-endeavour-challenger-trigger {
+  display: flex;
   align-items: center;
-  justify-content: center;
+  gap: 4px;
   height: 28px;
-  padding: 0 7px;
+  min-width: 0;
+  max-width: min(360px, 45cqw);
+  padding: 0 4px 0 8px;
   border: none;
-  border-radius: 8px;
+  border-radius: var(--dsw-radius-sm);
   outline: none;
-  background: var(--dsw-alias-interactive-bg-hover);
+  background: transparent;
   color: var(--dsw-alias-label-secondary);
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 20px;
   cursor: pointer;
-  flex: none;
 }
-.dsh-endeavour-unified-trigger:hover:not(:disabled) { color: var(--dsw-alias-label-primary); }
-.dsh-endeavour-unified-trigger:focus-visible { box-shadow: 0 0 0 2px var(--dsw-alias-border-l3); }
-.dsh-endeavour-unified-trigger:disabled { color: var(--dsw-alias-label-dimmed); cursor: default; }
-[data-composer-card]:has([data-endeavour-unified-models]) [data-slot="conversation.input.model"] { display: none; }
-/* One toolbar line: disable native wrapping and let the designated items
-   shrink instead (stable anchors: data-input-scroll marks the input area, so
-   its next sibling is the native tools/trailing row). */
-[data-composer-card] [data-input-scroll] + div {
-  flex-wrap: nowrap;
-  gap: 8px;
+.dsh-endeavour-challenger-trigger:hover:not(:disabled) { background: var(--dsw-alias-interactive-bg-hover); }
+.dsh-endeavour-challenger-trigger:focus-visible {
+  box-shadow: 0 0 0 2px var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary));
+}
+.dsh-endeavour-challenger-trigger:disabled { color: var(--dsw-alias-label-dimmed); cursor: default; }
+.dsh-endeavour-challenger-trigger-label {
   min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-[data-composer-card] [data-input-scroll] + div > :last-child {
-  flex-shrink: 1;
-  min-width: 0;
-}
-/* Left-side controls (workspace, access select, plan) keep their own space and
-   never reorder. NO overflow/clip is applied to the input-left parent: rc.2
-   mounts the native access-mode RiskConfirmation popover inside that subtree, so
-   clipping it silently swallowed the "Enable Full access?" modal. Text-level
-   ellipsis is applied to the control labels themselves instead. */
-/* Speed (order 10) and limits (order 20) are native right-slot entries ahead
-   of the two role groups; CSS never reorders them and they keep their size. */
-[data-composer-card] [data-slot="conversation.input.right"] > * { order: 0; }
-[data-composer-card] [data-slot="conversation.input.model"] > div {
-  min-width: 0;
-  flex-shrink: 1;
-  margin-right: 2px;
-}
-/* Tighter right-side gap only while the unified control is present. */
+.dsh-endeavour-challenger-chevron { flex: none; color: var(--dsw-alias-label-caption); transition: transform 0.12s; }
+.dsh-endeavour-challenger-chevron--open { transform: rotate(180deg); }
+/* The custom root owns no toolbar geometry: the model-slot host lays out its
+   own children, and the native selector next to this one is untouched. */
 [data-composer-card] :has(> [data-slot="conversation.input.left"]) [data-slot="conversation.input.left"] > button,
 [data-composer-card] :has(> [data-slot="conversation.input.left"]) [data-slot="conversation.input.left"] > div > button {
   max-width: 220px;
@@ -199,11 +193,11 @@ export const STYLE_TEXT = `
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-[data-composer-card]:has([data-endeavour-unified-models]) :has(> [data-slot="conversation.input.right"]) { gap: 8px; min-width: 0; }
-/* The unified control replaced the two role chips, so the shrink-priority
-   breakpoints that only served their trigger text are gone with them. */
-/* Native ModelSelect menu card: portaled, radius 20, specific-menu surface,
-   prominent elevation, 40px root cells, 14/22 typography. */
+/* Native ModelSelect menu card: portaled, viewport-constrained 240-420px,
+   4px padding, z-index 1100, --dsw-radius-lg and prominent elevation. The fill
+   and blur live on a separate noninteractive material layer, so backdrop-filter
+   never filters the rows themselves and never creates a containing block for
+   nested overlays. */
 .dsh-endeavour-menu {
   position: fixed;
   z-index: 1100;
@@ -213,32 +207,45 @@ export const STYLE_TEXT = `
   min-width: min(240px, calc(100vw - 32px));
   max-width: min(420px, calc(100vw - 32px));
   max-height: min(360px, calc(100vh - 96px));
-  overflow-y: auto;
+  overflow: hidden;
   padding: 4px;
   border: 0;
-  border-radius: 20px;
-  background: var(--dsw-specific-menu);
+  border-radius: var(--dsw-radius-lg);
+  background: transparent;
+  isolation: isolate;
   --dsw-elevation-stroke-color: var(--dsw-alias-border-l1);
   box-shadow: var(--dsw-elevation-prominent);
   color: var(--dsw-alias-label-primary);
   --dsh-scrollbar-thumb: var(--dsw-alias-scrollbar-bg-l2);
   --dsh-scrollbar-thumb-hover: var(--dsw-alias-scrollbar-hover-l2);
 }
+.dsh-endeavour-menu-material {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  background: var(--dsw-menu-surface-fill, var(--dsw-specific-menu));
+  backdrop-filter: var(--dsw-menu-backdrop-filter);
+  pointer-events: none;
+}
+.dsh-endeavour-menu-rows { display: flex; flex-direction: column; min-height: 0; overflow-y: auto; }
 .dsh-endeavour-menu-cell {
   box-sizing: border-box;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   width: auto;
   min-width: 100%;
-  height: 40px;
-  padding: 0 10px;
+  /* Native root-row metric: 34px, 13/20 type, 0 8px padding, 6px gap. */
+  height: 34px;
+  padding: 0 8px;
   border: none;
-  border-radius: 10px;
+  border-radius: var(--dsw-radius-md);
+  outline: none;
   background: transparent;
   color: var(--dsw-alias-label-primary);
-  font-size: 14px;
-  line-height: 22px;
+  font-size: 13px;
+  line-height: 20px;
   cursor: pointer;
   text-align: left;
 }
@@ -254,18 +261,18 @@ export const STYLE_TEXT = `
   text-align: right;
   color: var(--dsw-alias-label-tertiary);
 }
-.dsh-endeavour-menu-cell-chevron { flex: 0 0 auto; color: var(--dsw-alias-label-tertiary); }
+.dsh-endeavour-menu-cell-chevron { flex: 0 0 auto; color: var(--dsw-alias-menu-icon, var(--dsw-alias-label-tertiary)); }
 .dsh-endeavour-menu-option {
   box-sizing: border-box;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   width: auto;
   min-width: 100%;
-  min-height: 38px;
-  padding: 6px 8px;
+  min-height: 34px;
+  padding: 5px 7px;
   border: none;
-  border-radius: 10px;
+  border-radius: var(--dsw-radius-md);
   outline: none;
   background: transparent;
   color: inherit;
@@ -278,32 +285,13 @@ export const STYLE_TEXT = `
 .dsh-endeavour-menu-option-name {
   overflow: hidden;
   color: inherit;
-  font-size: 14px;
-  line-height: 20px;
-  font-weight: 500;
+  font-size: 13px;
+  line-height: 18px;
+  font-weight: 400;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .dsh-endeavour-menu-check { display: grid; place-items: center; flex: 0 0 18px; color: var(--dsw-alias-label-primary); }
-.dsh-endeavour-menu-section {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 10px 2px;
-  color: var(--dsw-alias-label-tertiary);
-  font-size: 12px;
-  line-height: 16px;
-  font-weight: 500;
-  text-transform: none;
-}
-.dsh-endeavour-menu-section-icon { display: grid; flex: none; place-items: center; width: 16px; height: 16px; color: currentColor; }
-.dsh-endeavour-menu-title {
-  padding: 6px 10px 2px;
-  color: var(--dsw-alias-label-tertiary);
-  font-size: 12px;
-  line-height: 16px;
-  font-weight: 500;
-}
 .dsh-endeavour-menu-group {
   position: sticky;
   top: 0;

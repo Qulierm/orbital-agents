@@ -12,7 +12,7 @@ const expected = `dsh-orbital-agents-${version}.tgz`
 const tarballs = readdirSync('.').filter((file) => file.endsWith('.tgz'))
 if (tarballs.length === 0) throw new Error('pack-check: no .tgz found; run `pnpm pack` first')
 if (!tarballs.includes(expected)) throw new Error(`pack-check: ${expected} is missing (found: ${tarballs.join(', ')}); run \`pnpm pack\` first`)
-const tarball = tarballs[0]
+const tarball = expected
 const listing = execFileSync('tar', ['-tzf', tarball], { encoding: 'utf8' }).split('\n').filter(Boolean)
 
 const required = [

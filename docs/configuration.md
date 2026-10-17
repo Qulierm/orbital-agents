@@ -5,48 +5,34 @@ is no "next child" route preference: the retired `endeavour-builder` settings
 namespace is removed by the installer (with a per-run backup) and the old
 Builder-route CLI flags are gone.
 
-## Unified composer control
+## Model controls
 
-The paired Endeavour composer carries ONE unified model control: a single icon-only
-button (slot id `endeuvre-models`, order 1000) that opens a menu with two
-sections — **Endeavour** and **Challenger** — each with its own **Model** and
-**Thinking** rows.
+The Endeavour composer keeps DSH's native selector and adds one custom Challenger selector beside it:
 
-Admission to that control is persistent and owned by the per-session client
-controller, so the trigger and the CSS marker that hides the host's native
-selector survive a null or malformed projection, a slot remount and a directory
-failure. The trigger is a stable shell that performs no model-directory
-operation; every role availability read, subscription, catalog load and write
-lives in the menu subtree below a menu-only error boundary, and all of them run
-after commit from the snapshot effect rather than while rendering — probing a
-directory lazily can publish composer/session changes, and doing that during a
-render nests an update inside a render. An unexpected
-exception there leaves the trigger mounted, keeps the native selector hidden and
-offers a localized retry that remounts just the menu, while an expected
-missing-scope or missing-binding error stays a per-role unavailable state with
-both role sections still visible.
+- DSH registers its Endeavour selector in the single-occupancy `conversation.input.model` seat; this plugin does not hide, restyle, replace or unregister it.
+- The custom selector (`id` `endeavour-challenger-model`, order 1000) registers only in the multi-entry `conversation.input.right` list, immediately left of the native seat, and configures the paired Challenger.
 
-- Every read, subscription, catalog load and write goes through the official
-  model directory of the target session: the Endeavour session the control is
-  rendered in, and its paired Challenger. The two roles never share mutable
-  selection state and no session is ever created or recreated.
-- Choosing a model writes through that role's directory and resets only that
-  role's thinking effort to the model's catalog default; choosing an effort
-  preserves the model of that role.
-- Menu rows always show the full catalog names; a failure to load or write is
-  reported inside the menu and leaves the displayed selection untouched.
-- The control is visible only on the paired Endeavour side of a valid pair; the
-  host's native Endeavour selector is hidden by CSS only while this control is
-  rendered, so Standard chats, unpaired sessions and the Challenger side keep
-  their ordinary selector.
-- While a plan is active the whole control is disabled, which freezes every
-  route for that run. A running turn disables it the same way instead of hiding
-  it.
-- The control is admitted once the pair is first seen and then latched: a
-  temporary gap in the `endeavourPeer` projection cannot unmount it, and the
-  validated Challenger identity is retained, so the native selector never
-  becomes a fallback. A role whose directory is briefly unavailable shows a
-  local unavailable/retry state inside the menu.
+The native model seat accepts one registration per priority, so the custom control never registers there.
+
+The custom button uses the native 28px height, 13/20 regular type, 4px gap, `0 4px 0 8px` padding, `--dsw-radius-sm` radius, transparent idle background, secondary label colour, hover and focus tokens, and a decorative rotating chevron. Its visible label is always **Challenger**; the tooltip and accessible description carry the current model, effort and pending status. The popup has Model and Effort rows at the native 34px root-row metric (13/20 type, `0 8px` padding, 6px gap, `--dsw-radius-md`) inside the native 240–420px viewport-constrained card at z-index 1100, with prominent elevation, `--dsw-radius-lg` and a separate noninteractive material layer.
+
+An explicit Endeavour root receives the selector before a Challenger peer exists. In this draft mode, the client reads the root's current model selection and catalog only to supply the initial value; it never writes to the root. The user can choose a model and effort while the peer is unavailable.
+
+The client stores a pre-peer choice in this desktop browser's local storage, scoped to the browser origin and exact Endeavour root session. The record contains only provider, model and optional reasoning effort. It is not synchronized with the DSH host or another browser origin, and storage read/write failures remain visible in the menu.
+
+When the exact validated Challenger peer becomes ready, the client applies the matching pending revision through that peer's official model directory. A successful application removes only that revision; a rejected selection or storage-removal failure leaves the choice pending and retryable. The client never creates or recreates a session for this control.
+
+A saved choice affects requests assembled after application. It does not guarantee a request already begun will use the new model, cancel or retarget that request, or change plan routing or task state. The selector remains enabled during plans and running turns.
+
+### Pending-selection storage
+
+Each save and conditional removal takes a native exclusive Web Lock named by the same origin- and root-scoped localStorage key. While holding the lock, the store rereads durable storage; it removes a pending choice only if its revision is still current. The browser must expose `navigator.locks`, normally in a secure context. If Web Locks or storage access is unavailable, mutations fail closed and the menu reports an error; there is no unlocked fallback.
+
+Reload every open DSH tab after installing or updating so each tab runs the lock-enabled code. The lock coordinates only updated tabs on the same origin using this exact key. Older plugin tabs and other code that writes localStorage without the lock do not participate, so this does not provide atomicity against arbitrary writers. The record remains local to this browser origin and exact Endeavour root session. See the [locking decision](decisions/2026-10-17-pending-selection-locking.md) for the rationale and alternatives.
+
+The peer directory resolves only for a session with a live scope and UI binding, and the host does not bind a peer merely by running it. While mounted, the control retains the exact validated Challenger through the official sessions service (`retain`, source `orbitalModelMenu`), waits for readiness, then reads, subscribes and loads its catalog. It releases that reference on unmount, retry, session/controller change or lost admission, after disposing the matching subscription. A peer that cannot be retained or opened shows a local unavailable/retry state while the trigger remains mounted; a host without `retain` uses the directory lookup alone.
+
+The selector appears only for an admitted Endeavour root. Standard sessions, known subagents and Challenger-side sessions do not receive it. A gap in the peer projection does not discard an already admitted root.
 
 ## Peer presets
 

@@ -42,7 +42,14 @@ const SCENES = [
   { name: 'plan-running', width: 760, height: 430 },
   { name: 'plan-interrupted', width: 760, height: 430 },
   { name: 'plan-complete', width: 760, height: 430 },
-  { name: 'model-menu', width: 760, height: 430 },
+  { name: 'challenger-controls', width: 760, height: 120 },
+  { name: 'challenger-no-peer', width: 760, height: 430 },
+  { name: 'challenger-active-work', width: 760, height: 560 },
+  { name: 'challenger-measure', width: 760, height: 430 },
+  { name: 'challenger-menu', width: 760, height: 430 },
+  { name: 'challenger-menu-neutral', width: 760, height: 430 },
+  { name: 'challenger-menu-keyboard', width: 760, height: 430 },
+  { name: 'challenger-narrow', width: 420, height: 120 },
   { name: 'composer-dock', width: 760, height: 240 },
 ]
 
